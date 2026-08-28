@@ -583,6 +583,43 @@ export const api = {
     }),
   retryJob: (id: string) => request<Job>(`/pipeline/jobs/${id}/retry`, { method: "POST" }),
 
+
+  // --- Phase 6 -----------------------------------------------------------
+
+  /** One level of the same tree the mirror and the export write to disk. */
+  fileTree: (path = "") =>
+    request<FileTree>(`/tree${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+
+  /** Pinned on the home screen: the day you need these is not a day to search. */
+  vital: () => request<Document[]>("/vital"),
+
+  exportFull: (name = "bindery-export") =>
+    request<ExportResult>("/export/full", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+  /** The passphrase is sent once and never stored, here or on the server. */
+  exportGoBag: (passphrase: string) =>
+    request<ExportResult>("/export/go-bag", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    }),
+
+  integrityCheck: () => request<IntegrityReport>("/integrity/check", { method: "POST" }),
+  rebuildMirror: () => request<MirrorResult>("/mirror/rebuild", { method: "POST" }),
+  runBackup: (force = false) =>
+    request<BackupResult>(`/backup/run${force ? "?force=true" : ""}`, { method: "POST" }),
+
+  audit: (filters: AuditFilters = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    }
+    return request<AuditPage>(`/audit${query.size ? `?${query}` : ""}`);
+  },
+
   upload: (libraryId: string, file: File) => {
     const form = new FormData();
     form.append("library_id", libraryId);
@@ -590,6 +627,106 @@ export const api = {
     return request<UploadResult>("/upload", { method: "POST", body: form });
   },
 };
+
+
+// --- Phase 6: trust, export and resilience -------------------------------
+
+export interface FileTreeNode {
+  path: string;
+  name: string;
+  kind: "folder" | "document" | "bundle";
+  document_id: string | null;
+  source_file_id: string | null;
+  title: string | null;
+  document_date: string | null;
+  correspondent: string | null;
+  document_type: string | null;
+  tags: string[];
+  page_start: number | null;
+  page_end: number | null;
+  page_count: number | null;
+  ingest_source: string | null;
+  received_at: string | null;
+  original_filename: string | null;
+  sensitivity: string | null;
+  review_state: string | null;
+  byte_size: number | null;
+  child_count: number;
+}
+
+export interface FileTree {
+  root: string;
+  nodes: FileTreeNode[];
+}
+
+export interface ExportResult {
+  path: string;
+  document_count: number;
+  file_count: number;
+  byte_size: number;
+  encrypted: boolean;
+  missing_blobs: string[];
+}
+
+export interface IntegrityReport {
+  started_at: string;
+  finished_at: string | null;
+  checked: number;
+  bytes_read: number;
+  ok: number;
+  healthy: boolean;
+  missing: { sha256: string; original_filename: string | null }[];
+  corrupt: { sha256: string; original_filename: string | null; actual_sha256: string }[];
+  orphan_count: number;
+  orphans: string[];
+}
+
+export interface MirrorResult {
+  root: string;
+  linked: number;
+  copied: number;
+  missing: number;
+  bundles: number;
+  removed: number;
+}
+
+export interface BackupResult {
+  path: string;
+  blob_count: number;
+  byte_size: number;
+  integrity_healthy: boolean;
+  manifest: Record<string, unknown>;
+}
+
+export interface AuditEventRecord {
+  id: string;
+  sequence: number;
+  entity_type: string;
+  entity_id: string;
+  action: string;
+  actor_type: string;
+  actor_label: string | null;
+  rule_id: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AuditPage {
+  events: AuditEventRecord[];
+  next_before_sequence: number | null;
+}
+
+export interface AuditFilters {
+  entity_id?: string;
+  entity_type?: string;
+  actor_type?: string;
+  action?: string;
+  since?: string;
+  until?: string;
+  before_sequence?: number;
+  limit?: number;
+}
 
 /** Blob URLs. Authenticated and library-scoped server-side; no token in the URL. */
 export const fileUrl = {

@@ -4,6 +4,11 @@
 # ---------------------------------------------------------------------------
 FROM python:3.13-slim AS base
 WORKDIR /app
+# pg_dump for backups (REQ-096) and psql for the restore drill. A newer client
+# can dump an older server, so the distro's version is fine against Postgres 16.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-client openssl \
+ && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml infra/extract-deps.py ./
 RUN python extract-deps.py > /tmp/requirements.txt \
  && pip install --no-cache-dir -r /tmp/requirements.txt \

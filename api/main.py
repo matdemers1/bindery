@@ -20,6 +20,7 @@ from api.routers import (
     search,
     segments,
     settings,
+    trust,
     upload,
 )
 
@@ -45,3 +46,4 @@ app.include_router(pipeline.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
 app.include_router(rules.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
+app.include_router(trust.router, prefix="/api")

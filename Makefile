@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: up down build logs ps migrate revision test test-pipeline ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
+.PHONY: up down build logs ps migrate revision test test-pipeline integrity backup export mirror drill ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
 
 build:            ## build all images
 	$(COMPOSE) build
@@ -34,6 +34,21 @@ test:             ## full suite against a throwaway database
 
 test-pipeline:    ## OCR / pipeline / golden-corpus suites (needs the OCR toolchain)
 	$(COMPOSE) --profile test run --rm test-worker
+
+integrity:        ## re-hash every original; run this BEFORE a backup, never after
+	$(COMPOSE) exec api python -m api.export.cli integrity
+
+backup:           ## integrity check, then pg_dump, then blobs — in that order (REQ-096)
+	$(COMPOSE) exec api python -m api.export.cli backup
+
+export:           ## full export: originals + static index, works with the stack stopped
+	$(COMPOSE) exec api python -m api.export.cli export
+
+mirror:           ## rebuild the browsable folder tree (safe: it is derived, not source)
+	$(COMPOSE) exec api python -m api.export.cli mirror
+
+drill:            ## THE deliverable: restore to a clean database and find the DD-214
+	scripts/restore-drill.sh $(b)
 
 ocr-report:       ## score OCR word accuracy on the golden corpus (REQ-018, the R-01 gate)
 	$(COMPOSE) --profile test run --rm test-worker \

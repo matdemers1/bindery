@@ -86,6 +86,16 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}_test
       DATA_ROOT: /tmp/bindery-test-data
+    # Without these, `make test` runs whatever source was baked into the image
+    # at build time and reports a pass on code you have already changed. A
+    # green suite that tested the previous commit is worse than a red one.
+    volumes:
+      - ../api:/app/api:ro
+      - ../worker:/app/worker:ro
+      - ../tests:/app/tests:ro
+      - ../alembic:/app/alembic:ro
+      # ruff and pytest read their config from here.
+      - ../pyproject.toml:/app/pyproject.toml:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -103,6 +113,14 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}_test
       DATA_ROOT: /tmp/bindery-test-data
+    # Same reason as `test`: the suite must run against the working tree.
+    volumes:
+      - ../api:/app/api:ro
+      - ../worker:/app/worker:ro
+      - ../tests:/app/tests:ro
+      - ../alembic:/app/alembic:ro
+      # ruff and pytest read their config from here.
+      - ../pyproject.toml:/app/pyproject.toml:ro
     depends_on:
       postgres:
         condition: service_healthy

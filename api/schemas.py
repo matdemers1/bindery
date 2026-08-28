@@ -504,6 +504,9 @@ __all__ = [
     "AssetIn",
     "AssetOut",
     "AssetTimelineOut",
+    "AuditEventOut",
+    "AuditPageOut",
+    "BackupOut",
     "BulkEditIn",
     "BulkResultOut",
     "ClassificationOut",
@@ -511,18 +514,25 @@ __all__ = [
     "DocumentDetailOut",
     "DocumentOut",
     "DuplicatePairOut",
+    "ExportOut",
+    "ExportRequestIn",
     "FacetOut",
     "FieldProvenanceOut",
+    "FileTreeNodeOut",
+    "FileTreeOut",
+    "GoBagIn",
     "HealthOut",
     "ImportItemOut",
     "ImportSessionOut",
     "ImportStartIn",
+    "IntegrityOut",
     "JobOut",
     "KnownFormOut",
     "LibraryOut",
     "LoginRequest",
     "MergeIn",
     "MergePreviewOut",
+    "MirrorOut",
     "PageHitOut",
     "PageOut",
     "PipelineStatusOut",
@@ -553,3 +563,106 @@ __all__ = [
     "UserOut",
     "WhyPanelOut",
 ]
+
+
+# --------------------------------------------------------------------------
+# Phase 6 — trust, export and resilience
+# --------------------------------------------------------------------------
+
+
+class ExportRequestIn(BaseModel):
+    name: str = "bindery-export"
+
+
+class GoBagIn(BaseModel):
+    # Not stored, never logged, and never written to the settings table: the
+    # passphrase exists only for the length of this request.
+    passphrase: str = Field(min_length=12)
+
+
+class ExportOut(BaseModel):
+    path: str
+    document_count: int
+    file_count: int
+    byte_size: int
+    encrypted: bool = False
+    missing_blobs: list[str] = []
+
+
+class IntegrityOut(BaseModel):
+    started_at: datetime
+    finished_at: datetime | None
+    checked: int
+    bytes_read: int
+    ok: int
+    healthy: bool
+    missing: list[dict]
+    corrupt: list[dict]
+    orphan_count: int
+    orphans: list[str]
+
+
+class MirrorOut(BaseModel):
+    root: str
+    linked: int
+    copied: int
+    missing: int
+    bundles: int
+    removed: int
+
+
+class BackupOut(BaseModel):
+    path: str
+    blob_count: int
+    byte_size: int
+    integrity_healthy: bool
+    manifest: dict
+
+
+class AuditEventOut(BaseModel):
+    id: uuid.UUID
+    sequence: int
+    entity_type: str
+    entity_id: uuid.UUID
+    action: str
+    actor_type: str
+    actor_label: str | None = None
+    rule_id: uuid.UUID | None = None
+    before: dict | None = None
+    after: dict | None = None
+    created_at: datetime
+
+
+class AuditPageOut(BaseModel):
+    events: list[AuditEventOut]
+    next_before_sequence: int | None = None
+
+
+class FileTreeNodeOut(BaseModel):
+    """One row of the browsable file tree — a folder, or a document inside one."""
+
+    path: str
+    name: str
+    kind: str  # "folder" | "document" | "bundle"
+    document_id: uuid.UUID | None = None
+    source_file_id: uuid.UUID | None = None
+    title: str | None = None
+    document_date: date | None = None
+    correspondent: str | None = None
+    document_type: str | None = None
+    tags: list[str] = []
+    page_start: int | None = None
+    page_end: int | None = None
+    page_count: int | None = None
+    ingest_source: str | None = None
+    received_at: datetime | None = None
+    original_filename: str | None = None
+    sensitivity: str | None = None
+    review_state: str | None = None
+    byte_size: int | None = None
+    child_count: int = 0
+
+
+class FileTreeOut(BaseModel):
+    root: str
+    nodes: list[FileTreeNodeOut]

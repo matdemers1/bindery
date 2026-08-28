@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
-import { api, type Library, type SearchResponse, fileUrl } from "../../api";
+import { api, type Document, type Library, type SearchResponse, fileUrl } from "../../api";
 import Snippet from "../../components/Snippet";
 
 // Every piece of search state lives in the URL (REQ-028), so a result is a link
@@ -97,12 +97,61 @@ export default function SearchPage({ libraries }: { libraries: Library[] }) {
 
 function EmptyPrompt() {
   return (
-    <div className="mt-16 text-center text-muted">
-      <p className="text-lg">Search finds the page, not just the file.</p>
-      <p className="mt-2 text-sm">
-        Press <Kbd>⌘</Kbd> <Kbd>K</Kbd> from anywhere to jump straight to a page.
-      </p>
+    <div className="mt-12">
+      <VitalRecords />
+      <div className="mt-12 text-center text-muted">
+        <p className="text-lg">Search finds the page, not just the file.</p>
+        <p className="mt-2 text-sm">
+          Press <Kbd>⌘</Kbd> <Kbd>K</Kbd> from anywhere to jump straight to a page.
+        </p>
+      </div>
     </div>
+  );
+}
+
+/**
+ * Vital records, pinned to the home screen (REQ-091).
+ *
+ * The day you need a DD-214 or a death certificate is not a day you want to be
+ * composing a query. These sit under the empty search box so they are the first
+ * thing on the screen, reachable in one click and zero recall.
+ *
+ * Silent when the tier is empty: an explanatory box about a feature you are not
+ * using is worse than nothing on an otherwise calm home screen.
+ */
+function VitalRecords() {
+  const [documents, setDocuments] = useState<Document[]>([]);
+
+  useEffect(() => {
+    api
+      .vital()
+      .then(setDocuments)
+      .catch(() => {});
+  }, []);
+
+  if (documents.length === 0) return null;
+
+  return (
+    <section>
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
+        Vital records
+      </h2>
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+        {documents.map((document) => (
+          <li key={document.id}>
+            <Link
+              to={`/document/${document.id}/page/${document.page_start}`}
+              className="block rounded-lg border border-edge bg-surface px-4 py-3 hover:border-accent"
+            >
+              <span className="font-medium">{document.title ?? "Untitled"}</span>
+              {document.document_date && (
+                <span className="ml-2 text-xs text-muted">{document.document_date}</span>
+              )}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

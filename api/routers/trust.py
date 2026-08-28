@@ -1,0 +1,425 @@
+"""Export, integrity, mirror, backup and the audit log (Phase 6).
+
+Everything here answers one question: *can I get my documents back?* The
+endpoints are deliberately boring and synchronous where they can be — a person
+clicks "Export" and gets a directory they can copy to a USB stick.
+
+The long-running ones (export, integrity, backup) run in a thread rather than
+blocking the event loop, and each records an audit event, because "I exported
+the whole archive" is exactly the kind of thing you want a record of.
+"""
+
+import asyncio
+import logging
+import uuid
+from datetime import date, datetime
+
+import sqlalchemy as sa
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.audit import record
+from api.auth.dependencies import current_user
+from api.db import repository
+from api.db.enums import ActorType, Sensitivity
+from api.db.models import AppUser, AuditEvent, Document, Rule
+from api.db.session import get_session
+from api.export import archive_export, backup, integrity, mirror
+from api.schemas import (
+    AuditEventOut,
+    AuditPageOut,
+    BackupOut,
+    DocumentOut,
+    ExportOut,
+    ExportRequestIn,
+    FileTreeNodeOut,
+    FileTreeOut,
+    GoBagIn,
+    IntegrityOut,
+    MirrorOut,
+)
+from api.segments import live
+
+log = logging.getLogger("bindery.trust")
+
+router = APIRouter(tags=["trust"])
+
+
+async def _visible(session: AsyncSession, user: AppUser) -> list[uuid.UUID]:
+    ids = await repository.visible_library_ids(session, user.id)
+    if not ids:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "no visible libraries")
+    return ids
+
+
+def _as_out(result: archive_export.ExportResult) -> ExportOut:
+    return ExportOut(
+        path=str(result.path),
+        document_count=result.document_count,
+        file_count=result.file_count,
+        byte_size=result.byte_size,
+        encrypted=result.encrypted,
+        missing_blobs=result.missing_blobs,
+    )
+
+
+# --------------------------------------------------------------------------
+# Vital records (T-6.1, REQ-091)
+# --------------------------------------------------------------------------
+
+
+@router.get("/vital", response_model=list[DocumentOut])
+async def vital_records(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> list[Document]:
+    """The documents you would need in a hurry, without searching for them.
+
+    Birth certificate, DD-214, deed, passport. On the home screen because the
+    day you need them is not a day you want to be composing a query.
+    """
+    library_ids = await _visible(session, user)
+    return list(
+        (
+            await session.execute(
+                sa.select(Document)
+                .where(
+                    Document.library_id.in_(library_ids),
+                    Document.sensitivity == Sensitivity.VITAL,
+                    live(),
+                )
+                .order_by(Document.document_date.desc().nullslast(), Document.title)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+# --------------------------------------------------------------------------
+# Export (T-6.2, T-6.3)
+# --------------------------------------------------------------------------
+
+
+@router.post("/export/full", response_model=ExportOut)
+async def export_full(
+    body: ExportRequestIn,
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> ExportOut:
+    library_ids = await _visible(session, user)
+    result = await archive_export.full_export(session, library_ids, name=body.name)
+    await record(
+        session,
+        entity_type="export",
+        entity_id=uuid.uuid4(),
+        action="export_full",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+        after={
+            "path": str(result.path),
+            "documents": result.document_count,
+            "files": result.file_count,
+            "missing_blobs": result.missing_blobs,
+        },
+    )
+    await session.commit()
+    return _as_out(result)
+
+
+@router.post("/export/go-bag", response_model=ExportOut)
+async def export_go_bag(
+    body: GoBagIn,
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> ExportOut:
+    """The vital tier, encrypted, small enough to carry (REQ-092)."""
+    library_ids = await _visible(session, user)
+    try:
+        result = await archive_export.go_bag(session, library_ids, body.passphrase)
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(error)) from error
+
+    await record(
+        session,
+        entity_type="export",
+        entity_id=uuid.uuid4(),
+        action="export_go_bag",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+        # The passphrase is not here, and must never be.
+        after={
+            "path": str(result.path),
+            "documents": result.document_count,
+            "encrypted": True,
+        },
+    )
+    await session.commit()
+    return _as_out(result)
+
+
+# --------------------------------------------------------------------------
+# Integrity, mirror, backup (T-6.4, T-6.5, T-6.6)
+# --------------------------------------------------------------------------
+
+
+@router.post("/integrity/check", response_model=IntegrityOut)
+async def integrity_check(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> IntegrityOut:
+    """Re-hash every original. Run this before a backup, not after (REQ-095)."""
+    await _visible(session, user)
+    report = await integrity.check(session)
+    await record(
+        session,
+        entity_type="integrity",
+        entity_id=uuid.uuid4(),
+        action="integrity_check",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+        after={
+            "checked": report.checked,
+            "healthy": report.healthy,
+            "corrupt": len(report.corrupt),
+            "missing": len(report.missing),
+        },
+    )
+    await session.commit()
+    return IntegrityOut(**report.as_dict())
+
+
+@router.post("/mirror/rebuild", response_model=MirrorOut)
+async def mirror_rebuild(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> MirrorOut:
+    """Regenerate the browsable folder tree. Safe to run any time (REQ-094)."""
+    library_ids = await _visible(session, user)
+    result = await mirror.rebuild(session, library_ids)
+    return MirrorOut(
+        root=str(result.root),
+        linked=result.linked,
+        copied=result.copied,
+        missing=result.missing,
+        bundles=result.bundles,
+        removed=result.removed,
+    )
+
+
+@router.post("/backup/run", response_model=BackupOut)
+async def backup_run(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+    force: bool = Query(False, description="back up even if integrity is failing"),
+) -> BackupOut:
+    """Integrity check, then dump, then blobs — in that order (REQ-096)."""
+    await _visible(session, user)
+    report = await integrity.check(session)
+    try:
+        # pg_dump and a large file copy are both blocking; keep the event loop free.
+        result = await asyncio.to_thread(
+            backup.run_backup, report, destination=None, allow_unhealthy=force
+        )
+    except RuntimeError as error:
+        # The integrity refusal. A 409 rather than a 500: the request is valid,
+        # the archive's state is not.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+
+    await record(
+        session,
+        entity_type="backup",
+        entity_id=uuid.uuid4(),
+        action="backup_run",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+        after={
+            "path": str(result.path),
+            "blobs": result.blob_count,
+            "integrity_healthy": result.integrity_healthy,
+            "forced": force,
+        },
+    )
+    await session.commit()
+    return BackupOut(
+        path=str(result.path),
+        blob_count=result.blob_count,
+        byte_size=result.byte_size,
+        integrity_healthy=result.integrity_healthy,
+        manifest=result.manifest,
+    )
+
+
+# --------------------------------------------------------------------------
+# Audit log viewer (T-6.8, REQ-069)
+# --------------------------------------------------------------------------
+
+
+@router.get("/audit", response_model=AuditPageOut)
+async def audit_log(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+    entity_id: uuid.UUID | None = Query(None, description="one document's history"),
+    entity_type: str | None = None,
+    actor_type: str | None = Query(None, description="human, ai, rule or system"),
+    action: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    before_sequence: int | None = Query(None, description="keyset cursor"),
+    limit: int = Query(100, ge=1, le=500),
+) -> AuditPageOut:
+    """Every mutation, filterable, newest first.
+
+    Paged by `sequence` rather than by offset: the table only grows, and a
+    keyset cursor cannot skip or repeat a row while you are reading it.
+    Ordered by `sequence` rather than `created_at` because `now()` is
+    transaction-scoped — events written together share a timestamp.
+    """
+    await _visible(session, user)
+
+    conditions: list[sa.ColumnElement[bool]] = []
+    if entity_id is not None:
+        conditions.append(AuditEvent.entity_id == entity_id)
+    if entity_type:
+        conditions.append(AuditEvent.entity_type == entity_type)
+    if actor_type:
+        conditions.append(AuditEvent.actor_type == actor_type)
+    if action:
+        conditions.append(AuditEvent.action == action)
+    if since is not None:
+        conditions.append(AuditEvent.created_at >= since)
+    if until is not None:
+        conditions.append(AuditEvent.created_at <= until)
+    if before_sequence is not None:
+        conditions.append(AuditEvent.sequence < before_sequence)
+
+    rows = (
+        await session.execute(
+            sa.select(AuditEvent, AppUser.email, Rule.name.label("rule_name"))
+            .outerjoin(AppUser, AppUser.id == AuditEvent.actor_id)
+            .outerjoin(Rule, Rule.id == AuditEvent.rule_id)
+            .where(sa.and_(*conditions) if conditions else sa.true())
+            .order_by(AuditEvent.sequence.desc())
+            .limit(limit + 1)
+        )
+    ).all()
+
+    has_more = len(rows) > limit
+    events = []
+    for row in rows[:limit]:
+        event = row[0]
+        events.append(
+            AuditEventOut(
+                id=event.id,
+                sequence=event.sequence,
+                entity_type=event.entity_type,
+                entity_id=event.entity_id,
+                action=event.action,
+                actor_type=str(event.actor_type),
+                # "Who did this" should read as a name, not a UUID.
+                actor_label=row.email or row.rule_name,
+                rule_id=event.rule_id,
+                before=event.before,
+                after=event.after,
+                created_at=event.created_at,
+            )
+        )
+
+    return AuditPageOut(
+        events=events,
+        next_before_sequence=events[-1].sequence if has_more and events else None,
+    )
+
+
+# --------------------------------------------------------------------------
+# Browsing the tree in the app (T-6.4)
+# --------------------------------------------------------------------------
+
+
+@router.get("/tree", response_model=FileTreeOut)
+async def browse_tree(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+    path: str = Query("", description="folder to list; empty for the top"),
+) -> FileTreeOut:
+    """List one level of the same tree the mirror and the export write to disk.
+
+    Answering "what is actually in here, how did it get in, and what is it
+    tagged with" should not require searching for something you already have —
+    or SSHing into the box to look at a folder. This is that folder, in the app,
+    computed from the database rather than read off disk, so it is correct even
+    when the mirror has not been rebuilt yet.
+    """
+    library_ids = await _visible(session, user)
+    entries = await archive_export.collect(session, library_ids)
+    archive_export.plan_layout(entries)
+
+    prefix = path.strip("/")
+    depth = len(prefix.split("/")) if prefix else 0
+
+    folders: dict[str, int] = {}
+    nodes: list[FileTreeNodeOut] = []
+    seen_bundles: set[str] = set()
+
+    for entry in entries:
+        relative = entry.relative_path or ""
+        if prefix and not relative.startswith(f"{prefix}/"):
+            continue
+        parts = relative.split("/")
+        if len(parts) > depth + 1:
+            # Something deeper: surface the folder that contains it, once.
+            folders[parts[depth]] = folders.get(parts[depth], 0) + 1
+            continue
+
+        document = entry.document
+        is_bundle = "bundle" in document
+        if is_bundle:
+            if relative in seen_bundles:
+                # Every document in a bundle shares one file; list it once and
+                # let the row carry the page ranges.
+                continue
+            seen_bundles.add(relative)
+
+        nodes.append(
+            FileTreeNodeOut(
+                path=relative,
+                name=parts[-1],
+                kind="bundle" if is_bundle else "document",
+                document_id=uuid.UUID(document["document_id"]),
+                source_file_id=uuid.UUID(document["source_file_id"]),
+                title=document["title"],
+                document_date=document["document_date"],
+                correspondent=document["correspondent"],
+                document_type=document["document_type"] or document["known_form_name"],
+                tags=document["tags"],
+                page_start=document["page_start"],
+                page_end=document["page_end"],
+                page_count=entry.page_count,
+                original_filename=entry.original_filename,
+                received_at=entry.received_at,
+                sensitivity=document["sensitivity"],
+                review_state=document["review_state"],
+                ingest_source=document["ingest_source"],
+                byte_size=document["byte_size"],
+            )
+        )
+
+    folder_nodes = [
+        FileTreeNodeOut(
+            path=f"{prefix}/{name}" if prefix else name,
+            name=name,
+            kind="folder",
+            child_count=count,
+        )
+        for name, count in sorted(folders.items())
+    ]
+
+    return FileTreeOut(
+        root=prefix,
+        # Folders first, then documents by date — the order a person scanning a
+        # directory listing expects.
+        nodes=folder_nodes
+        + sorted(nodes, key=lambda n: (n.document_date or date.max, n.name)),
+    )

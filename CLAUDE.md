@@ -171,6 +171,35 @@ decision currently happens at the end of `rules`.
   the lowercase types the migrations create.
 - `tests/test_no_destructive_paths.py` enforces REQ-090 by scanning `api/` and
   `worker/`. If it fails, revoke or tombstone — do not loosen the pattern list.
+- **The `test` and `test-worker` compose services bind-mount `api/`, `worker/`,
+  `tests/`, `alembic/` and `pyproject.toml`.** Without those mounts the suite
+  runs whatever source was baked into the image and reports a pass on code you
+  have already changed — which happened once, and cost a stale green run.
+
+## Trust, export and resilience (Phase 6)
+
+`docs/backup-and-restore.md` is the runbook. Four things to keep straight:
+
+- **The ordering rule.** Integrity check → `pg_dump` → copy blobs. Blobs are
+  content-addressed and immutable, so a blob newer than the dump is a harmless
+  orphan; the other order can produce a dangling reference. `run_backup` refuses
+  to run over a failing integrity check unless explicitly forced.
+- **The export must work with the stack stopped.** `api/export/archive_export.py`
+  writes a semantic folder tree plus a self-contained `index.html` — no scripts,
+  no external assets, no absolute paths. A test asserts all three, because
+  "works without Bindery" is a property that decays silently.
+- **The mirror is the one place that deletes files**, and it is safe only because
+  nothing in it is an original: every entry is a hardlink to an immutable 0444
+  blob, and the whole tree is regenerated from the database. REQ-090 is about
+  originals and records; it is not violated by tidying a derived index.
+- **The restore drill is the deliverable**, not the backup. `make drill b=<dir>`
+  restores into a throwaway container and searches the restored data for the
+  DD-214. Run it after every schema migration.
+
+Bundles never become one file per document anywhere — not in the export, not in
+the mirror. A twelve-page scan holding three documents is one file plus an
+`index.html` naming the page ranges, because splitting it would modify an
+original.
 
 ## Deployment
 
