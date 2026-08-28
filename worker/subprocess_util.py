@@ -15,16 +15,27 @@ class CommandError(RuntimeError):
 
 
 async def run(
-    argv: list[str], *, timeout: float, ok_codes: tuple[int, ...] = (0,)
+    argv: list[str],
+    *,
+    timeout: float,
+    ok_codes: tuple[int, ...] = (0,),
+    env: dict[str, str] | None = None,
 ) -> tuple[int, bytes, str]:
     """Run a command, returning (returncode, stdout, stderr).
 
     Raises CommandError for a code outside `ok_codes`, so a stage that ignores
     the result still fails loudly rather than writing a truncated artifact.
+
+    `env` replaces the child's environment entirely when given — LibreOffice
+    needs a writable HOME of its own, and inheriting the worker's would let two
+    conversions collide in one profile.
     """
     log.debug("exec %s", " ".join(argv))
     process = await asyncio.create_subprocess_exec(
-        *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)

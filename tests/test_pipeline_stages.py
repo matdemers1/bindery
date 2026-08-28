@@ -346,3 +346,91 @@ async def test_a_page_that_yields_text_is_never_forced(
         )
     )
     assert forced_runs == [False], "one pass only; nothing was lost to recover"
+
+
+# --------------------------------------------------------------------------
+# Office documents (T-8.14)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name,builder",
+    [
+        ("statement.csv", "csv"),
+        ("letter.docx", "docx"),
+        ("accounts.xlsx", "xlsx"),
+        ("notes.txt", "txt"),
+    ],
+)
+async def test_office_documents_become_searchable(session, tmp_path, name, builder) -> None:
+    """The point of converting rather than parsing.
+
+    A spreadsheet of account numbers is exactly what an archive is for, and it
+    used to be skipped as unsupported. Rendering it to PDF means it arrives
+    searchable, citable and viewable by the same code as a scan — instead of
+    needing its own paging, viewer and citation model.
+    """
+    from worker.stages import normalize
+
+    payload = _office_fixture(builder, tmp_path / name)
+
+    library = Library(name=f"Office {name}", kind=LibraryKind.PERSONAL)
+    session.add(library)
+    await session.flush()
+    source_file = SourceFile(
+        library_id=library.id, sha256=uuid.uuid4().hex * 2, byte_size=len(payload),
+        original_filename=name, ingest_source=IngestSource.WEB_UPLOAD,
+        state=SourceFileState.RECEIVED,
+    )
+    session.add(source_file)
+    await session.flush()
+    blob = blob_path(source_file.sha256)
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(payload)
+
+    await normalize.run_normalize(
+        session,
+        ClaimedJob(
+            id=uuid.uuid4(), stage=JobStage.NORMALIZE, source_file_id=source_file.id,
+            document_id=None, prompt_version=None, attempts=0,
+        ),
+    )
+    await session.commit()
+
+    boxes = json.loads(derived_for(source_file.sha256).word_boxes.read_text())
+    assert normalize._word_count(boxes) > 0, f"{name} produced no searchable text"
+
+    text = " ".join(
+        word["t"]
+        for page in boxes["pages"]
+        for line in page["lines"]
+        for word in line["words"]
+    )
+    assert "Meridian" in text, f"the actual content of {name} did not survive"
+
+    # The original is untouched: conversion writes a derived artifact only.
+    assert blob.read_bytes() == payload
+
+
+def _office_fixture(kind: str, path) -> bytes:
+    """Build a real file of each type, not a stub — the conversion is the test."""
+    if kind == "csv":
+        path.write_text("Account,Institution,Balance\n4417,Meridian Credit Union,1284.55\n")
+    elif kind == "txt":
+        path.write_text("Meridian Credit Union — account notes\nOpened 2019.\n")
+    elif kind == "docx":
+        from docx import Document as Docx
+
+        document = Docx()
+        document.add_paragraph("Meridian Credit Union")
+        document.add_paragraph("Account closing confirmation.")
+        document.save(path)
+    elif kind == "xlsx":
+        from openpyxl import Workbook
+
+        book = Workbook()
+        sheet = book.active
+        sheet["A1"] = "Institution"
+        sheet["A2"] = "Meridian Credit Union"
+        book.save(path)
+    return path.read_bytes()

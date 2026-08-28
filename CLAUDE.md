@@ -364,6 +364,32 @@ requests a second*.
   forms — and because the dev server proxies WebSockets natively, that failure
   appears *only* in the deployed stack.
 
+## Formats
+
+Two families, and only one pipeline.
+
+- **Scans and photographs** — `.pdf .jpg .jpeg .png .tif .tiff .heic .heif` —
+  go straight to OCR.
+- **Office documents** — Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT,
+  MD — are rendered to PDF by headless LibreOffice in `worker/convert.py` and
+  then travel the *ordinary* path. That is the whole design: handling them
+  natively would mean a second implementation of paging, viewing, citation and
+  export for every format. The original is never replaced — the PDF is a derived
+  artifact beside the blob, and an export still hands back the .xlsx.
+
+`convert.CONVERTIBLE` and `walker.OFFICE` must stay in step, or the importer
+skips a format the pipeline can handle.
+
+Deliberately still unsupported: source code, config, markup. They are not
+archive material and would bury the things that are. The importer's
+`skipped_unsupported` counter is the honest report of that.
+
+Gotchas worth keeping: `soffice` **exits 0 on several failures**, so the output
+file's existence is the only trustworthy signal; each conversion needs its own
+`-env:UserInstallation` profile or two concurrent runs silently produce nothing;
+and spreadsheets export through `calc_pdf_Export` so a wide bank statement
+scales to fit instead of losing its right-hand columns off the page.
+
 ## Deployment
 
 `docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) runs lint and the

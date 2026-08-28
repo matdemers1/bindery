@@ -30,7 +30,7 @@ from api.db.enums import JobStage, SourceFileState
 from api.db.models import SourceFile
 from api.queue import ClaimedJob
 from api.storage.blobs import blob_path
-from worker import subprocess_util
+from worker import convert, subprocess_util
 from worker.ocr.word_boxes import extract_word_boxes
 
 log = logging.getLogger("bindery.worker.normalize")
@@ -162,11 +162,29 @@ def _is_heif(source_file: SourceFile, original: Path) -> bool:
 async def _ocr_input(source_file: SourceFile, original: Path):
     """Yield a path ocrmypdf can actually read.
 
-    HEIC needs decoding first: ocrmypdf shells out to its own interpreter, which
-    never calls `register_heif_opener`, so the format is invisible to it even
-    with pillow-heif installed here. Converting to JPEG in this process is the
-    whole fix (REQ-006).
+    Two formats need turning into something else first, and this is the one
+    place that knows about it:
+
+    **Office documents** — a Word letter, a spreadsheet of account numbers, a
+    CSV exported from a bank — are rendered to PDF so they travel the ordinary
+    path and end up searchable, citable and viewable like everything else.
+
+    **HEIC** needs decoding because ocrmypdf shells out to its own interpreter,
+    which never calls `register_heif_opener`, so the format is invisible to it
+    even with pillow-heif installed here (REQ-006).
+
+    The original is untouched in both cases: what is yielded is a temporary
+    file, and the blob keeps the bytes you put in.
     """
+    if convert.is_convertible(source_file.original_filename, source_file.mime_type):
+        with tempfile.TemporaryDirectory(dir=get_settings().temp_root) as scratch:
+            yield await convert.to_pdf(
+                original,
+                Path(scratch),
+                original_name=source_file.original_filename,
+            )
+        return
+
     if not _is_heif(source_file, original):
         yield original
         return

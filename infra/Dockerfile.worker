@@ -10,6 +10,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       pngquant \
     && rm -rf /var/lib/apt/lists/*
 
+# Office formats. A household archive is full of documents that never touched a
+# scanner — a spreadsheet of account numbers, a letter written in Word, a CSV
+# export from a bank — and they carry exactly the information the archive exists
+# to find. They are converted to PDF and then travel the ordinary path, so they
+# end up searchable, citable and exportable like everything else.
+#
+# Only the filters actually needed: `libreoffice` pulls in a desktop, Java and
+# a lot of things a headless converter never runs. This is roughly 400MB rather
+# than well over a gigabyte.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libreoffice-writer-nogui \
+      libreoffice-calc-nogui \
+      libreoffice-impress-nogui \
+      fonts-dejavu-core \
+      fonts-liberation2 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY pyproject.toml infra/extract-deps.py ./
 RUN python extract-deps.py worker > /tmp/requirements.txt \

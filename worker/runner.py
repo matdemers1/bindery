@@ -23,6 +23,7 @@ from api.config import get_settings
 from api.db.enums import JobStage
 from api.db.models import Document, SourceFile
 from api.db.session import SessionFactory, engine
+from worker import convert
 from worker.ingest.watched_folder import watch_inbox
 from worker.stages import STAGES
 
@@ -287,6 +288,10 @@ async def main() -> None:
             eventlog.drain_forever(stopping, SessionFactory), name="log-drain"
         )
     )
+    # Fire-and-forget: LibreOffice's first start builds a profile and takes
+    # several seconds. Doing it now means the first office document someone
+    # adds is not the one that waits for it. Never blocks boot.
+    tasks.append(asyncio.create_task(convert.warm_up(), name="converter-warmup"))
 
     # Last line of defence: if a task exits despite the guards above, say so
     # rather than letting the worker sit there looking healthy.

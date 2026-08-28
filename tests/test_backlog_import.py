@@ -48,7 +48,11 @@ def tree(tmp_path: Path) -> Path:
     (tmp_path / "2020" / "medical" / "record.pdf").write_bytes(
         b"%PDF-1.7\nrecord" + nonce + b"\n%%EOF\n"
     )
-    (tmp_path / "2020" / "notes.txt").write_text("not a document")
+    # Now that .txt and office formats are supported, the "not a document" case
+    # has to be something that genuinely is not one — which is source code, the
+    # thing a real backlog is actually full of.
+    (tmp_path / "2020" / "app.js").write_text("export const noise = 1;")
+    (tmp_path / "2020" / "letter.docx").write_bytes(b"PK\x03\x04letter" + nonce)
     (tmp_path / ".DS_Store").write_bytes(b"junk")
     (tmp_path / "2019" / "empty.pdf").write_bytes(b"")
     (tmp_path / ".Trash" / "deleted.pdf").write_bytes(b"%PDF-1.7\n%%EOF\n")
@@ -73,8 +77,8 @@ async def import_session(session, signed_in, tree):
 def test_the_walk_finds_documents_and_ignores_the_noise(tree) -> None:
     result = walk(tree)
     names = sorted(p.name for p in result.files)
-    assert names == ["bill.pdf", "record.pdf", "scan.png"]
-    assert result.skipped_unsupported == 1          # notes.txt
+    assert names == ["bill.pdf", "letter.docx", "record.pdf", "scan.png"]
+    assert result.skipped_unsupported == 1          # app.js
     assert result.skipped_hidden == 1               # .DS_Store
     assert any("empty file" in message for _, message in result.errors)
 
@@ -129,8 +133,8 @@ async def test_the_dry_run_reports_counts_without_ingesting(session, import_sess
     await session.commit()
 
     assert record.state is ImportState.DRY_RUN
-    assert record.dry_run["total_files"] == 3
-    assert record.dry_run["by_extension"] == {".pdf": 2, ".png": 1}
+    assert record.dry_run["total_files"] == 4
+    assert record.dry_run["by_extension"] == {".pdf": 2, ".png": 1, ".docx": 1}
     assert record.cost_estimate["batch_usd"] < record.cost_estimate["interactive_usd"]
 
     # Not one byte entered the archive from this scan.
@@ -191,7 +195,7 @@ async def test_rescanning_converges_rather_than_duplicating(session, import_sess
             .where(ImportItem.session_id == record.id)
         )
     ).scalar_one()
-    assert count == 3
+    assert count == 4
 
 
 async def test_an_interrupted_import_resumes_where_it_stopped(session, import_session) -> None:
@@ -206,7 +210,7 @@ async def test_an_interrupted_import_resumes_where_it_stopped(session, import_se
 
     second = await ingest_batch(session, record, states=[ImportItemState.PENDING], limit=50)
     await session.commit()
-    assert second == 1  # only the remaining one
+    assert second == 2  # only the remaining ones
 
     third = await ingest_batch(session, record, states=[ImportItemState.PENDING], limit=50)
     assert third == 0   # and nothing is reprocessed
@@ -220,7 +224,7 @@ async def test_an_interrupted_import_resumes_where_it_stopped(session, import_se
             )
         )
     ).scalar_one()
-    assert files == 3
+    assert files == 4
 
 
 async def test_a_file_that_fails_does_not_stop_the_import(session, import_session) -> None:
@@ -233,7 +237,7 @@ async def test_a_file_that_fails_does_not_stop_the_import(session, import_sessio
     done = await ingest_batch(session, record, states=[ImportItemState.PENDING], limit=50)
     await session.commit()
 
-    assert done == 2
+    assert done == 3  # four importable, one deliberately broken
     failed = (
         await session.execute(
             sa.select(ImportItem).where(
@@ -286,14 +290,14 @@ async def test_imported_documents_are_flagged_and_excluded_from_review(
 
     flagged = await mark_backlog(session, record)
     await session.commit()
-    assert flagged == 3
+    assert flagged == 4
 
     # They need review, but they are not in the queue you open every morning.
     body = (await client.get("/api/review")).json()
     assert body["total"] == 0
 
     with_backlog = (await client.get("/api/review?include_backlog=true")).json()
-    assert with_backlog["total"] == 3
+    assert with_backlog["total"] == 4
 
 
 # --------------------------------------------------------------------------

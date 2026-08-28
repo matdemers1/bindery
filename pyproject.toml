@@ -45,7 +45,11 @@ worker = [
     # HEIC/HEIF from an iPhone camera roll (REQ-006).
     "pillow-heif",
 ]
-dev = ["pytest", "pytest-asyncio", "httpx", "ruff", "mypy"]
+dev = [
+    "pytest", "pytest-asyncio", "httpx", "ruff", "mypy",
+    # Build real .docx/.xlsx fixtures: a stub would test nothing.
+    "python-docx", "openpyxl",
+]
 
 [tool.setuptools.packages.find]
 include = ["api*", "worker*"]

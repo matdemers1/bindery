@@ -18,7 +18,18 @@ from pathlib import Path
 
 log = logging.getLogger("bindery.import.walk")
 
-SUPPORTED = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif"}
+# Scans and photographs...
+SCANNED = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif"}
+# ...and documents that never touched a scanner. A spreadsheet of account
+# numbers is exactly the sort of thing an archive is for, and it was being
+# skipped as unsupported. These are converted to PDF on the way in.
+OFFICE = {
+    ".doc", ".docx", ".odt", ".rtf",
+    ".xls", ".xlsx", ".ods", ".csv",
+    ".ppt", ".pptx", ".odp",
+    ".txt", ".md",
+}
+SUPPORTED = SCANNED | OFFICE
 # Directories that are never documents.
 SKIP_DIRS = {".git", ".svn", "node_modules", "__pycache__", ".Trash", "$RECYCLE.BIN",
              ".Spotlight-V100", ".fseventsd", ".TemporaryItems", "@eaDir"}
