@@ -27,7 +27,38 @@ The originals stay byte-identical on disk either way — that is invariant 1 —
 
 ---
 
-## 1. A GitHub token the Zima can pull with
+## 1. ZimaOS's two quirks — read these first
+
+Both cost real time to discover. Everything else follows from them.
+
+**`/` is a read-only squashfs.** The OS image is immutable. `/root` cannot be
+written to *even as root*. `/etc` and `/DATA` are writable overlays.
+
+**`HOME=/DATA` for your shell, `HOME=/root` for services.** So anything you
+write to `~` lands in `/DATA`, while sshd and the Docker daemon look in `/root`
+and find nothing. This produces two failures that look unrelated:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| SSH key rejected despite correct perms | key went to `/DATA/.ssh`, sshd reads `/root/.ssh` | `AuthorizedKeysFile /DATA/.ssh/authorized_keys` in `sshd_config` |
+| "Failed to pull image after trying 5 mirror methods" | `docker login` wrote `/DATA/.docker/config.json`, the daemon reads `/root/.docker/` | `export DOCKER_CONFIG=/DATA/.docker` before any pull |
+
+The mirror-hunting error is especially misleading: it reads like a network or
+registry problem and is actually a credentials-path problem.
+
+Also: `PermitRootLogin` ships as `no`. For key-based root access:
+
+```bash
+sed -i 's/^\s*PermitRootLogin\s\+no\s*$/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+sshd -t && systemctl restart sshd
+```
+
+`sshd -T` reads the *file*; it does not prove the running daemon reloaded. Check
+`ps -o pid,lstart -C sshd` for a fresh start time.
+
+---
+
+## 2. A GitHub token the Zima can pull with
 
 The repo is private, so the images are private, and an anonymous pull returns a
 confusing "not found" rather than "unauthorized".
@@ -43,29 +74,43 @@ ZimaOS web UI:
 echo "<the-token>" | docker login ghcr.io -u matdemers1 --password-stdin
 ```
 
-This writes `~/.docker/config.json` on the host and persists across reboots.
+That writes `/DATA/.docker/config.json`. **Every subsequent docker command that
+needs to pull must be run with `DOCKER_CONFIG=/DATA/.docker`** — see the quirks
+above. This is also why the CasaOS custom-app installer cannot pull these
+images: it has no way to set that variable.
 
 ---
 
-## 2. Storage on the 16 TB pool
+## 3. Storage — `/DATA` is *not* the pool
+
+This is the trap. `/DATA` is a **904 GB NVMe partition**. The 16 TB array is
+mounted elsewhere:
+
+| Mount | Size | What it is |
+|---|---|---|
+| `/media/Main-Storage` | 10.9 TB | btrfs on **md RAID 5**, four disks, survives one failure |
+| `/DATA` | 904 GB | single NVMe partition, no redundancy |
+
+The archive is split deliberately:
 
 ```bash
-mkdir -p /DATA/AppData/bindery/data/inbox/household
-mkdir -p /DATA/AppData/bindery/pgdata
+mkdir -p /media/Main-Storage/bindery/data/inbox/household   # blobs, derived, inbox
+mkdir -p /DATA/AppData/bindery/pgdata                        # database
 ```
 
-`data/` holds blobs, derived artifacts, the watched-folder inbox, and exports.
-`pgdata/` holds the database. Both are on the pool, not the boot device.
+**Blobs go on the array** because they are the irreplaceable bytes and RAID 5
+turns a disk failure into an inconvenience (R-09). **Postgres goes on NVMe** for
+IOPS — it is not redundant, but it is fully reconstructible from the nightly
+`pg_dump`, which lands on the array.
 
-> If your pool is mounted somewhere other than `/DATA`, change it here **and** in
-> the two volume paths in the compose file.
+Putting everything on `/DATA` would leave every original on one disk.
 
 The inbox subdirectory name must match a library name — `household` matches a
 library called "Household". That is how a scanner picks a destination.
 
 ---
 
-## 3. Cloudflare Tunnel
+## 4. Cloudflare Tunnel
 
 The tunnel is what makes the archive reachable without opening a port. Create it
 at **Zero Trust → Networks → Tunnels → Create a tunnel**, choose *Cloudflared*,
@@ -87,7 +132,7 @@ to the api container. One route covers both.
 
 ---
 
-## 4. Cloudflare Access
+## 5. Cloudflare Access
 
 The tunnel makes it reachable; Access decides who reaches it. Bindery's own JWT
 login exists regardless — Access is defence in depth, never the only gate
@@ -124,7 +169,20 @@ below the Allow policy, or scoped to the wrong path.
 
 ---
 
-## 5. Install the app on ZimaOS
+## 6. Install
+
+The CasaOS custom-app importer **cannot pull these images** — it has no way to
+set `DOCKER_CONFIG`, so it falls back to mirror-hunting and fails. Deploy with
+compose directly:
+
+```bash
+# copy the filled manifest to the host as /DATA/AppData/bindery/docker-compose.yml
+cd /DATA/AppData/bindery
+export DOCKER_CONFIG=/DATA/.docker
+docker compose pull && docker compose up -d
+```
+
+The original CasaOS import route, kept for reference
 
 **ZimaOS → Apps → Custom Install → Import**, and paste
 `infra/zimaos/bindery.zimaos.yaml`.
@@ -149,7 +207,7 @@ defers (REQ-055).
 
 ---
 
-## 6. First run
+## 7. First run
 
 ```bash
 # Migrations are applied explicitly, never on container boot (REQ-114).
@@ -165,7 +223,7 @@ docker exec -it bindery-api python -m api.cli create-user \
 
 ---
 
-## 7. Verify
+## 8. Verify
 
 ```bash
 # REQ-104: no service may publish a host port. No row may contain "->".
@@ -193,25 +251,19 @@ press ⌘K in the browser and search for a word you know is inside it.
 
 ---
 
-## 8. A backup, before you trust it with anything
+## 9. A backup, before you trust it with anything
 
 Not the Phase 6 answer. Enough that a disk failure this month is survivable.
 
+Installed at `/DATA/AppData/bindery/backup.sh`, running nightly at 03:30. It
+dumps Postgres and rsyncs blobs to `/media/Main-Storage/Backups/bindery/` — the
+RAID array, a different device from the NVMe the database sits on.
+
+Verify a dump is genuinely restorable rather than merely non-empty:
+
 ```bash
-mkdir -p /DATA/Backups/bindery
-cat > /usr/local/bin/bindery-backup.sh <<'SH'
-#!/bin/sh
-set -eu
-DEST=/DATA/Backups/bindery
-STAMP=$(date +%F)
-docker exec bindery-postgres pg_dump -U bindery -Fc bindery > "$DEST/bindery-$STAMP.dump"
-# Blobs are content-addressed and write-once, so this only ever adds.
-rsync -a --ignore-existing /DATA/AppData/bindery/data/blobs/ "$DEST/blobs/"
-# Keep a month of database dumps. Blobs are never pruned.
-find "$DEST" -name 'bindery-*.dump' -mtime +30 -delete
-SH
-chmod +x /usr/local/bin/bindery-backup.sh
-(crontab -l 2>/dev/null; echo "30 3 * * * /usr/local/bin/bindery-backup.sh") | crontab -
+DUMP=$(ls -t /media/Main-Storage/Backups/bindery/*.dump | head -1)
+docker exec -i bindery-postgres pg_restore -l < "$DUMP" | grep -c "TABLE DATA"
 ```
 
 `derived/` is deliberately not backed up — every byte of it is reproducible from
@@ -249,6 +301,8 @@ To roll back, change the `:main` tags to `:sha-<commit>` and `up -d` again.
 | Files sit in the inbox untouched | The subdirectory name does not match a library name; check `docker logs bindery-worker` |
 | Jobs queued but never claimed | Worker cannot reach the database — compare `DATABASE_URL` between the api and worker blocks |
 | `curl` with a service token returns 302 | The Service Auth policy is below the Allow policy in precedence |
+| API client gets `403 error code: 1010` | Cloudflare's Browser Integrity Check rejecting the default user agent. Send a real `User-Agent` header |
+| Worker logs `relation "library" does not exist` at startup | It started before migrations were applied. It backs off and recovers on its own once the schema exists |
 | Everything works, nothing classifies | Expected with no `ANTHROPIC_API_KEY`. The worker logs the deferral and retries |
 
 ## See also

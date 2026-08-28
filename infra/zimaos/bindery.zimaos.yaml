@@ -4,8 +4,10 @@
 #
 # Before you do, three things must already be true. Each is a one-time step and
 # each is in docs/zimaos-deploy.md:
-#   1. `docker login ghcr.io` has been run on the Zima (the repo is private, so
-#      the images are private, so an anonymous pull returns "not found").
+#   1. Images have been pulled. NOTE: ZimaOS sets HOME=/DATA for your shell but
+#      HOME=/root for services, and / is a read-only squashfs — so `docker login`
+#      writes /DATA/.docker/config.json which the daemon never reads. Pull with:
+#          DOCKER_CONFIG=/DATA/.docker docker compose pull
 #   2. The directories below exist on the 16 TB pool.
 #   3. Every `change-me` in the environment blocks has been replaced.
 #
@@ -13,10 +15,20 @@
 # Tunnel only (ADR-006). Do not add a `ports:` key to anything here — the whole
 # archive would become reachable from the LAN with no Access in front of it.
 #
-# Storage layout on the pool:
-#   /DATA/AppData/bindery/data      blobs, derived artifacts, inbox, exports
-#   /DATA/AppData/bindery/pgdata    the database
-# Adjust both if your pool is mounted elsewhere.
+# Storage layout — deliberately split across two devices:
+#
+#   /media/Main-Storage/bindery/data   blobs, derived artifacts, inbox, exports
+#                                      11 TB btrfs on RAID 5 across four disks.
+#                                      The irreplaceable bytes live here because
+#                                      this array survives a disk failure (R-09).
+#
+#   /DATA/AppData/bindery/pgdata       the database, on NVMe for IOPS. Not
+#                                      redundant, but fully reconstructible from
+#                                      the nightly pg_dump, which lands on the
+#                                      RAID array.
+#
+# `/DATA` on ZimaOS is a 904 GB NVMe partition, NOT the storage pool. Putting the
+# archive there would leave every original on a single disk.
 
 name: bindery
 
@@ -75,7 +87,7 @@ services:
       BINDERY_PROMPT_VERSION: v1
       BINDERY_HOSTNAME: bindery.d3cloud.io
     volumes:
-      - /DATA/AppData/bindery/data:/data
+      - /media/Main-Storage/bindery/data:/data
     healthcheck:
       test:
         - CMD
@@ -101,7 +113,7 @@ services:
         condition: service_healthy
     environment: *bindery-env
     volumes:
-      - /DATA/AppData/bindery/data:/data
+      - /media/Main-Storage/bindery/data:/data
     deploy:
       resources:
         limits:
@@ -165,6 +177,6 @@ x-casaos:
     before_install:
       en_us: >-
         Run `docker login ghcr.io` on this host first — the images are private.
-        Create /DATA/AppData/bindery/{data,pgdata}. Replace every change-me
+        Create /media/Main-Storage/bindery/data and /DATA/AppData/bindery/pgdata. Replace every change-me
         value. After install, apply migrations explicitly:
         `docker exec bindery-api alembic upgrade head`.

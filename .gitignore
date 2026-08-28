@@ -15,6 +15,9 @@ dist/
 *.tsbuildinfo
 
 # Env & secrets
+# Filled-in deployment manifest: contains the tunnel token, database password
+# and JWT secret. Never commit.
+/.deploy/
 .env
 .env.*
 !.env.example
