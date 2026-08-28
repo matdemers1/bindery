@@ -5,6 +5,7 @@ import { ApiError, api, type Library, type User } from "./api";
 import CommandPalette from "./features/palette/CommandPalette";
 import PipelinePage from "./features/pipeline/PipelinePage";
 import ArchivePage from "./features/archive/ArchivePage";
+import AskPage from "./features/ask/AskPage";
 import FilesPage from "./features/files/FilesPage";
 import LibrariesPage from "./features/household/LibrariesPage";
 import ImportPage from "./features/import/ImportPage";
@@ -77,7 +78,10 @@ export default function App() {
         }}
       >
         <Routes>
-          <Route path="/" element={<SearchPage libraries={libraries} />} />
+          <Route
+            path="/"
+            element={<SearchPage libraries={libraries} onUploaded={refresh} />}
+          />
           {/* Documents are the normal path: search returns page ranges, not files. */}
           <Route
             path="/document/:documentId/page/:pageNumber"
@@ -90,6 +94,7 @@ export default function App() {
           <Route path="/file/:fileId" element={<Navigate to="page/1" replace />} />
           <Route path="/archive" element={<ArchivePage />} />
           <Route path="/files" element={<FilesPage />} />
+          <Route path="/ask" element={<AskPage />} />
           <Route path="/trust" element={<TrustPage />} />
           <Route path="/libraries" element={<LibrariesPage />} />
           <Route path="/import" element={<ImportPage libraries={libraries} />} />

@@ -21,6 +21,13 @@ export default function Shell({
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
+
+  // Rendered only where a camera exists: on a desktop the capture attribute is
+  // ignored and the button would just be a second, worse file picker.
+  const hasCamera =
+    typeof navigator !== "undefined" &&
+    (navigator.maxTouchPoints > 0 || /Android|iPhone|iPad/.test(navigator.userAgent));
 
   async function upload(files: FileList | null) {
     const target = libraries[0];
@@ -55,14 +62,21 @@ export default function Shell({
         void upload(event.dataTransfer.files);
       }}
     >
+      {/* Eleven nav tabs sit between the top of the page and the content, so
+          a keyboard user would otherwise Tab through all of them on every
+          screen. */}
+      <a href="#content" className="skip-link text-sm">
+        Skip to content
+      </a>
       <header className="sticky top-0 z-40 border-b border-edge bg-ink/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-6 px-6 py-3">
           <NavLink to="/" className="text-base font-semibold tracking-tight">
             Bindery
           </NavLink>
 
-          <nav className="flex items-center gap-1 text-sm">
+          <nav aria-label="Sections" className="flex items-center gap-1 text-sm">
             <Tab to="/">Search</Tab>
+            <Tab to="/ask">Ask</Tab>
             <Tab to="/archive">Archive</Tab>
             <Tab to="/files">Files</Tab>
             <Tab to="/review">Review</Tab>
@@ -89,6 +103,22 @@ export default function Shell({
               className="hidden"
               onChange={(event) => void upload(event.target.files)}
             />
+            {/*
+              Camera capture (REQ-007). `capture="environment"` opens the rear
+              camera directly instead of the photo picker, which is the whole
+              point: a receipt is photographed where you are standing, not
+              chosen from a camera roll later. Desktop browsers ignore the
+              attribute and fall back to a file picker, so the button is only
+              rendered where a camera actually exists.
+            */}
+            <input
+              ref={camera}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(event) => void upload(event.target.files)}
+            />
             <button
               onClick={() => input.current?.click()}
               disabled={busy || libraries.length === 0}
@@ -96,6 +126,17 @@ export default function Shell({
             >
               {busy ? "Uploading…" : "Add files"}
             </button>
+            {hasCamera && (
+              <button
+                onClick={() => camera.current?.click()}
+                disabled={busy || libraries.length === 0}
+                title="Photograph a document"
+                aria-label="Photograph a document"
+                className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-50"
+              >
+                Photo
+              </button>
+            )}
             <button
               onClick={onSignedOut}
               title={user.email}
@@ -106,13 +147,19 @@ export default function Shell({
           </div>
         </div>
         {notice && (
-          <div className="border-t border-edge bg-surface px-6 py-1.5 text-center text-xs text-accent">
+          <div
+            role="status"
+            aria-live="polite"
+            className="border-t border-edge bg-surface px-6 py-1.5 text-center text-xs text-accent"
+          >
             {notice}
           </div>
         )}
       </header>
 
-      <main>{children}</main>
+      <main id="content" tabIndex={-1}>
+        {children}
+      </main>
     </div>
   );
 }

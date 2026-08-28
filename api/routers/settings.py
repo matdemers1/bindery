@@ -35,11 +35,14 @@ async def read_settings(
     session: AsyncSession = Depends(get_session),
 ) -> SettingsOut:
     key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
+    webhook = await settings_store.get(session, settings_store.NOTIFY_WEBHOOK_URL)
     return SettingsOut(
         anthropic_key_configured=bool(key),
         anthropic_key_hint=settings_store.mask(key),
         model=await settings_store.get(session, settings_store.BINDERY_MODEL) or "claude-opus-5",
         prompt_version=await settings_store.get(session, settings_store.PROMPT_VERSION) or "v1",
+        notify_webhook_configured=bool(webhook),
+        notify_webhook_hint=settings_store.mask(webhook),
     )
 
 
@@ -71,6 +74,13 @@ async def update_settings(
             actor_id=user.id,
         )
         changed.append("prompt_version")
+
+    if payload.notify_webhook_url is not None:
+        await settings_store.set_(
+            session, settings_store.NOTIFY_WEBHOOK_URL,
+            payload.notify_webhook_url.strip() or None, actor_id=user.id,
+        )
+        changed.append("notify_webhook_url")
 
     if changed:
         # The audit records *that* a secret changed, never its value.

@@ -169,3 +169,92 @@ async def test_a_term_on_every_page_is_reported_not_asserted(
     elapsed = (time.perf_counter() - started) * 1000
     print(f"\nworst case: 'continuation sheet' matched {response.total:,} documents "
           f"in {elapsed:.0f} ms")
+
+
+async def test_palette_latency_is_within_budget(
+    seeded, session_module, library_module
+) -> None:
+    """REQ-027 — the command palette must answer in under 100 ms.
+
+    A third of the search budget, because the palette runs on every keystroke.
+    It gets there by asking for far fewer rows: the same query, `limit=8`,
+    which is what fits on the screen anyway.
+    """
+    visible = [library_module.id]
+    for query in QUERIES:
+        await search_query.search(session_module, query, visible, limit=8)
+
+    timings: list[float] = []
+    for _ in range(5):
+        for query in QUERIES:
+            started = time.perf_counter()
+            await search_query.search(session_module, query, visible, limit=8)
+            timings.append((time.perf_counter() - started) * 1000)
+
+    timings.sort()
+    p95 = timings[int(len(timings) * 0.95) - 1]
+    print(f"\npalette | p50 {statistics.median(timings):.0f} ms | p95 {p95:.0f} ms")
+    assert p95 < 100, f"palette p95 {p95:.0f} ms exceeds the 100 ms budget (REQ-027)"
+
+
+async def test_ask_retrieval_stays_inside_the_search_budget(
+    seeded, session_module, library_module
+) -> None:
+    """Q&A retrieval broadens to an OR query when the precise one is empty, and
+    an OR across content words is the expensive shape. Measured here so the
+    fallback cannot quietly become the slow path nobody notices.
+
+    Split the same way the search suite splits: an ordinary question is a gate,
+    a question built out of a term matching a fifth of the archive is reported.
+    Holding the second to a budget would mean tuning for a query with no useful
+    answer, and the existing `continuation sheet` case already documents that
+    cost at the search layer.
+    """
+    from api import ask
+
+    ordinary = [
+        "when did I last get the brakes done?",
+        "what is my policy number?",
+        "how much did the roof cost?",
+    ]
+    timings: list[float] = []
+    for question in ordinary:
+        started = time.perf_counter()
+        await ask.gather_sources(session_module, question, [library_module.id])
+        timings.append((time.perf_counter() - started) * 1000)
+
+    worst = max(timings)
+    print(f"\nask retrieval | worst {worst:.0f} ms across {len(timings)} questions")
+
+    started = time.perf_counter()
+    await ask.gather_sources(
+        session_module, "how much was the continuation sheet?", [library_module.id]
+    )
+    pathological = (time.perf_counter() - started) * 1000
+    print(f"ask retrieval worst case: 'continuation sheet' in {pathological:.0f} ms")
+
+    # Two search passes at worst — precise, then broad — so twice the budget.
+    assert worst < 600, f"ask retrieval {worst:.0f} ms is beyond two search budgets"
+
+
+def test_the_broad_fallback_is_bounded() -> None:
+    """The OR pass uses only the most selective terms.
+
+    Not a latency gate — the measurement above shows breadth is not what costs,
+    a single common term is — but an unbounded OR over a long question would
+    return the archive in relevance order, which is not an answer.
+    """
+    from api import ask
+
+    precise, broad = ask.question_to_query(
+        "how much did the emergency roof replacement contractor invoice cost me"
+    )
+    assert broad.count(" OR ") + 1 <= ask.BROAD_TERMS
+    assert len(precise.split()) > ask.BROAD_TERMS, "the precise pass keeps every word"
+
+
+def test_a_question_of_only_stopwords_does_not_match_everything() -> None:
+    from api import ask
+
+    precise, broad = ask.question_to_query("what is it?")
+    assert precise == broad == "what is it?"

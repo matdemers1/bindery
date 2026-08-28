@@ -86,6 +86,7 @@ export default function CommandPalette({
     >
       <div
         role="dialog"
+        aria-modal="true"
         aria-label="Command palette"
         onClick={(event) => event.stopPropagation()}
         className="w-full max-w-xl overflow-hidden rounded-xl border border-edge bg-surface shadow-2xl"
@@ -101,14 +102,23 @@ export default function CommandPalette({
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder="Jump to a page…"
+          role="combobox"
+          aria-expanded={results.length > 0}
+          aria-controls="palette-results"
+          aria-activedescendant={
+            results[selected] ? `palette-result-${results[selected].document_id}` : undefined
+          }
           className="w-full border-b border-edge bg-transparent px-4 py-3.5 text-base outline-none"
         />
 
         {results.length > 0 ? (
-          <ul className="max-h-80 overflow-y-auto py-1">
+          <ul id="palette-results" role="listbox" className="max-h-80 overflow-y-auto py-1">
             {results.map((result, index) => (
               <li key={result.document_id}>
                 <button
+                  id={`palette-result-${result.document_id}`}
+                  role="option"
+                  aria-selected={index === selected}
                   onMouseEnter={() => setSelected(index)}
                   onClick={() => openResult(result)}
                   className={`flex w-full items-baseline gap-3 px-4 py-2.5 text-left ${

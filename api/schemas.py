@@ -474,6 +474,10 @@ class SettingsOut(BaseModel):
     anthropic_key_hint: str | None
     model: str
     prompt_version: str
+    # Push endpoints usually carry their credential in the URL, so this is
+    # treated as a secret too: configured-or-not, never the value.
+    notify_webhook_configured: bool = False
+    notify_webhook_hint: str | None = None
 
 
 class SettingsUpdateIn(BaseModel):
@@ -481,6 +485,7 @@ class SettingsUpdateIn(BaseModel):
     anthropic_api_key: str | None = None
     model: str | None = None
     prompt_version: str | None = None
+    notify_webhook_url: str | None = None
 
 
 class SettingsTestOut(BaseModel):
@@ -775,3 +780,29 @@ class AskOut(BaseModel):
     consulted: list[ConsultedOut]
     unavailable_reason: str | None
     model: str | None
+
+
+class ApiTokenIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    scopes: list[str] = Field(min_length=1)
+    # Empty means "every library the creator is in", re-intersected on each use.
+    library_ids: list[uuid.UUID] = []
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class ApiTokenOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    prefix: str
+    scopes: list[str]
+    library_ids: list[uuid.UUID]
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+    created_at: datetime
+
+
+class ApiTokenIssuedOut(ApiTokenOut):
+    # The only time this value exists outside the caller's hands. It is not
+    # stored, cannot be recovered, and never appears in an audit event.
+    secret: str

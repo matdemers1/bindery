@@ -227,6 +227,30 @@ to another — so this phase is defended by tests, not by inspection.
   cross-library tags are *revoked*, never deleted, and named in the audit
   `before`.
 
+## Ask, health and hardening (Phase 8)
+
+- **An uncited answer is discarded, not shown with a caveat** (`api/ask.py`). A
+  caveat is read once; an answer is believed. Citations come from the API's
+  citations feature and index into the exact blocks sent, so the page number is
+  a lookup rather than something the model wrote. Retrieval is Postgres, so
+  `/api/ask` still returns the matching pages with no key and no network.
+- **Question retrieval runs precise-then-broad.** Content words ANDed, then the
+  four most selective ORed. "when did I last get the brakes done?" contains one
+  word a receipt has.
+- **The health panel separates queue depth, failures and stalls**, because they
+  mean different things. A stall — queued work, nothing running — is the one
+  that never announces itself. The monitor runs in the *worker*, since the
+  condition is the worker not working.
+- **Notifications dedupe per alert code** on a six-hour cooldown and clear when
+  the condition resolves. A failed webhook is logged and never propagates.
+- **API tokens are re-intersected with their creator's memberships on every
+  request**, so removing a membership shrinks every token immediately without
+  anyone hunting for them. Only the hash is stored; the secret is shown once.
+- **Latency, measured at 100K pages:** search p95 15 ms (budget 300), palette
+  p95 15 ms (budget 100), ask retrieval 41 ms. The `continuation sheet` case —
+  one term matching a fifth of the archive — is reported at ~650–800 ms and
+  deliberately not gated, at both the search and ask layers.
+
 ## Deployment
 
 `docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) runs lint and the

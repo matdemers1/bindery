@@ -14,14 +14,17 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import moves
+from api import moves, tokens
 from api.audit import record
 from api.auth.dependencies import current_scope, current_user
 from api.db.enums import ActorType, LibraryKind, MembershipRole
-from api.db.models import AppUser, Library, Membership, SourceFile
+from api.db.models import ApiToken, AppUser, Library, Membership, SourceFile
 from api.db.scope import Scope
 from api.db.session import get_session
 from api.schemas import (
+    ApiTokenIn,
+    ApiTokenIssuedOut,
+    ApiTokenOut,
     LibraryCreateIn,
     LibraryDetailOut,
     MemberOut,
@@ -255,3 +258,105 @@ async def move_file(
     result = await moves.move(session, source_file, body.to_library_id, actor_id=user.id)
     await session.commit()
     return MovePlanOut(**result.as_dict(), loses_metadata=result.loses_metadata)
+
+
+# --------------------------------------------------------------------------
+# T-8.5 — scoped API tokens (REQ-107)
+# --------------------------------------------------------------------------
+
+
+@router.get("/tokens", response_model=list[ApiTokenOut])
+async def list_tokens(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> list[ApiTokenOut]:
+    """Your tokens, including revoked ones.
+
+    Revoked tokens stay listed because "what existed and what could it reach"
+    is a question you want answered after an incident, not before one.
+    """
+    rows = (
+        (
+            await session.execute(
+                sa.select(ApiToken)
+                .where(ApiToken.user_id == user.id)
+                .order_by(ApiToken.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        ApiTokenOut(
+            id=row.id, name=row.name, prefix=row.prefix, scopes=row.scopes,
+            library_ids=row.library_ids, expires_at=row.expires_at,
+            last_used_at=row.last_used_at, revoked_at=row.revoked_at,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/tokens", response_model=ApiTokenIssuedOut, status_code=201)
+async def create_token(
+    body: ApiTokenIn,
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> ApiTokenIssuedOut:
+    """Issue a token. The secret is in this response and nowhere else, ever."""
+    try:
+        issued = await tokens.issue(
+            session,
+            user_id=user.id,
+            name=body.name,
+            scopes=body.scopes,
+            library_ids=body.library_ids,
+            expires_in_days=body.expires_in_days,
+        )
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+    await record(
+        session,
+        entity_type="api_token",
+        entity_id=issued.record.id,
+        action="token_issued",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+        # The secret is not here, and must never be.
+        after={"name": issued.record.name, "scopes": issued.record.scopes},
+    )
+    await session.commit()
+    return ApiTokenIssuedOut(
+        id=issued.record.id, name=issued.record.name, prefix=issued.record.prefix,
+        scopes=issued.record.scopes, library_ids=issued.record.library_ids,
+        expires_at=issued.record.expires_at, last_used_at=None, revoked_at=None,
+        created_at=issued.record.created_at,
+        secret=issued.secret,
+    )
+
+
+@router.post("/tokens/{token_id}/revoke", response_model=ApiTokenOut)
+async def revoke_token(
+    token_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> ApiTokenOut:
+    if not await tokens.revoke(session, token_id, user.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    await record(
+        session,
+        entity_type="api_token",
+        entity_id=token_id,
+        action="token_revoked",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+    )
+    await session.commit()
+    row = await session.get(ApiToken, token_id)
+    return ApiTokenOut(
+        id=row.id, name=row.name, prefix=row.prefix, scopes=row.scopes,
+        library_ids=row.library_ids, expires_at=row.expires_at,
+        last_used_at=row.last_used_at, revoked_at=row.revoked_at,
+        created_at=row.created_at,
+    )

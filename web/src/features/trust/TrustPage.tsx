@@ -6,6 +6,7 @@ import {
   type AuditEventRecord,
   type BackupResult,
   type ExportResult,
+  type HealthPanel,
   type IntegrityReport,
   type MirrorResult,
 } from "../../api";
@@ -25,7 +26,7 @@ import {
  * app that just died.
  */
 export default function TrustPage() {
-  const [tab, setTab] = useState<"resilience" | "audit">("resilience");
+  const [tab, setTab] = useState<"health" | "resilience" | "audit">("health");
 
   return (
     <div className="space-y-4">
@@ -40,6 +41,7 @@ export default function TrustPage() {
       <nav className="flex gap-1 border-b border-edge">
         {(
           [
+            ["health", "Health"],
             ["resilience", "Export & resilience"],
             ["audit", "Audit log"],
           ] as const
@@ -59,7 +61,13 @@ export default function TrustPage() {
         ))}
       </nav>
 
-      {tab === "resilience" ? <ResiliencePanel /> : <AuditPanel />}
+      {tab === "health" ? (
+        <HealthPanelView />
+      ) : tab === "resilience" ? (
+        <ResiliencePanel />
+      ) : (
+        <AuditPanel />
+      )}
     </div>
   );
 }
@@ -440,5 +448,164 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-xs text-muted">{label}</span>
       {children}
     </label>
+  );
+}
+
+
+// --------------------------------------------------------------------------
+// Health (T-8.2, REQ-109)
+// --------------------------------------------------------------------------
+
+const STATE_LABELS: Record<string, string> = {
+  received: "waiting to start",
+  normalizing: "being converted",
+  paging: "being read",
+  segmenting: "being split",
+  processed: "filed",
+  failed: "failed",
+  duplicate: "already had it",
+};
+
+/**
+ * What the pipeline is doing, and whether anything is quietly broken.
+ *
+ * The ordering here is the argument: alerts first, then whether work is moving,
+ * then what it costs. A number nobody has to act on is not the headline.
+ */
+function HealthPanelView() {
+  const [panel, setPanel] = useState<HealthPanel | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setPanel(await api.healthPanel());
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : String(caught));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    // Slow on purpose. This is a status page, not a dashboard to watch.
+    const timer = setInterval(() => void load(), 60_000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  if (error) {
+    return (
+      <p role="alert" className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+        {error}
+      </p>
+    );
+  }
+  if (loading && !panel) return <p className="text-sm text-muted">Loading…</p>;
+  if (!panel) return null;
+
+  const queued = Object.values(panel.queue_depth).reduce((total, n) => total + n, 0);
+
+  return (
+    <div className="space-y-4">
+      {panel.alerts.length === 0 ? (
+        <p className="rounded-md border border-emerald-900 bg-emerald-950/30 p-3 text-sm text-emerald-300">
+          Everything is moving. {queued === 0 ? "Nothing is waiting." : `${queued} waiting.`}
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {panel.alerts.map((alert) => (
+            <li
+              key={alert.code}
+              role={alert.severity === "critical" ? "alert" : undefined}
+              className={
+                alert.severity === "critical"
+                  ? "rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300"
+                  : "rounded-md border border-amber-900 bg-amber-950/30 p-3 text-sm text-amber-300"
+              }
+            >
+              {alert.message}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-4">
+        <Stat label="Waiting" value={queued} />
+        <Stat label="Running" value={panel.running} />
+        <Stat label="Failed today" value={panel.failed_24h} />
+        <Stat label="Gave up" value={panel.dead_letter} />
+      </div>
+
+      <Card
+        title="Files"
+        blurb="Where everything that has arrived currently sits. Nothing here is ever
+          discarded — a file that failed to process is still stored, byte for byte."
+      >
+        <ul className="space-y-1 text-sm">
+          {Object.entries(panel.files_by_state).map(([state, count]) => (
+            <li key={state} className="flex justify-between">
+              <span>{STATE_LABELS[state] ?? state}</span>
+              <span className="text-muted">{count}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+
+      <Card
+        title="API spend, last 30 days"
+        blurb="Approximate, from recorded token usage. It is here to catch a runaway
+          loop early — a bug that presents as a bill."
+      >
+        <p className="text-2xl font-semibold">${panel.spend_30d_usd.toFixed(2)}</p>
+        {panel.spend_by_day.length > 0 && (
+          <ul className="mt-3 space-y-0.5 text-xs text-muted">
+            {panel.spend_by_day.slice(-7).map((day) => (
+              <li key={day.day} className="flex justify-between">
+                <span>{day.day}</span>
+                <span>${day.usd.toFixed(2)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      {panel.stuck_jobs.length > 0 && (
+        <Card
+          title="Stuck"
+          blurb="These claimed a slot and never released it — usually a worker that
+            died. They are recoverable; nothing has been lost."
+        >
+          <ul className="space-y-1 text-sm">
+            {panel.stuck_jobs.map((job) => (
+              <li key={job.id} className="flex justify-between">
+                <span>{job.stage}</span>
+                <span className="text-muted">
+                  {job.locked_by} ·{" "}
+                  {Math.round((job.locked_for_seconds ?? 0) / 60)} min
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      <p className="text-xs text-muted">
+        Checked {new Date(panel.checked_at).toLocaleTimeString()}. The worker also
+        checks on its own and can push a notification when the pipeline stops — set a
+        webhook in Settings.
+      </p>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-edge bg-surface p-3">
+      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
+    </div>
   );
 }

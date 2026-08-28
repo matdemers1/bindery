@@ -268,6 +268,8 @@ export interface Settings {
   anthropic_key_hint: string | null;
   model: string;
   prompt_version: string;
+  notify_webhook_configured: boolean;
+  notify_webhook_hint: string | null;
 }
 
 export interface SettingsTest {
@@ -463,7 +465,11 @@ export const api = {
   tree: (groupBy: string) => request<Tree>(`/archive/tree?group_by=${groupBy}`),
 
   settings: () => request<Settings>("/settings"),
-  updateSettings: (body: Partial<Record<"anthropic_api_key" | "model" | "prompt_version", string>>) =>
+  updateSettings: (
+    body: Partial<
+      Record<"anthropic_api_key" | "model" | "prompt_version" | "notify_webhook_url", string>
+    >,
+  ) =>
     request<Settings>("/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -651,6 +657,33 @@ export const api = {
       body: JSON.stringify({ to_library_id: toLibraryId }),
     }),
 
+
+  // --- Phase 8 -----------------------------------------------------------
+
+  ask: (question: string) =>
+    request<AskAnswer>("/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    }),
+
+  healthPanel: () => request<HealthPanel>("/health/panel"),
+
+  apiTokens: () => request<ApiTokenRecord[]>("/tokens"),
+  createApiToken: (body: {
+    name: string;
+    scopes: string[];
+    library_ids?: string[];
+    expires_in_days?: number | null;
+  }) =>
+    request<IssuedApiToken>("/tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  revokeApiToken: (id: string) =>
+    request<ApiTokenRecord>(`/tokens/${id}/revoke`, { method: "POST" }),
+
   upload: (libraryId: string, file: File) => {
     const form = new FormData();
     form.append("library_id", libraryId);
@@ -789,6 +822,66 @@ export interface MovePlan {
   cleared_types: string[];
   cleared_tags: string[];
   loses_metadata: boolean;
+}
+
+
+// --- Phase 8: ask, health, tokens ----------------------------------------
+
+export interface AskCitation {
+  document_id: string;
+  source_file_id: string;
+  title: string;
+  page_number: number;
+  quote: string;
+}
+
+export interface AskAnswer {
+  question: string;
+  /** Null whenever there is nothing honest to say — including an uncited answer. */
+  answer: string | null;
+  citations: AskCitation[];
+  consulted: { document_id: string; source_file_id: string; title: string; page_number: number }[];
+  unavailable_reason: string | null;
+  model: string | null;
+}
+
+export interface HealthAlert {
+  severity: "warning" | "critical";
+  code: string;
+  message: string;
+  detail: Record<string, unknown>;
+}
+
+export interface HealthPanel {
+  checked_at: string;
+  healthy: boolean;
+  queue_depth: Record<string, number>;
+  running: number;
+  failed_24h: number;
+  dead_letter: number;
+  stuck_jobs: { id: string; stage: string; locked_by: string | null; locked_for_seconds: number | null }[];
+  oldest_queued_seconds: number | null;
+  stalled: boolean;
+  files_by_state: Record<string, number>;
+  spend_30d_usd: number;
+  spend_by_day: { day: string; usd: number }[];
+  alerts: HealthAlert[];
+}
+
+export interface ApiTokenRecord {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  library_ids: string[];
+  expires_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+export interface IssuedApiToken extends ApiTokenRecord {
+  secret: string;
 }
 
 /** Blob URLs. Authenticated and library-scoped server-side; no token in the URL. */

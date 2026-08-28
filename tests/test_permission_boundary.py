@@ -234,6 +234,7 @@ EVERY_READ_PATH = [
     ("rules", "/api/rules"),
     ("household libraries", "/api/household/libraries"),
     ("health panel", "/api/health/panel"),
+    ("api tokens", "/api/tokens"),
 ]
 
 

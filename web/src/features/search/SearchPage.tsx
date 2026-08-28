@@ -3,10 +3,18 @@ import { Link, useSearchParams } from "react-router";
 
 import { api, type Document, type Library, type SearchResponse, fileUrl } from "../../api";
 import Snippet from "../../components/Snippet";
+import FirstRun from "../firstrun/FirstRun";
+import { ErrorState } from "../../components/States";
 
 // Every piece of search state lives in the URL (REQ-028), so a result is a link
 // you can send someone, and the back button behaves.
-export default function SearchPage({ libraries }: { libraries: Library[] }) {
+export default function SearchPage({
+  libraries,
+  onUploaded,
+}: {
+  libraries: Library[];
+  onUploaded: () => void;
+}) {
   const [params, setParams] = useSearchParams();
   const query = params.get("q") ?? "";
   const libraryFilter = params.getAll("library");
@@ -15,6 +23,7 @@ export default function SearchPage({ libraries }: { libraries: Library[] }) {
   const [draft, setDraft] = useState(query);
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => setDraft(query), [query]);
 
@@ -25,13 +34,20 @@ export default function SearchPage({ libraries }: { libraries: Library[] }) {
     }
     const controller = new AbortController();
     setLoading(true);
+    setError(null);
     api
       .search(
         { q: query, libraryIds: libraryFilter, knownFormCodes: formFilter },
         controller.signal,
       )
       .then(setResponse)
-      .catch(() => {})
+      .catch((caught) => {
+        // Not swallowed: a search that quietly returns nothing is
+        // indistinguishable from an archive that does not contain the thing,
+        // which is the worst possible failure for this particular box.
+        if (controller.signal.aborted) return;
+        setError(caught);
+      })
       .finally(() => setLoading(false));
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -78,7 +94,11 @@ export default function SearchPage({ libraries }: { libraries: Library[] }) {
       </form>
 
       {!query.trim() ? (
-        <EmptyPrompt />
+        <EmptyPrompt libraries={libraries} onUploaded={onUploaded} />
+      ) : error ? (
+        <div className="mt-8">
+          <ErrorState error={error} onRetry={() => update((next) => next.set("q", query))} />
+        </div>
       ) : loading && !response ? (
         <Skeleton />
       ) : response ? (
@@ -95,7 +115,25 @@ export default function SearchPage({ libraries }: { libraries: Library[] }) {
   );
 }
 
-function EmptyPrompt() {
+function EmptyPrompt({ libraries, onUploaded }: { libraries: Library[]; onUploaded: () => void }) {
+  const [empty, setEmpty] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // Source files rather than documents: a file that arrived but has not
+    // finished processing still means the archive is no longer empty, and
+    // showing "nothing in here yet" while the pipeline runs would be a lie.
+    api
+      .sourceFiles()
+      .then((files) => setEmpty(files.length === 0))
+      .catch(() => setEmpty(false));
+  }, []);
+
+  // The first-run panel only exists for an archive with nothing in it, and it
+  // never comes back — so it must not flash on screen while we find out.
+  if (empty === true) {
+    return <FirstRun libraries={libraries} onUploaded={onUploaded} />;
+  }
+
   return (
     <div className="mt-12">
       <VitalRecords />

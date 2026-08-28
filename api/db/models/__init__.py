@@ -1,5 +1,6 @@
 """All ORM models. Importing this package registers every table on Base.metadata."""
 
+from api.db.models.api_token import ApiToken
 from api.db.models.audit_event import AuditEvent
 from api.db.models.classification import Classification, FieldProvenance
 from api.db.models.document import Document
@@ -28,6 +29,7 @@ from api.db.models.taxonomy import Correspondent, DocumentType, Rule
 from api.db.models.user import AppUser, RefreshToken
 
 __all__ = [
+    "ApiToken",
     "AppUser",
     "Asset",
     "AuditEvent",

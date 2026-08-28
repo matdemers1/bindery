@@ -45,6 +45,8 @@ MAX_PAGE_CHARS = 6000
 # Words that carry no retrieval signal. Postgres strips these from the *index*,
 # but `websearch_to_tsquery` still ANDs them into the query, so "when did I last
 # get the brakes done?" becomes a query no receipt can satisfy.
+BROAD_TERMS = 4
+
 STOPWORDS = frozenset("""
 a an and are as at be been but by can could did do does for from get got had has
 have how i if in into is it its last me my of on or our out show tell that the
@@ -74,7 +76,17 @@ def question_to_query(question: str) -> tuple[str, str]:
         # Nothing but stopwords. Fall back to the question as written rather
         # than to an empty query, which would match everything.
         return question.strip(), question.strip()
-    return " ".join(seen), " OR ".join(seen)
+
+    # The OR fallback is the expensive shape: every extra term is another slice
+    # of the archive to rank. Longer words are a decent proxy for rarer ones —
+    # "brakes" discriminates, "cost" does not — so the broad pass uses the few
+    # most selective terms rather than all of them. Precision is what makes it
+    # fast *and* what makes it useful; an OR over nine words returns the whole
+    # archive in relevance order, which is not an answer.
+    selective = sorted(seen, key=len, reverse=True)[:BROAD_TERMS]
+    return " ".join(seen), " OR ".join(
+        [word for word in seen if word in set(selective)]
+    )
 
 
 
