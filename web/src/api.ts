@@ -324,6 +324,61 @@ export interface BulkResult {
   changes: { document_id: string; title: string | null; changes: Record<string, unknown> }[];
 }
 
+export interface CorrespondentRef {
+  id: string;
+  name: string;
+  kind: string | null;
+  aliases: string[];
+  document_count: number;
+}
+
+export interface AssetRef {
+  id: string;
+  library_id: string;
+  kind: string;
+  name: string;
+  attributes: Record<string, string>;
+  document_count: number;
+}
+
+export interface TimelineEntry {
+  document_id: string;
+  title: string | null;
+  date: string;
+  dated_precisely: boolean;
+  correspondent: string | null;
+  source_file_id: string;
+  page_start: number;
+}
+
+export interface MergePreview {
+  from_name: string;
+  into_name: string;
+  document_count: number;
+  alias_count: number;
+  documents: { id: string; title: string | null }[];
+  operation_id: string | null;
+}
+
+export interface TaxonomyHealth {
+  total_tags: number;
+  used_once: number;
+  unused: number;
+  orphan_ratio: number;
+  exceeds_alarm: boolean;
+  near_duplicate_tags: { a_id: string; a_name: string; b_id: string; b_name: string; similarity: number }[];
+  near_duplicate_correspondents: { a_id: string; a_name: string; b_id: string; b_name: string; similarity: number }[];
+}
+
+export interface DuplicatePair {
+  id: string;
+  document_a_id: string;
+  document_b_id: string;
+  a_title: string | null;
+  b_title: string | null;
+  similarity: number;
+}
+
 export interface Job {
   id: string;
   source_file_id: string | null;
@@ -449,6 +504,57 @@ export const api = {
     }),
   bulkUndo: (operationId: string) =>
     request<BulkResult>(`/bulk/${operationId}/undo`, { method: "POST" }),
+
+  correspondents: () => request<CorrespondentRef[]>("/correspondents"),
+  addAlias: (id: string, alias: string) =>
+    request<CorrespondentRef>(
+      `/correspondents/${id}/aliases?alias=${encodeURIComponent(alias)}`,
+      { method: "POST" },
+    ),
+  previewMerge: (sourceId: string, targetId: string) =>
+    request<MergePreview>("/correspondents/merge/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: sourceId, target_id: targetId }),
+    }),
+  mergeCorrespondents: (sourceId: string, targetId: string) =>
+    request<MergePreview>("/correspondents/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: sourceId, target_id: targetId }),
+    }),
+  mergeTags: (sourceId: string, targetId: string) =>
+    request<MergePreview>("/tags/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: sourceId, target_id: targetId }),
+    }),
+  undoMerge: (operationId: string) =>
+    request<{ restored: number }>(`/merges/${operationId}/undo`, { method: "POST" }),
+
+  assets: () => request<AssetRef[]>("/assets"),
+  createAsset: (body: { library_id: string; kind: string; name: string; attributes: Record<string, string> }) =>
+    request<AssetRef>("/assets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  attachAsset: (assetId: string, documentId: string) =>
+    request<{ attached: boolean }>(`/assets/${assetId}/documents/${documentId}`, {
+      method: "POST",
+    }),
+  assetTimeline: (assetId: string) =>
+    request<{ asset: AssetRef; entries: TimelineEntry[] }>(`/assets/${assetId}/timeline`),
+
+  taxonomyHealth: () => request<TaxonomyHealth>("/taxonomy/health"),
+  duplicates: () => request<DuplicatePair[]>("/duplicates"),
+  scanDuplicates: () => request<{ found: number }>("/duplicates/scan", { method: "POST" }),
+  similar: (documentId: string) =>
+    request<{ results: { document_id: string; title: string | null; similarity: number }[] }>(
+      `/documents/${documentId}/similar`,
+    ),
+
+  shelves: () => request<{ id: string; name: string; query: Record<string, unknown>; is_packet: boolean }[]>("/shelves"),
 
   review: () => request<ReviewQueue>("/review"),
   why: (documentId: string) => request<WhyPanel>(`/documents/${documentId}/why`),

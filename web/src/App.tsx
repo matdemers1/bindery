@@ -6,6 +6,7 @@ import CommandPalette from "./features/palette/CommandPalette";
 import PipelinePage from "./features/pipeline/PipelinePage";
 import ArchivePage from "./features/archive/ArchivePage";
 import ImportPage from "./features/import/ImportPage";
+import OrganisePage from "./features/organise/OrganisePage";
 import ReviewPage from "./features/review/ReviewPage";
 import RulesPage from "./features/rules/RulesPage";
 import SearchPage from "./features/search/SearchPage";
@@ -86,6 +87,7 @@ export default function App() {
           <Route path="/file/:fileId" element={<Navigate to="page/1" replace />} />
           <Route path="/archive" element={<ArchivePage />} />
           <Route path="/import" element={<ImportPage libraries={libraries} />} />
+          <Route path="/organise" element={<OrganisePage libraries={libraries} />} />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/rules" element={<RulesPage libraries={libraries} />} />
