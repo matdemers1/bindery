@@ -110,21 +110,28 @@ green "  all $TOTAL originals present"
 step "Searching the restored archive for: $SEARCH_TERM"
 # Deliberately the same full-text path the application uses, against the
 # restored data, not the live data.
+# coalesce, because `NULL || text` is NULL in SQL: an unclassified document
+# has no title, and without this it comes back as a blank line that reads as
+# "not found". That is not hypothetical — it is what this drill did on its
+# first real run against a live archive.
 docker exec "$CONTAINER" psql -U bindery -d bindery -At -c "
-  SELECT d.title || ' | pp. ' || d.page_start || '-' || d.page_end
+  SELECT coalesce(d.title, f.original_filename, 'untitled')
+         || ' | pp. ' || d.page_start || '-' || d.page_end
     FROM document d
+    JOIN source_file f ON f.id = d.source_file_id
     JOIN page p ON p.source_file_id = d.source_file_id
                 AND p.page_number BETWEEN d.page_start AND d.page_end
    WHERE d.superseded_at IS NULL
      AND p.text_tsv @@ websearch_to_tsquery('english', '$SEARCH_SQL')
-   GROUP BY d.id, d.title, d.page_start, d.page_end
+   GROUP BY d.id, d.title, f.original_filename, d.page_start, d.page_end
    LIMIT 10;
 " > /tmp/drill-hits.txt || true
 
 # Known forms are matched structurally rather than by OCR text, so a DD-214 can
 # be found even when the scan reads "DD FORM 214" and defeats the text query.
 docker exec "$CONTAINER" psql -U bindery -d bindery -At -c "
-  SELECT d.title || ' | pp. ' || d.page_start || '-' || d.page_end || ' | form ' || k.code
+  SELECT coalesce(d.title, 'untitled')
+         || ' | pp. ' || d.page_start || '-' || d.page_end || ' | form ' || k.code
     FROM document d JOIN known_form k ON k.id = d.known_form_id
    WHERE d.superseded_at IS NULL
      AND upper(replace(k.code,'-','')) LIKE upper(replace('%$SEARCH_SQL%','-',''))

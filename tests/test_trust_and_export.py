@@ -384,6 +384,11 @@ def test_the_restore_drill_fails_loudly_when_it_cannot_find_the_document() -> No
 
     assert "DRILL FAILED" in body
     assert "exit 1" in body
+    # An unclassified document has no title, and `NULL || text` is NULL in SQL,
+    # so without coalesce a real hit comes back as a blank line that reads as
+    # "not found". The drill did exactly that on its first run against a live
+    # archive — it reported failure while holding the document it was asked for.
+    assert "coalesce(d.title" in body
     # It must verify the blobs, not just that pg_restore returned zero.
     assert "MISSING BLOB" in body
     # It must never point at the live database.
