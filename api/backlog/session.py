@@ -21,6 +21,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import ingest
+from api.backlog.dryrun import analyse
+from api.backlog.walker import walk
 from api.db.enums import (
     ActorType,
     ImportItemState,
@@ -29,8 +31,6 @@ from api.db.enums import (
 )
 from api.db.models import Document, ImportItem, ImportSession
 from api.storage.blobs import CHUNK_SIZE, store_stream
-from worker.backlog.dryrun import analyse
-from worker.backlog.walker import walk
 
 log = logging.getLogger("bindery.import")
 

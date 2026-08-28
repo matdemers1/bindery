@@ -16,7 +16,7 @@ import os
 import signal
 import uuid
 
-from api import queue
+from api import health_panel, notify, queue, settings_store
 from api.config import get_settings
 from api.db.session import SessionFactory, engine
 from worker.ingest.watched_folder import watch_inbox
@@ -29,6 +29,10 @@ log = logging.getLogger("bindery.worker")
 
 IDLE_POLL_SECONDS = 2.0
 RECLAIM_INTERVAL_SECONDS = 60.0
+# Five minutes: a stall is defined as fifteen minutes of queued-but-idle, so
+# checking more often than this would only find the same stall sooner than it
+# is a stall.
+HEALTH_INTERVAL_SECONDS = 300.0
 SHUTDOWN_GRACE_SECONDS = 20.0
 
 
@@ -125,6 +129,45 @@ async def _reclaimer(stopping: asyncio.Event) -> None:
             await asyncio.wait_for(stopping.wait(), timeout=RECLAIM_INTERVAL_SECONDS)
 
 
+async def _health_monitor(stopping: asyncio.Event) -> None:
+    """Notice a stopped pipeline and say so out loud (REQ-110).
+
+    Runs in the worker rather than the api because the condition it watches for
+    is *the worker not working*, and a check that lives in the thing being
+    checked is not much of a check. It is still not perfect — a worker that dies
+    entirely takes this with it — which is why the api serves the same panel on
+    demand and the ZimaOS healthcheck restarts a dead container.
+    """
+    notifier: notify.Notifier | None = None
+    while not stopping.is_set():
+        try:
+            async with SessionFactory() as session:
+                panel = await health_panel.collect(session)
+                webhook = await settings_store.get(session, settings_store.NOTIFY_WEBHOOK_URL)
+
+            # Rebuilt when the webhook changes, so editing it in Settings takes
+            # effect without a restart; otherwise kept, because the cooldown
+            # state lives on it and a fresh notifier would notify every pass.
+            if notifier is None or notifier.webhook_url != (webhook or "").strip():
+                notifier = notify.Notifier(webhook)
+
+            for delivery in notifier.dispatch(panel.alerts):
+                if delivery.sent:
+                    log.warning("notified: %s", delivery.code)
+                elif delivery.reason not in ("within cooldown", "no webhook configured"):
+                    log.error("could not notify %s: %s", delivery.code, delivery.reason)
+
+            for alert in panel.alerts:
+                log.log(
+                    logging.ERROR if alert.severity == "critical" else logging.WARNING,
+                    "health: %s", alert.message,
+                )
+        except Exception:
+            log.exception("health pass failed")
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stopping.wait(), timeout=HEALTH_INTERVAL_SECONDS)
+
+
 def _report_unexpected_exit(task: asyncio.Task) -> None:
     if task.cancelled():
         return
@@ -158,6 +201,7 @@ async def main() -> None:
     ]
     tasks.append(asyncio.create_task(_reclaimer(stopping), name="reclaimer"))
     tasks.append(asyncio.create_task(watch_inbox(stopping), name="watched-folder"))
+    tasks.append(asyncio.create_task(_health_monitor(stopping), name="health-monitor"))
 
     # Last line of defence: if a task exits despite the guards above, say so
     # rather than letting the worker sit there looking healthy.

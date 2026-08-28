@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     bindery_model: str = "claude-opus-5"
     bindery_prompt_version: str = "v1"
     anthropic_api_key: str = ""
+    # A push endpoint (ntfy, Pushover, Gotify, a Slack hook). Empty means
+    # notifications are off, which is a supported configuration, not an error.
+    notify_webhook_url: str = ""
 
     @property
     def blob_root(self) -> Path:

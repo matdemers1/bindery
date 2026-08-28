@@ -26,6 +26,7 @@ from api.audit import record
 from api.db.enums import ActorType, ReviewState, Sensitivity, TagSource
 from api.db.models import AuditEvent, Document, DocumentTag, Tag, live_tag_links
 from api.segments import live
+from api.text import slugify
 
 
 class BulkError(ValueError):
@@ -49,7 +50,6 @@ class BulkResult:
 async def _resolve_tags(
     session: AsyncSession, names: list[str], library_id: uuid.UUID
 ) -> list[uuid.UUID]:
-    from worker.classify.resolve import slugify
 
     ids = []
     for name in names:

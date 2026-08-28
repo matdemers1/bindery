@@ -18,6 +18,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import ai_ask, ask, health_panel, settings_store
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -27,6 +28,8 @@ from api.db.scope import resolve
 from api.db.session import get_session
 from api.export import archive_export, backup, integrity, mirror
 from api.schemas import (
+    AskIn,
+    AskOut,
     AuditEventOut,
     AuditPageOut,
     BackupOut,
@@ -36,6 +39,7 @@ from api.schemas import (
     FileTreeNodeOut,
     FileTreeOut,
     GoBagIn,
+    HealthPanelOut,
     IntegrityOut,
     MirrorOut,
 )
@@ -440,3 +444,52 @@ async def browse_tree(
         nodes=folder_nodes
         + sorted(nodes, key=lambda n: (n.document_date or date.max, n.name)),
     )
+
+
+# --------------------------------------------------------------------------
+# Health panel (T-8.2, REQ-109)
+# --------------------------------------------------------------------------
+
+
+@router.get("/health/panel", response_model=HealthPanelOut)
+async def health_panel_view(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> HealthPanelOut:
+    """Queue depth, failures, stalls and spend.
+
+    Authenticated, unlike `/api/health`: queue contents and API spend are not
+    facts to hand an unauthenticated caller. The unauthenticated endpoint stays
+    a bare liveness probe for the container healthcheck.
+    """
+    await _visible(session, user)
+    panel = await health_panel.collect(session)
+    return HealthPanelOut(**panel.as_dict())
+
+
+# --------------------------------------------------------------------------
+# Ask (T-8.1, REQ-116)
+# --------------------------------------------------------------------------
+
+
+@router.post("/ask", response_model=AskOut)
+async def ask_the_archive(
+    body: AskIn,
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> AskOut:
+    """Answer a question from the archive, citing every claim to a page.
+
+    Retrieval is Postgres full-text search, so this endpoint still does
+    something useful with no API key and no network: it returns the pages that
+    mention the question. That is invariant 7 — retrieval never depends on the
+    Claude API — showing up as a product behaviour rather than a principle.
+    """
+    library_ids = await _visible(session, user)
+
+    key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
+    model = await settings_store.get(session, settings_store.BINDERY_MODEL) or "claude-opus-5"
+    answerer = ai_ask.ClaudeAnswerer(key or "", model=model) if key else None
+
+    result = await ask.ask(session, body.question.strip(), library_ids, answerer)
+    return AskOut(**result.as_dict())

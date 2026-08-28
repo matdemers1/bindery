@@ -233,6 +233,7 @@ EVERY_READ_PATH = [
     ("assets", "/api/assets"),
     ("rules", "/api/rules"),
     ("household libraries", "/api/household/libraries"),
+    ("health panel", "/api/health/panel"),
 ]
 
 

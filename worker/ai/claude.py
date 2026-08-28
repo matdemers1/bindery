@@ -253,3 +253,4 @@ class ClaudeProvider:
         if confirmation is None:
             raise AIProviderError("structured output was empty")
         return confirmation
+

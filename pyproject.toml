@@ -29,6 +29,9 @@ dependencies = [
     "pikepdf",
     # Encrypts secrets held in the settings table.
     "cryptography",
+    # The api needs it too: /api/settings/test-ai validates a key against the
+    # live API, and Q&A (REQ-116) is a synchronous request, not a worker stage.
+    "anthropic",
     # AES-256 ZIP for the go-bag export. Standard enough that 7-Zip and Keka
     # open it, which is the point: the recipient may not have Bindery.
     "pyzipper",
@@ -41,7 +44,6 @@ worker = [
     "pillow",
     # HEIC/HEIF from an iPhone camera roll (REQ-006).
     "pillow-heif",
-    "anthropic",
 ]
 dev = ["pytest", "pytest-asyncio", "httpx", "ruff", "mypy"]
 

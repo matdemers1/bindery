@@ -28,9 +28,14 @@ log = logging.getLogger("bindery.settings")
 ANTHROPIC_API_KEY = "anthropic_api_key"
 BINDERY_MODEL = "bindery_model"
 PROMPT_VERSION = "bindery_prompt_version"
+# Where a stalled pipeline goes to be noticed (REQ-110). Treated as a secret:
+# most push services put the credential in the URL itself.
+NOTIFY_WEBHOOK_URL = "notify_webhook_url"
 
-SECRET_KEYS = frozenset({ANTHROPIC_API_KEY})
-WRITABLE = frozenset({ANTHROPIC_API_KEY, BINDERY_MODEL, PROMPT_VERSION})
+SECRET_KEYS = frozenset({ANTHROPIC_API_KEY, NOTIFY_WEBHOOK_URL})
+WRITABLE = frozenset(
+    {ANTHROPIC_API_KEY, BINDERY_MODEL, PROMPT_VERSION, NOTIFY_WEBHOOK_URL}
+)
 
 
 def _cipher() -> Fernet:
@@ -64,6 +69,7 @@ async def get(session: AsyncSession, key: str) -> str | None:
         ANTHROPIC_API_KEY: environment.anthropic_api_key,
         BINDERY_MODEL: environment.bindery_model,
         PROMPT_VERSION: environment.bindery_prompt_version,
+        NOTIFY_WEBHOOK_URL: environment.notify_webhook_url,
     }.get(key) or None
 
 

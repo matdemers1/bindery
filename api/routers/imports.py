@@ -66,7 +66,7 @@ async def list_imports(
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list:
-    from worker.backlog.session import progress as progress_of
+    from api.backlog.session import progress as progress_of
 
     library_ids = await repository.visible_library_ids(session, user.id)
     if not library_ids:
@@ -88,8 +88,8 @@ async def start_import(
     session: AsyncSession = Depends(get_session),
 ) -> ImportSessionOut:
     """Scan a directory and produce a dry run. **Ingests nothing.**"""
-    from worker.backlog.session import progress as progress_of
-    from worker.backlog.session import scan
+    from api.backlog.session import progress as progress_of
+    from api.backlog.session import scan
 
     if not await repository.can_write_library(session, user.id, payload.library_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "no write access to that library")
@@ -124,7 +124,7 @@ async def get_import(
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ImportSessionOut:
-    from worker.backlog.session import progress as progress_of
+    from api.backlog.session import progress as progress_of
 
     import_session = await _owned(session, user, session_id)
     return _out(import_session, await progress_of(session, import_session))
@@ -164,8 +164,8 @@ async def sample(
     session: AsyncSession = Depends(get_session),
 ) -> ImportSessionOut:
     """Pick pass one's stratified sample (REQ-084)."""
-    from worker.backlog.session import progress as progress_of
-    from worker.backlog.session import select_sample
+    from api.backlog.session import progress as progress_of
+    from api.backlog.session import select_sample
 
     import_session = await _owned(session, user, session_id)
     await select_sample(session, import_session)
@@ -181,8 +181,8 @@ async def run(
     session: AsyncSession = Depends(get_session),
 ) -> ImportSessionOut:
     """Ingest the next slice. Idempotent — calling it again is the resume."""
-    from worker.backlog.session import ingest_batch, mark_backlog
-    from worker.backlog.session import progress as progress_of
+    from api.backlog.session import ingest_batch, mark_backlog
+    from api.backlog.session import progress as progress_of
 
     import_session = await _owned(session, user, session_id)
     if import_session.state is ImportState.PAUSED:
@@ -222,7 +222,7 @@ async def pause(
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ImportSessionOut:
-    from worker.backlog.session import progress as progress_of
+    from api.backlog.session import progress as progress_of
 
     import_session = await _owned(session, user, session_id)
     import_session.state = ImportState.PAUSED
@@ -241,7 +241,7 @@ async def curate(
     The highest-leverage human hour in the project: merging near-duplicate tags
     *before* the other several thousand documents are classified against them.
     """
-    from worker.backlog.session import progress as progress_of
+    from api.backlog.session import progress as progress_of
 
     import_session = await _owned(session, user, session_id)
     import_session.state = ImportState.CURATING

@@ -173,3 +173,4 @@ class AIProvider(Protocol):
         so the expensive one only sees the cases that need judgement.
         """
         ...
+

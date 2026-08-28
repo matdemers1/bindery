@@ -19,8 +19,8 @@ from pathlib import Path
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.backlog.walker import WalkResult, hash_file
 from api.db.models import SourceFile
-from worker.backlog.walker import WalkResult, hash_file
 
 log = logging.getLogger("bindery.import.dryrun")
 

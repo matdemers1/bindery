@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 
+from api.backlog.dryrun import estimate_cost
+from api.backlog.walker import walk
 from api.db.enums import ImportItemState, ImportState, IngestSource, SourceFileState
 from api.db.models import (
     AuditEvent,
@@ -25,8 +27,6 @@ from api.db.models import (
     ImportSession,
     SourceFile,
 )
-from worker.backlog.dryrun import estimate_cost
-from worker.backlog.walker import walk
 
 
 @pytest.fixture
@@ -122,7 +122,7 @@ def test_an_unreadable_directory_is_reported_not_fatal(tmp_path) -> None:
 
 async def test_the_dry_run_reports_counts_without_ingesting(session, import_session) -> None:
     """Nothing is processed until a human has seen this."""
-    from worker.backlog.session import scan
+    from api.backlog.session import scan
 
     _, record, _ = import_session
     await scan(session, record)
@@ -147,7 +147,7 @@ async def test_the_dry_run_reports_counts_without_ingesting(session, import_sess
 async def test_the_dry_run_notices_documents_already_in_the_archive(
     session, import_session
 ) -> None:
-    from worker.backlog.session import scan
+    from api.backlog.session import scan
 
     library, record, tree = import_session
     payload = (tree / "2019" / "bill.pdf").read_bytes()
@@ -178,7 +178,7 @@ def test_the_cost_estimate_halves_for_batch_and_flags_the_r06_alarm() -> None:
 
 
 async def test_rescanning_converges_rather_than_duplicating(session, import_session) -> None:
-    from worker.backlog.session import scan
+    from api.backlog.session import scan
 
     _, record, _ = import_session
     await scan(session, record)
@@ -195,7 +195,7 @@ async def test_rescanning_converges_rather_than_duplicating(session, import_sess
 
 
 async def test_an_interrupted_import_resumes_where_it_stopped(session, import_session) -> None:
-    from worker.backlog.session import ingest_batch, scan
+    from api.backlog.session import ingest_batch, scan
 
     _, record, _ = import_session
     await scan(session, record)
@@ -224,7 +224,7 @@ async def test_an_interrupted_import_resumes_where_it_stopped(session, import_se
 
 
 async def test_a_file_that_fails_does_not_stop_the_import(session, import_session) -> None:
-    from worker.backlog.session import ingest_batch, scan
+    from api.backlog.session import ingest_batch, scan
 
     _, record, tree = import_session
     await scan(session, record)
@@ -254,7 +254,7 @@ async def test_imported_documents_are_flagged_and_excluded_from_review(
     client, session, import_session
 ) -> None:
     """**The R-03 mitigation.** The whole risk is triage becoming the new mess."""
-    from worker.backlog.session import ingest_batch, mark_backlog, scan
+    from api.backlog.session import ingest_batch, mark_backlog, scan
 
     library, record, _ = import_session
     await scan(session, record)
@@ -303,7 +303,7 @@ async def test_imported_documents_are_flagged_and_excluded_from_review(
 
 async def test_the_sample_is_spread_across_directories(session, import_session) -> None:
     """A backlog is organised by something; one folder is not representative."""
-    from worker.backlog.session import scan, select_sample
+    from api.backlog.session import scan, select_sample
 
     _, record, _ = import_session
     await scan(session, record)
@@ -324,7 +324,7 @@ async def test_the_sample_is_spread_across_directories(session, import_session) 
 
 
 async def test_curation_sits_between_the_two_passes(client, session, import_session) -> None:
-    from worker.backlog.session import scan
+    from api.backlog.session import scan
 
     _, record, _ = import_session
     await scan(session, record)

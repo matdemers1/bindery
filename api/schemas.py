@@ -717,3 +717,61 @@ class MovePlanOut(BaseModel):
     cleared_types: list[str]
     cleared_tags: list[str]
     loses_metadata: bool
+
+
+# --------------------------------------------------------------------------
+# Phase 8 — health and Q&A
+# --------------------------------------------------------------------------
+
+
+class AlertOut(BaseModel):
+    severity: str
+    code: str
+    message: str
+    detail: dict
+
+
+class HealthPanelOut(BaseModel):
+    checked_at: datetime
+    healthy: bool
+    queue_depth: dict[str, int]
+    running: int
+    failed_24h: int
+    dead_letter: int
+    stuck_jobs: list[dict]
+    oldest_queued_seconds: float | None
+    stalled: bool
+    files_by_state: dict[str, int]
+    spend_30d_usd: float
+    spend_by_day: list[dict]
+    alerts: list[AlertOut]
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=3, max_length=500)
+
+
+class CitationOut(BaseModel):
+    document_id: uuid.UUID
+    source_file_id: uuid.UUID
+    title: str
+    page_number: int
+    quote: str
+
+
+class ConsultedOut(BaseModel):
+    document_id: uuid.UUID
+    source_file_id: uuid.UUID
+    title: str
+    page_number: int
+
+
+class AskOut(BaseModel):
+    question: str
+    # None whenever there is nothing honest to say — including when the model
+    # answered without citing anything (REQ-116).
+    answer: str | None
+    citations: list[CitationOut]
+    consulted: list[ConsultedOut]
+    unavailable_reason: str | None
+    model: str | None

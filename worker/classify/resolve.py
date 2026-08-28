@@ -15,8 +15,6 @@ resolve inside the document's library is dropped, not resolved leniently.
 """
 
 import logging
-import re
-import unicodedata
 import uuid
 from dataclasses import dataclass, field
 
@@ -32,14 +30,10 @@ from api.db.models import (
     Tag,
     live_tag_links,
 )
+from api.text import slugify
 from worker.ai.provider import ClassificationResult
 
 log = logging.getLogger("bindery.worker.classify")
-
-
-def slugify(name: str) -> str:
-    normalized = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
-    return re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-") or "untitled"
 
 
 @dataclass
