@@ -94,3 +94,23 @@ async def signed_in(client: AsyncClient, user_factory):
         return user, library
 
     return sign_in
+
+
+# ---------------------------------------------------------------------------
+# Module-scoped fixtures for the seeded performance suite. A 100K-page index is
+# far too expensive to build per test.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+async def session_module() -> AsyncIterator[AsyncSession]:
+    async with SessionFactory() as session:
+        yield session
+
+
+@pytest.fixture(scope="module")
+async def library_module(session_module: AsyncSession) -> Library:
+    library = Library(name="Performance Seed", kind=LibraryKind.PERSONAL)
+    session_module.add(library)
+    await session_module.commit()
+    return library

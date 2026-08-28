@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.db.enums import MembershipRole
-from api.db.models import Document, Library, Membership, SourceFile
+from api.db.models import Document, Job, Library, Membership, Page, SourceFile
 
 WRITE_ROLES = (MembershipRole.OWNER, MembershipRole.CONTRIBUTOR)
 
@@ -91,3 +91,68 @@ async def get_source_file_by_hash(
     """Hash lookup is global on purpose — the unique constraint is global."""
     result = await session.execute(sa.select(SourceFile).where(SourceFile.sha256 == sha256))
     return result.scalar_one_or_none()
+
+
+async def get_source_file(
+    session: AsyncSession, user_id: uuid.UUID, source_file_id: uuid.UUID
+) -> SourceFile | None:
+    """A source file, or None if it does not exist *or* is not the caller's.
+
+    Deliberately one answer for both cases: whether a document exists in a
+    library you cannot see is itself information.
+    """
+    library_ids = await visible_library_ids(session, user_id)
+    if not library_ids:
+        return None
+    result = await session.execute(
+        sa.select(SourceFile).where(
+            SourceFile.id == source_file_id, SourceFile.library_id.in_(library_ids)
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_page(
+    session: AsyncSession, user_id: uuid.UUID, source_file_id: uuid.UUID, page_number: int
+) -> Page | None:
+    library_ids = await visible_library_ids(session, user_id)
+    if not library_ids:
+        return None
+    result = await session.execute(
+        sa.select(Page)
+        .join(SourceFile, SourceFile.id == Page.source_file_id)
+        .where(
+            Page.source_file_id == source_file_id,
+            Page.page_number == page_number,
+            SourceFile.library_id.in_(library_ids),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_pages(
+    session: AsyncSession, user_id: uuid.UUID, source_file_id: uuid.UUID
+) -> Sequence[Page]:
+    library_ids = await visible_library_ids(session, user_id)
+    if not library_ids:
+        return []
+    result = await session.execute(
+        sa.select(Page)
+        .join(SourceFile, SourceFile.id == Page.source_file_id)
+        .where(Page.source_file_id == source_file_id, SourceFile.library_id.in_(library_ids))
+        .order_by(Page.page_number)
+    )
+    return result.scalars().all()
+
+
+def visible_jobs(library_ids: list[uuid.UUID]):
+    """A jobs query already narrowed to the caller's libraries.
+
+    Jobs reach a library through their source file; one left join, and a job
+    with no source file (none exist yet) is excluded rather than leaked.
+    """
+    return (
+        sa.select(Job)
+        .join(SourceFile, SourceFile.id == Job.source_file_id)
+        .where(SourceFile.library_id.in_(library_ids))
+    )

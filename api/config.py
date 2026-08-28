@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     inbox_root: Path = Path("/data/inbox")
 
     worker_concurrency: int = 3
+    ocr_languages: str = "eng"
+    ocr_deskew: bool = True
+    ocr_clean: bool = True
 
     bindery_model: str = "claude-opus-5"
     bindery_prompt_version: str = "v1"

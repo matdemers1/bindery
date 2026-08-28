@@ -90,5 +90,22 @@ services:
       postgres:
         condition: service_healthy
 
+  # Pipeline and golden-corpus suites. Needs the OCR toolchain, so it is built
+  # from the worker image rather than the api one.
+  #   docker compose --profile test run --rm test-worker
+  test-worker:
+    profiles: [test]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+      target: dev
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}_test
+      DATA_ROOT: /tmp/bindery-test-data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:

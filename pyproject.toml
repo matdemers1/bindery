@@ -31,7 +31,8 @@ worker = [
     "pikepdf",
     "pypdf",
     "pillow",
-    "watchfiles",
+    # HEIC/HEIF from an iPhone camera roll (REQ-006).
+    "pillow-heif",
     "anthropic",
 ]
 dev = ["pytest", "pytest-asyncio", "httpx", "ruff", "mypy"]
@@ -60,5 +61,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
-markers = ["live_api: hits the real Claude API; excluded from the default run"]
-addopts = "-m 'not live_api'"
+markers = [
+    "live_api: hits the real Claude API; excluded from the default run",
+    "slow: seeds a large index or runs OCR; excluded from the default run",
+]
+addopts = "-m 'not live_api and not slow'"

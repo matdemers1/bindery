@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: up down build logs ps migrate revision test shell psql create-user tunnel
+.PHONY: up down build logs ps migrate revision test test-pipeline ocr-report shell psql create-user tunnel
 
 build:            ## build all images
 	$(COMPOSE) build
@@ -31,6 +31,13 @@ revision:         ## make a new migration: make revision m="add foo"
 
 test:             ## full suite against a throwaway database
 	$(COMPOSE) --profile test run --rm test
+
+test-pipeline:    ## OCR / pipeline / golden-corpus suites (needs the OCR toolchain)
+	$(COMPOSE) --profile test run --rm test-worker
+
+ocr-report:       ## score OCR word accuracy on the golden corpus (REQ-018, the R-01 gate)
+	$(COMPOSE) --profile test run --rm test-worker \
+	  python -m pytest tests/test_ocr_accuracy.py -m slow -s
 
 shell:
 	$(COMPOSE) exec api bash
