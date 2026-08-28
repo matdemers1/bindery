@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api, type PipelineStatus } from "../../api";
+import PendingReviewPanel from "../../components/PendingReview";
 
 // "Nothing fails silently" is an invariant, so this screen is the place a failed
 // document is guaranteed to surface — and the place it can be retried.
@@ -29,18 +30,25 @@ export default function PipelinePage() {
   }
 
   if (!status) {
-    return <div className="mx-auto max-w-4xl px-6 py-16 text-center text-muted">Loading…</div>;
+    return <div className="mx-auto max-w-4xl py-8 text-center text-muted">Loading…</div>;
   }
 
   const quiet =
     status.counts.length === 0 && status.attention.length === 0 && status.in_flight.length === 0;
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8">
+    <div className="mx-auto max-w-4xl">
       <h1 className="text-xl font-semibold tracking-tight">Pipeline</h1>
       <p className="mt-1 mb-6 text-sm text-muted">
         Every job in the archive, and every one that needs a human.
       </p>
+
+      {/* Above the job list on purpose. "Nothing in flight" is true and was
+          also, until now, the only thing this screen said while documents sat
+          permanently unclassified. */}
+      <div className="mb-6">
+        <PendingReviewPanel />
+      </div>
 
       {quiet ? (
         <p className="rounded-lg border border-edge p-8 text-center text-sm text-muted">

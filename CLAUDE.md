@@ -251,6 +251,33 @@ to another — so this phase is defended by tests, not by inspection.
   one term matching a fifth of the archive — is reported at ~650–800 ms and
   deliberately not gated, at both the search and ask layers.
 
+## Two UI rules worth keeping
+
+- **Page padding lives in `Shell`'s `<main>`, once.** Screens choose their own
+  `mx-auto max-w-*` because a table wants more room than prose, but they do not
+  repeat the gutter. Every screen used to, and the four added last simply
+  forgot — which is how Trust ended up flush against the window edge.
+- **`repository.visible_jobs` reaches a job by *either* key.** It joined only
+  through `source_file`, which was true of every job when it was written and
+  stopped being true when classify began enqueueing by `document_id`. The
+  effect was that every classification failure was invisible on the one screen
+  whose stated purpose is that nothing fails silently.
+
+## Re-running AI review
+
+`api/reclassify.py`. The archive is deliberately useful with no API key, so
+adding documents first and a key later is the *normal* path, not a recovery
+path — and it needs to be reachable without a shell on the host.
+
+The two situations are reported separately and must stay that way: **"never
+attempted"** (arrived before a key existed — not a failure) and **"gave up"**
+(attempted, dead-lettered). Calling the first a failure is alarming and wrong.
+
+"Waiting" means `review_state == PENDING_CLASSIFICATION`, never merely "has no
+classification row" — a document filed by a rule or by hand has no
+classification and is finished, and offering to run AI over it is offering to
+overwrite a person's work.
+
 ## Deployment
 
 `docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) runs lint and the

@@ -381,9 +381,23 @@ export interface DuplicatePair {
   similarity: number;
 }
 
+export interface PendingReason {
+  code: "never_attempted" | "provider_unavailable" | "failed";
+  label: string;
+  detail: string;
+  count: number;
+  document_ids: string[];
+}
+
+export interface PendingReview {
+  total: number;
+  reasons: PendingReason[];
+}
+
 export interface Job {
   id: string;
   source_file_id: string | null;
+  document_id: string | null;
   stage: string;
   state: string;
   attempts: number;
@@ -588,6 +602,15 @@ export const api = {
       method: "POST",
     }),
   retryJob: (id: string) => request<Job>(`/pipeline/jobs/${id}/retry`, { method: "POST" }),
+
+  /** What is waiting for AI review, and why it is waiting. */
+  pendingReview: () => request<PendingReview>("/pipeline/reclassify/pending"),
+  reclassify: (body: { document_ids?: string[]; all_pending?: boolean; reasons?: string[] }) =>
+    request<{ queued: number; requested: number }>("/pipeline/reclassify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 
 
   // --- Phase 6 -----------------------------------------------------------

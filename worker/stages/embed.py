@@ -56,7 +56,15 @@ async def run_embed(session: AsyncSession, job: ClaimedJob) -> None:
     provider = get_embedding_provider()
     for document in documents:
         document.embedding = provider.embed(await _document_text(session, document))
-        await queue.enqueue(session, JobStage.CLASSIFY, document_id=document.id)
+        # Both keys: the document is what gets classified, but carrying the
+        # file as well is what lets every "show me this library's jobs" query
+        # reach it by the obvious route.
+        await queue.enqueue(
+            session,
+            JobStage.CLASSIFY,
+            document_id=document.id,
+            source_file_id=document.source_file_id,
+        )
     await session.flush()
 
     log.info("embedded %s document(s) with %s", len(documents), provider.name)

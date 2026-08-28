@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import PendingReviewPanel from "../../components/PendingReview";
 import { ApiError, api, type ApiTokenRecord, type IssuedApiToken, type Settings, type SettingsTest } from "../../api";
 
 /**
@@ -41,11 +42,11 @@ export default function SettingsPage() {
   }
 
   if (!settings) {
-    return <div className="mx-auto max-w-3xl px-6 py-16 text-center text-muted">Loading…</div>;
+    return <div className="mx-auto max-w-3xl py-8 text-center text-muted">Loading…</div>;
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
+    <div className="mx-auto max-w-3xl">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
       <p className="mt-1 mb-6 text-sm text-muted">Configuration you can change without a restart.</p>
 
@@ -161,6 +162,13 @@ export default function SettingsPage() {
           classified them.
         </p>
       </section>
+
+      {/* Directly under the key field: finishing that form is exactly the
+          moment someone wants to be asked about the documents that arrived
+          before it was filled in. */}
+      <div className="mt-6">
+        <PendingReviewPanel key={String(settings.anthropic_key_configured)} />
+      </div>
 
       <NotificationSettings settings={settings} onSaved={load} />
       <ApiTokens />

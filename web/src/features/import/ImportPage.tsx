@@ -62,7 +62,7 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
   const total = Object.values(active?.progress ?? {}).reduce((a, b) => a + b, 0);
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <div className="mx-auto max-w-5xl">
       <h1 className="text-xl font-semibold tracking-tight">Import a backlog</h1>
       <p className="mt-1 mb-6 text-sm text-muted">
         Point this at a directory the <span className="font-mono text-xs">worker</span>{" "}

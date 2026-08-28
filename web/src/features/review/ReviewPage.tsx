@@ -88,12 +88,12 @@ export default function ReviewPage() {
   );
 
   if (!loaded) {
-    return <div className="mx-auto max-w-4xl px-6 py-16 text-center text-muted">Loading…</div>;
+    return <div className="mx-auto max-w-4xl py-8 text-center text-muted">Loading…</div>;
   }
 
   if (!current) {
     return (
-      <div className="mx-auto max-w-2xl px-6 py-20 text-center">
+      <div className="mx-auto max-w-2xl py-12 text-center">
         <p className="text-lg">Nothing waiting.</p>
         <p className="mt-2 text-sm text-muted">Everything filed itself.</p>
       </div>
@@ -101,7 +101,7 @@ export default function ReviewPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-6">
+    <div className="mx-auto max-w-7xl">
       <header className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h1 className="text-lg font-medium">Review</h1>

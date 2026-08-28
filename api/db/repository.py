@@ -165,11 +165,25 @@ async def list_pages(
 def visible_jobs(library_ids: list[uuid.UUID]):
     """A jobs query already narrowed to the caller's libraries.
 
-    Jobs reach a library through their source file; one left join, and a job
-    with no source file (none exist yet) is excluded rather than leaked.
+    A job reaches a library through **either** key. This used to join only
+    through `source_file`, on the reasoning that every job had one — which was
+    true when it was written and stopped being true the moment the classify
+    stage began enqueueing by `document_id` alone.
+
+    The consequence was not a leak but the opposite, and worse for it: every
+    classification failure became invisible on the pipeline screen and could
+    not be retried, so a document that failed AI review simply sat there with
+    nothing to show it had. Outer joins, so a job is reachable by whichever
+    key it carries, and one with neither is still excluded rather than leaked.
     """
     return (
         sa.select(Job)
-        .join(SourceFile, SourceFile.id == Job.source_file_id)
-        .where(SourceFile.library_id.in_(library_ids))
+        .outerjoin(SourceFile, SourceFile.id == Job.source_file_id)
+        .outerjoin(Document, Document.id == Job.document_id)
+        .where(
+            sa.or_(
+                SourceFile.library_id.in_(library_ids),
+                Document.library_id.in_(library_ids),
+            )
+        )
     )

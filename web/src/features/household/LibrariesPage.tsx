@@ -50,7 +50,7 @@ export default function LibrariesPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto max-w-4xl space-y-5">
       <header className="space-y-1">
         <h1 className="text-lg font-semibold">Libraries</h1>
         <p className="max-w-3xl text-sm text-muted">

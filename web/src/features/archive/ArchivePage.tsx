@@ -79,7 +79,7 @@ export default function ArchivePage() {
     filters.document_type.length;
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-6">
+    <div className="mx-auto max-w-7xl">
       <header className="mb-5">
         <h1 className="text-xl font-semibold tracking-tight">Archive</h1>
         {stats && (
@@ -94,7 +94,17 @@ export default function ArchivePage() {
                 </Link>
               </>
             )}
-            {stats.unclassified > 0 && ` · ${stats.unclassified} not yet classified`}
+            {stats.unclassified > 0 && (
+              <>
+                {" · "}
+                {/* A link now that there is somewhere for it to go. It was a
+                    dead end next to a live one, which reads as "nothing you
+                    can do about this". */}
+                <Link to="/pipeline" className="text-accent underline underline-offset-2">
+                  {stats.unclassified} not yet classified
+                </Link>
+              </>
+            )}
           </p>
         )}
       </header>

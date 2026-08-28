@@ -105,10 +105,10 @@ export default function ViewerPage({ mode }: { mode: "document" | "file" }) {
   }, [go, localPage]);
 
   if (error) {
-    return <div className="mx-auto max-w-2xl px-6 py-20 text-center text-muted">{error}</div>;
+    return <div className="mx-auto max-w-2xl py-12 text-center text-muted">{error}</div>;
   }
   if (!detail) {
-    return <div className="mx-auto max-w-2xl px-6 py-20 text-center text-muted">Loading…</div>;
+    return <div className="mx-auto max-w-2xl py-12 text-center text-muted">Loading…</div>;
   }
 
   const isSegment = mode === "document" && pageCount < filePageCount;
@@ -116,7 +116,7 @@ export default function ViewerPage({ mode }: { mode: "document" | "file" }) {
     document_?.document.title ?? detail.source_file.original_filename ?? "(no filename)";
 
   return (
-    <div className="mx-auto flex max-w-7xl gap-6 px-6 py-6">
+    <div className="mx-auto flex max-w-7xl gap-6">
       <ThumbnailStrip
         fileId={fileId}
         pages={

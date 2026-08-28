@@ -31,7 +31,7 @@ export default function OrganisePage({ libraries }: { libraries: { id: string }[
   const tab = params.get("tab") ?? "correspondents";
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <div className="mx-auto max-w-5xl">
       <h1 className="text-xl font-semibold tracking-tight">Organise</h1>
       <p className="mt-1 mb-5 text-sm text-muted">
         The vocabulary the archive files things under. Near-duplicates here are

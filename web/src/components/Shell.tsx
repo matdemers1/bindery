@@ -157,7 +157,15 @@ export default function Shell({
         )}
       </header>
 
-      <main id="content" tabIndex={-1}>
+      {/*
+        Page padding lives here, once. Every screen used to repeat
+        `px-6 py-8` in its own root div, and the four screens added last simply
+        forgot — which is how Trust ended up flush against the window edge with
+        its cards bleeding off the right. Screens still choose their own
+        `max-w-*`, because a table wants more room than prose, but they can no
+        longer forget the gutter.
+      */}
+      <main id="content" tabIndex={-1} className="px-6 py-8">
         {children}
       </main>
     </div>

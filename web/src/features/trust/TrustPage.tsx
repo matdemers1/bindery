@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
 
 import {
   ApiError,
@@ -29,7 +30,7 @@ export default function TrustPage() {
   const [tab, setTab] = useState<"health" | "resilience" | "audit">("health");
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto max-w-5xl space-y-4">
       <header className="space-y-1">
         <h1 className="text-lg font-semibold">Trust</h1>
         <p className="text-sm text-muted">
@@ -527,6 +528,17 @@ function HealthPanelView() {
               }
             >
               {alert.message}
+              {/* An alert with nothing to do about it trains people to
+                  ignore alerts. Documents that gave up are re-runnable, and
+                  the place to do it is one click away. */}
+              {(alert.code === "dead_letter" || alert.code === "recent_failures") && (
+                <Link
+                  to="/pipeline"
+                  className="ml-2 underline underline-offset-2"
+                >
+                  Review and re-run them
+                </Link>
+              )}
             </li>
           ))}
         </ul>

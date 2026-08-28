@@ -265,6 +265,9 @@ class JobOut(BaseModel):
 
     id: uuid.UUID
     source_file_id: uuid.UUID | None
+    # A classify job carries only this, and without it a failed classification
+    # on the pipeline screen is a row you cannot click through to.
+    document_id: uuid.UUID | None
     stage: str
     state: str
     attempts: int
@@ -806,3 +809,30 @@ class ApiTokenIssuedOut(ApiTokenOut):
     # The only time this value exists outside the caller's hands. It is not
     # stored, cannot be recovered, and never appears in an audit event.
     secret: str
+
+
+class PendingReasonOut(BaseModel):
+    code: str
+    label: str
+    detail: str
+    count: int
+    document_ids: list[uuid.UUID]
+
+
+class PendingReviewOut(BaseModel):
+    total: int
+    reasons: list[PendingReasonOut]
+
+
+class ReclassifyIn(BaseModel):
+    document_ids: list[uuid.UUID] = []
+    # "Everything waiting", optionally narrowed to particular reasons — so
+    # "retry the ones that failed" and "review the ones that never ran" are
+    # separate decisions rather than one blunt button.
+    all_pending: bool = False
+    reasons: list[str] = []
+
+
+class ReclassifyResultOut(BaseModel):
+    queued: int
+    requested: int

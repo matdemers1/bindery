@@ -55,7 +55,7 @@ export default function RulesPage({ libraries }: { libraries: Library[] }) {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8">
+    <div className="mx-auto max-w-4xl">
       <h1 className="text-xl font-semibold tracking-tight">Rules</h1>
       <p className="mt-1 mb-6 text-sm text-muted">
         Deterministic overrides. A rule you wrote outranks the classifier, and its

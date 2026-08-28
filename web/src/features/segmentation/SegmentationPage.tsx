@@ -128,14 +128,14 @@ export default function SegmentationPage() {
   }
 
   if (error) {
-    return <div className="mx-auto max-w-2xl px-6 py-20 text-center text-muted">{error}</div>;
+    return <div className="mx-auto max-w-2xl py-12 text-center text-muted">{error}</div>;
   }
   if (!detail || !saved) {
-    return <div className="mx-auto max-w-2xl px-6 py-20 text-center text-muted">Loading…</div>;
+    return <div className="mx-auto max-w-2xl py-12 text-center text-muted">Loading…</div>;
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-6">
+    <div className="mx-auto max-w-6xl">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <div className="min-w-0">
           <h1 className="truncate text-lg font-medium">

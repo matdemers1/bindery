@@ -77,7 +77,7 @@ export default function SearchPage({
     libraries.find((library) => library.id === id)?.name ?? "Unknown library";
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <div className="mx-auto max-w-5xl">
       <form
         onSubmit={(event) => {
           event.preventDefault();

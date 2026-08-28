@@ -63,7 +63,7 @@ export default function FilesPage() {
   const segments = path ? path.split("/") : [];
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto max-w-5xl space-y-4">
       <header className="space-y-1">
         <h1 className="text-lg font-semibold">Files</h1>
         <p className="text-sm text-muted">
