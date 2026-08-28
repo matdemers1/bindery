@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.audit import record
-from api.db.enums import ActorType, ReviewState
+from api.db.enums import ActorType, IngestSource, ReviewState
 from api.db.models import Document, Page, SourceFile
 
 
@@ -144,6 +144,19 @@ async def replace(
         )
         await session.flush()
 
+    # Inherited from the file, not stamped on afterwards.
+    #
+    # `mark_backlog` used to do this from the import endpoint, immediately
+    # after ingest — before normalize, paging and segmentation had run, so
+    # there were no documents yet to mark. It flagged whatever happened to
+    # exist from an earlier slice: 15 of 396 in a real import, and the other
+    # 381 landed in the daily review queue, which is exactly the pile the
+    # backlog flag exists to prevent (R-03).
+    #
+    # How a file arrived is known at ingest and never changes, so the document
+    # can simply take it from the file at the moment it is created.
+    from_backlog = source_file.ingest_source == IngestSource.BULK_IMPORT
+
     created = [
         Document(
             library_id=source_file.library_id,
@@ -152,6 +165,7 @@ async def replace(
             page_end=spec.page_end,
             title=spec.title,
             review_state=ReviewState.PENDING_CLASSIFICATION,
+            is_backlog=from_backlog,
         )
         for spec in sorted(specs, key=lambda spec: spec.page_start)
     ]

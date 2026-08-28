@@ -272,3 +272,59 @@ def test_the_digital_text_threshold_ignores_stray_ocr_junk() -> None:
     from worker.stages.normalize import DIGITAL_TEXT_THRESHOLD
 
     assert DIGITAL_TEXT_THRESHOLD >= 100
+
+
+# --------------------------------------------------------------------------
+# Failures from a real 500-file import
+# --------------------------------------------------------------------------
+
+
+def test_glyph_codes_do_not_destroy_the_whole_document() -> None:
+    """A PDF with a broken font encoding cost five real documents.
+
+    `pdftotext` emits raw glyph codes for fonts it cannot map to Unicode, and
+    writes those control bytes into the XML unescaped. ElementTree then rejects
+    the *entire* tree — so one unreadable word on page nine loses pages one
+    through eight too.
+    """
+    from worker.ocr.word_boxes import parse_bbox_xhtml
+
+    document = (
+        b'<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        b'<doc><page width="612" height="792">'
+        b'<flow><block><line>'
+        b'<word xMin="1" yMin="2" xMax="3" yMax="4">Readable</word>'
+        # Exactly what a custom-encoded font produces.
+        b'<word xMin="5" yMin="6" xMax="7" yMax="8">\x01\x02\x03\x04</word>'
+        b'</line></block></flow>'
+        b"</page></doc></body></html>"
+    )
+
+    parsed = parse_bbox_xhtml(document)
+    words = [w["t"] for p in parsed["pages"] for line in p["lines"] for w in line["words"]]
+    assert "Readable" in words, "the legible words must survive an illegible neighbour"
+
+
+def test_tabs_and_newlines_are_still_legal() -> None:
+    """Sanitizing must not eat the whitespace XML genuinely permits."""
+    from worker.ocr.word_boxes import parse_bbox_xhtml
+
+    document = (
+        b'<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body>\n\t'
+        b'<doc><page width="612" height="792"><flow><block><line>'
+        b'<word xMin="1" yMin="2" xMax="3" yMax="4">Kept</word>'
+        b"</line></block></flow></page></doc></body></html>"
+    )
+    parsed = parse_bbox_xhtml(document)
+    assert parsed["pages"][0]["lines"][0]["words"][0]["t"] == "Kept"
+
+
+def test_ghostscript_giving_up_counts_as_a_pdfa_failure() -> None:
+    """Reported as exit 7 with none of the colour-space wording, so the
+    earlier signatures missed it and two real forms dead-lettered."""
+    from worker.stages.normalize import _is_pdfa_failure
+    from worker.subprocess_util import CommandError
+
+    assert _is_pdfa_failure(
+        CommandError(["ocrmypdf"], 7, "SubprocessOutputError: Ghostscript PDF/A rendering failed")
+    )

@@ -31,9 +31,27 @@ def _attr_float(element: ElementTree.Element, name: str) -> float:
     return round(float(element.get(name, 0.0)), 2)
 
 
+# Bytes that are legal in a PDF's text but illegal in XML. A PDF with a custom
+# or broken font encoding makes `pdftotext` emit raw glyph codes — \x01\x02\x03
+# where letters should be — and it writes them into the XML unescaped.
+_XML_ILLEGAL = bytes(b for b in range(0x20) if b not in (0x09, 0x0A, 0x0D))
+_XML_SANITIZE = bytes.maketrans(_XML_ILLEGAL, b" " * len(_XML_ILLEGAL))
+
+
 def parse_bbox_xhtml(document: bytes) -> dict[str, Any]:
-    """Turn `pdftotext -bbox-layout` output into the ocr.json structure."""
-    root = ElementTree.fromstring(document)
+    """Turn `pdftotext -bbox-layout` output into the ocr.json structure.
+
+    The output is sanitized first because a single unrepresentable glyph would
+    otherwise cost the whole document: ElementTree rejects the entire tree on
+    one illegal byte, so a bad font on page nine loses pages one through eight
+    as well. Five real documents — an offer letter, month-end financials, a loan
+    statement — failed exactly this way.
+
+    Replacing rather than dropping keeps the word count and the bounding boxes
+    honest: the position of the unreadable text is still true even when the
+    text itself is not recoverable.
+    """
+    root = ElementTree.fromstring(document.translate(_XML_SANITIZE))
     pages: list[dict[str, Any]] = []
 
     for index, page in enumerate(root.iter(f"{XHTML}page"), start=1):

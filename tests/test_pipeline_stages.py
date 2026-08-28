@@ -527,3 +527,74 @@ def test_deskew_and_clean_are_scanner_corrections_only() -> None:
     assert "--deskew" not in generated and "--clean" not in generated
     # Nothing else changes: this is one decision, not a different operation.
     assert [a for a in scanned if a not in {"--deskew", "--clean"}] == generated
+
+
+async def test_a_screenshot_with_transparency_is_readable(session, tmp_path) -> None:
+    """126 files in one import failed on this, almost all PNG screenshots.
+
+    ocrmypdf refuses an alpha channel outright. Compositing onto white is the
+    fix rather than discarding the channel, because dropping alpha turns
+    transparent pixels black — which on a screenshot with a transparent
+    background buries the text under a solid block.
+    """
+    from PIL import Image
+
+    from worker.stages import normalize
+
+    opaque = render_text_page("Meridian Credit Union", tmp_path / "flat.png")
+    with Image.open(opaque) as base:
+        transparent = base.convert("RGBA")
+        # Genuinely transparent background, dark text — the screenshot case.
+        pixels = transparent.load()
+        for x in range(0, transparent.width, 7):
+            for y in range(0, transparent.height, 7):
+                if pixels[x, y][:3] > (200, 200, 200):
+                    pixels[x, y] = (255, 255, 255, 0)
+        transparent.save(tmp_path / "shot.png", "PNG")
+    payload = (tmp_path / "shot.png").read_bytes()
+
+    library = Library(name="Alpha", kind=LibraryKind.PERSONAL)
+    session.add(library)
+    await session.flush()
+    source_file = SourceFile(
+        library_id=library.id, sha256=uuid.uuid4().hex * 2, byte_size=len(payload),
+        original_filename="shot.png", ingest_source=IngestSource.WEB_UPLOAD,
+        state=SourceFileState.RECEIVED,
+    )
+    session.add(source_file)
+    await session.flush()
+    blob = blob_path(source_file.sha256)
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(payload)
+
+    await normalize.run_normalize(
+        session,
+        ClaimedJob(
+            id=uuid.uuid4(), stage=JobStage.NORMALIZE, source_file_id=source_file.id,
+            document_id=None, prompt_version=None, attempts=0,
+        ),
+    )
+    await session.commit()
+
+    boxes = json.loads(derived_for(source_file.sha256).word_boxes.read_text())
+    text = " ".join(
+        w["t"] for p in boxes["pages"] for line in p["lines"] for w in line["words"]
+    )
+    assert "Meridian" in text, "the text survived flattening and was read"
+    # The original is untouched: still the PNG, still with its alpha channel.
+    assert blob.read_bytes() == payload
+
+
+async def test_an_ordinary_jpeg_is_not_re_encoded(session, tmp_path) -> None:
+    """Only images that need changing get changed.
+
+    Re-encoding a clean scan before OCR would throw away detail for nothing.
+    """
+    from worker.stages.normalize import _prepare_image
+
+    path = render_text_page("Meridian Credit Union", tmp_path / "clean.png")
+    source_file = SourceFile(
+        library_id=uuid.uuid4(), sha256="x" * 64, byte_size=1,
+        original_filename="clean.png", ingest_source=IngestSource.WEB_UPLOAD,
+    )
+    assert _prepare_image(source_file, path) is None, "nothing to fix, so pass it through"

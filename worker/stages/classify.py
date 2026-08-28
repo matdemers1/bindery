@@ -114,6 +114,7 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
         known_form_match=known_form is not None,
         rule_fired=False,  # rules run in their own stage, after this one
         neighbour_similarity=candidate_set.best_similarity,
+        is_backlog=document.is_backlog,
     )
     verdict = gate_module.decide(signals)
 

@@ -19,7 +19,7 @@ information, not authority.
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -39,6 +39,21 @@ STRONG = 1.0
 MODERATE = 0.5
 THRESHOLD = 2.0
 
+# A backlog document is judged against a lower bar (REQ-085, the R-03
+# mitigation). One strong signal is enough.
+#
+# The asymmetry is deliberate and is about what the alternative actually is. A
+# document arriving today is one you can glance at now, so holding it costs a
+# few seconds. A document from a twenty-year backlog was already unfindable —
+# it sat in a folder tree nobody could search — so filing it with a title that
+# might need correcting is strictly better than the drawer it came from, and
+# holding it just rebuilds the same pile somewhere new.
+#
+# The number that matters is not this threshold but the size of the queue: a
+# review queue of three hundred is a queue nobody works through, which means
+# the review step stops happening at all.
+BACKLOG_THRESHOLD = 1.0
+
 # A neighbour this close is structurally the same kind of document as one that
 # was already filed correctly.
 SIMILARITY_THRESHOLD = 0.60
@@ -57,6 +72,8 @@ class GateInputs:
 
     known_form_match: bool = False
     rule_fired: bool = False
+    # Came in through the backlog importer rather than day-to-day.
+    is_backlog: bool = False
     all_tags_existing: bool = False
     correspondent_existing: bool = False
     document_type_existing: bool = False
@@ -70,20 +87,15 @@ class GateInputs:
     model_confidence: dict[str, float] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
-        return {
-            "known_form_match": self.known_form_match,
-            "rule_fired": self.rule_fired,
-            "all_tags_existing": self.all_tags_existing,
-            "correspondent_existing": self.correspondent_existing,
-            "document_type_existing": self.document_type_existing,
-            "date_is_labelled": self.date_is_labelled,
-            "has_date": self.has_date,
-            "neighbour_similarity": self.neighbour_similarity,
-            "tag_count": self.tag_count,
-            "invented_count": self.invented_count,
-            "rejected_id_count": self.rejected_id_count,
-            "model_confidence": self.model_confidence,
-        }
+        """Every field, derived from the dataclass rather than listed by hand.
+
+        This was a hand-written dict, and adding `is_backlog` to the gate did
+        not add it here — so the signal that decided a document was missing
+        from the record of why. Replaying that decision would have quietly
+        produced a different answer, which is precisely what REQ-057 exists to
+        prevent. Deriving it means a new signal cannot be forgotten.
+        """
+        return asdict(self)
 
     @classmethod
     def from_json(cls, payload: dict[str, Any]) -> "GateInputs":
@@ -160,10 +172,12 @@ def collect(
     known_form_match: bool,
     rule_fired: bool,
     neighbour_similarity: float | None,
+    is_backlog: bool = False,
 ) -> GateInputs:
     return GateInputs(
         known_form_match=known_form_match,
         rule_fired=rule_fired,
+        is_backlog=is_backlog,
         all_tags_existing=resolution.all_tags_existing and bool(resolution.tag_ids),
         correspondent_existing=resolution.correspondent_was_existing,
         document_type_existing=resolution.document_type_was_existing,
@@ -217,8 +231,15 @@ def decide(inputs: GateInputs) -> GateResult:
             f"{inputs.rejected_id_count} returned id(s) do not exist in this library"
         ]
 
-    decision = GateDecision.FILED if score >= THRESHOLD else GateDecision.NEEDS_REVIEW
-    if decision is GateDecision.NEEDS_REVIEW and not reasons:
+    threshold = BACKLOG_THRESHOLD if inputs.is_backlog else THRESHOLD
+    if inputs.is_backlog:
+        reasons.append(
+            "from the backlog import, so judged against a lower bar than a "
+            "document arriving today"
+        )
+
+    decision = GateDecision.FILED if score >= threshold else GateDecision.NEEDS_REVIEW
+    if decision is GateDecision.NEEDS_REVIEW and score == 0.0:
         reasons.append("no structural signal was strong enough to file unattended")
     return GateResult(decision=decision, score=score, reasons=reasons)
 

@@ -61,6 +61,9 @@ PDFA_FAILURE_SIGNATURES = (
     "ColorConversionStrategy",
     "DeviceN",
     "not permitted in PDF/A",
+    # Ghostscript giving up on the PDF/A rendering entirely, which it reports
+    # as exit 7 rather than 10 and with none of the wording above.
+    "PDF/A rendering failed",
 )
 
 
@@ -192,6 +195,63 @@ def _is_heif(source_file: SourceFile, original: Path) -> bool:
     return Path(source_file.original_filename or "").suffix.lower() in HEIF_SUFFIXES
 
 
+
+def _prepare_image(source_file: SourceFile, original: Path):
+    """Return an image ocrmypdf will accept, or None if it already would.
+
+    Two things it will not accept, both of which cost real documents:
+
+    **An alpha channel.** ocrmypdf refuses outright — *"The input image has an
+    alpha channel. Remove the alpha channel first."* — and 126 files in one
+    import failed on it, almost all screenshots saved as PNG. Transparency is
+    meaningless once a page is printed onto white paper, so it is composited
+    onto white rather than simply dropped: discarding the channel turns
+    transparent pixels black and can bury the text entirely.
+
+    **HEIC.** ocrmypdf shells out to its own interpreter, which never calls
+    `register_heif_opener`, so the format is invisible to it even with
+    pillow-heif installed here (REQ-006).
+
+    Anything already acceptable returns None and is passed through untouched —
+    re-encoding a clean JPEG would only lose detail before OCR reads it.
+    """
+    from PIL import Image
+
+    if _is_heif(source_file, original):
+        import pillow_heif
+
+        pillow_heif.register_heif_opener()
+
+    try:
+        image = Image.open(original)
+        image.load()
+    except Exception as error:
+        # Not decodable here does not mean unusable: let ocrmypdf try and
+        # report its own, more specific, failure.
+        log.debug("could not pre-read %s: %s", original.name, error)
+        return None
+
+    has_alpha = image.mode in {"RGBA", "LA", "PA"} or (
+        image.mode == "P" and "transparency" in image.info
+    )
+    if not has_alpha and not _is_heif(source_file, original):
+        image.close()
+        return None
+
+    if has_alpha:
+        rgba = image.convert("RGBA")
+        flattened = Image.new("RGB", rgba.size, (255, 255, 255))
+        flattened.paste(rgba, mask=rgba.split()[-1])
+        rgba.close()
+        image.close()
+        log.info("flattened transparency in %s", source_file.original_filename)
+        return flattened
+
+    converted = image.convert("RGB")
+    image.close()
+    return converted
+
+
 @dataclass(frozen=True)
 class OcrInput:
     """What to feed the OCR stage, and whether it needs OCR at all."""
@@ -233,22 +293,19 @@ async def _ocr_input(source_file: SourceFile, original: Path):
             yield OcrInput(converted, digital_native=True)
         return
 
-    if not _is_heif(source_file, original):
+    if not _looks_like_image(source_file):
         yield OcrInput(original, digital_native=False)
         return
 
-    import pillow_heif
-    from PIL import Image
+    prepared = await asyncio.to_thread(_prepare_image, source_file, original)
+    if prepared is None:
+        yield OcrInput(original, digital_native=False)
+        return
 
-    pillow_heif.register_heif_opener()
     with tempfile.TemporaryDirectory(dir=get_settings().temp_root) as scratch:
         converted = Path(scratch) / "converted.jpg"
-
-        def _convert() -> None:
-            with Image.open(original) as image:
-                image.convert("RGB").save(converted, "JPEG", quality=95)
-
-        await asyncio.to_thread(_convert)
+        await asyncio.to_thread(prepared.save, converted, "JPEG", quality=95)
+        prepared.close()
         yield OcrInput(converted, digital_native=False)
 
 

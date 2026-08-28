@@ -224,3 +224,69 @@ def test_collect_records_confidence_without_acting_on_it() -> None:
     assert signals.model_confidence == {"title": 0.99}
     # No tags means "all tags existing" is vacuous, not a signal.
     assert signals.all_tags_existing is False
+
+
+# --------------------------------------------------------------------------
+# The backlog bar (REQ-085, the R-03 mitigation)
+# --------------------------------------------------------------------------
+
+
+def test_one_strong_signal_files_a_backlog_document() -> None:
+    """A document from a twenty-year backlog was already unfindable.
+
+    Filing it with a title that might need correcting is strictly better than
+    the folder tree it came from; holding it just rebuilds the same pile
+    somewhere new. A document arriving *today* still needs two signals, because
+    holding that one costs a few seconds.
+    """
+    signals = GateInputs(correspondent_existing=True)
+
+    assert decide(signals).decision is GateDecision.NEEDS_REVIEW
+
+    from_backlog = GateInputs(correspondent_existing=True, is_backlog=True)
+    assert decide(from_backlog).decision is GateDecision.FILED
+
+
+def test_a_backlog_document_with_nothing_behind_it_is_still_held() -> None:
+    """The bar is lower, not absent. A response where the model invented
+    everything has no structural support at either threshold."""
+    assert decide(GateInputs(is_backlog=True)).decision is GateDecision.NEEDS_REVIEW
+
+
+def test_a_rejected_id_still_overrides_the_backlog_bar() -> None:
+    """An id the model was never shown is not a near-miss at any threshold."""
+    signals = GateInputs(
+        is_backlog=True, correspondent_existing=True, known_form_match=True,
+        rejected_id_count=1,
+    )
+    assert decide(signals).decision is GateDecision.NEEDS_REVIEW
+
+
+def test_the_backlog_bar_is_recorded_in_the_reasons() -> None:
+    """Why a document filed has to be legible afterwards, not inferred from
+    which threshold happened to apply."""
+    result = decide(GateInputs(correspondent_existing=True, is_backlog=True))
+    assert any("lower bar" in reason for reason in result.reasons)
+
+
+def test_the_decision_still_replays_from_stored_signals() -> None:
+    """REQ-057: the new input has to survive the round trip, or replaying an
+    old decision would silently give a different answer."""
+    from worker.classify.gate import replay
+
+    original = GateInputs(correspondent_existing=True, is_backlog=True)
+    verdict = decide(original)
+    assert replay(original.to_json()).decision is verdict.decision
+
+
+def test_every_gate_signal_is_recorded() -> None:
+    """The stored signals must be the complete input to the decision.
+
+    Anything missing makes `replay` a different function from `decide`, and the
+    auditability of every filing decision rests on them being the same one.
+    """
+    from dataclasses import fields
+
+    recorded = set(GateInputs().to_json())
+    declared = {f.name for f in fields(GateInputs)}
+    assert recorded == declared
