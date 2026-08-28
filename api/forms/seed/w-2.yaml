@@ -1,0 +1,13 @@
+code: W-2
+name: W-2 — Wage and Tax Statement
+description: A single-page IRS form; the page cap is what keeps it out of bundles.
+match_rules:
+  scope: any_page
+  max_pages: 2
+  all:
+    - phrase: wage and tax statement
+  any:
+    - regex: \bform\s?w\s?2\b
+    - phrase: employers name address and zip code
+    - phrase: wages tips other compensation
+field_extractors: {}

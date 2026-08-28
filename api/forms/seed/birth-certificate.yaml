@@ -1,0 +1,17 @@
+code: BIRTH-CERT
+name: Certificate of Live Birth
+description: Vital-tier. Excludes the marriage and death certificates it shares wording with.
+match_rules:
+  scope: any_page
+  max_pages: 2
+  all:
+    - regex: \bcertificate of (live )?birth\b
+  any:
+    - phrase: date of birth
+    - phrase: place of birth
+    - phrase: name of child
+    - phrase: state file number
+  none:
+    - phrase: certificate of marriage
+    - phrase: certificate of death
+field_extractors: {}

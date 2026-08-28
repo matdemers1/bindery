@@ -55,7 +55,8 @@ export default function CommandPalette({
   function openResult(result: SearchResult) {
     onClose();
     navigate(
-      `/file/${result.source_file_id}/page/${result.best_page.page_number}?q=${encodeURIComponent(query)}`,
+      `/document/${result.document_id}/page/${result.best_page.document_page_number}` +
+        `?q=${encodeURIComponent(query)}`,
     );
   }
 
@@ -106,7 +107,7 @@ export default function CommandPalette({
         {results.length > 0 ? (
           <ul className="max-h-80 overflow-y-auto py-1">
             {results.map((result, index) => (
-              <li key={result.source_file_id}>
+              <li key={result.document_id}>
                 <button
                   onMouseEnter={() => setSelected(index)}
                   onClick={() => openResult(result)}
@@ -115,10 +116,15 @@ export default function CommandPalette({
                   }`}
                 >
                   <span className="min-w-0 flex-1 truncate text-sm">
-                    {result.original_filename ?? "(no filename)"}
+                    {result.title ?? result.original_filename ?? "(untitled)"}
                   </span>
+                  {result.known_form_code && (
+                    <span className="shrink-0 rounded-full border border-accent/50 px-1.5 text-xs text-accent">
+                      {result.known_form_code}
+                    </span>
+                  )}
                   <span className="shrink-0 font-mono text-xs text-muted">
-                    p.{result.best_page.page_number}
+                    p.{result.best_page.document_page_number}
                   </span>
                 </button>
               </li>

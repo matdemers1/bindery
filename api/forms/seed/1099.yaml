@@ -1,0 +1,18 @@
+code: "1099"
+name: Form 1099 (INT / DIV / MISC / NEC)
+description: >
+  One entry covers the family: the variants share a layout and differ mainly in
+  the box labels, and telling them apart is the classifier's job in Phase 3, not
+  the registry's.
+match_rules:
+  scope: any_page
+  max_pages: 3
+  all:
+    - regex: \bform\s?1099[\s-]?(int|div|misc|nec|r|b|g)\b
+  any:
+    - phrase: interest income
+    - phrase: dividends and distributions
+    - phrase: miscellaneous information
+    - phrase: nonemployee compensation
+    - phrase: payers tin
+field_extractors: {}

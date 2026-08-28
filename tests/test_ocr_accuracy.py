@@ -21,7 +21,13 @@ import pytest
 from tests.corpus.fixtures import CLEAN_SCAN, render_text_page
 from tests.ocr_scoring import Score, corpus_accuracy, report, score
 
-pytestmark = pytest.mark.slow
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(
+        shutil.which("ocrmypdf") is None,
+        reason="OCR toolchain not present; run this suite with `make ocr-report`",
+    ),
+]
 
 CORPUS_ROOT = Path(__file__).parent / "corpus"
 GATE = 0.90
@@ -110,7 +116,6 @@ async def test_deskew_and_clean_help_a_bad_scan(workspace) -> None:
     assert result.accuracy >= 0.70, "preprocessing no longer rescues a bad scan"
 
 
-@pytest.mark.skipif(shutil.which("ocrmypdf") is None, reason="OCR toolchain not present")
 async def test_golden_corpus_word_accuracy(workspace) -> None:
     """The report. **This is the R-01 gate.**"""
     fixtures = real_fixtures()

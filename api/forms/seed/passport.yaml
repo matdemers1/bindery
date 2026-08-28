@@ -1,0 +1,15 @@
+code: PASSPORT
+name: Passport
+description: >
+  A scanned data page. The machine-readable zone is the reliable signal: two
+  lines of 44 characters where '<' is the filler.
+match_rules:
+  scope: any_page
+  max_pages: 2
+  any:
+    - regex: p<[a-z]{3}[a-z<]{10,}
+    - phrase: united states of america passport
+    - phrase: passport no
+  all:
+    - regex: \bpassport\b
+field_extractors: {}

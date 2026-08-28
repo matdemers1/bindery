@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from api.db.enums import JobStage
 from worker.stages.normalize import run_normalize
 from worker.stages.page import run_page
+from worker.stages.segment import run_segment
 
 # (session, job) -> None. Raising is how a stage reports failure.
 StageFn = Callable[..., Awaitable[None]]
@@ -22,6 +23,7 @@ StageFn = Callable[..., Awaitable[None]]
 STAGES: dict[JobStage, StageFn] = {
     JobStage.NORMALIZE: run_normalize,
     JobStage.PAGE: run_page,
+    JobStage.SEGMENT: run_segment,
 }
 
 __all__ = ["STAGES", "StageFn"]

@@ -1,11 +1,20 @@
-from fastapi import APIRouter, Depends, Query
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.dependencies import current_user
 from api.db import repository
-from api.db.models import AppUser
+from api.db.models import AppUser, KnownForm
 from api.db.session import get_session
-from api.schemas import DocumentOut, LibraryOut, SourceFileOut
+from api.schemas import (
+    DocumentDetailOut,
+    DocumentOut,
+    KnownFormOut,
+    LibraryOut,
+    PageOut,
+    SourceFileOut,
+)
 
 router = APIRouter(tags=["archive"])
 
@@ -43,3 +52,39 @@ async def list_source_files(
 ) -> list:
     """Uploaded originals, scoped to the caller's libraries."""
     return list(await repository.list_source_files(session, user.id, limit=limit, offset=offset))
+
+
+@router.get("/documents/{document_id}", response_model=DocumentDetailOut)
+async def get_document(
+    document_id: uuid.UUID,
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentDetailOut:
+    """One document, with the pages of its range and the file it was cut from.
+
+    Everything the viewer needs to present a page range as if it were a
+    standalone document (ADR-001) — including the file's own page count, so page
+    numbers can always be disambiguated (REQ-030).
+    """
+    document = await repository.get_document(session, user.id, document_id)
+    if document is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+
+    source_file = await repository.get_source_file(session, user.id, document.source_file_id)
+    known_form = (
+        await session.get(KnownForm, document.known_form_id)
+        if document.known_form_id
+        else None
+    )
+    pages = [
+        page
+        for page in await repository.list_pages(session, user.id, document.source_file_id)
+        if document.page_start <= page.page_number <= document.page_end
+    ]
+
+    return DocumentDetailOut(
+        document=DocumentOut.model_validate(document),
+        source_file=SourceFileOut.model_validate(source_file),
+        known_form=KnownFormOut.model_validate(known_form) if known_form else None,
+        pages=[PageOut.model_validate(page) for page in pages],
+    )

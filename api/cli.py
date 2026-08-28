@@ -21,6 +21,39 @@ from api.db.models import AppUser, Library, Membership
 from api.db.session import SessionFactory
 
 
+async def _seed_forms() -> None:
+    from api.forms.registry import seed
+
+    async with SessionFactory() as session:
+        inserted, updated = await seed(session)
+        await session.commit()
+        print(f"known forms: {inserted} inserted, {updated} updated")
+
+
+async def _enqueue_stage(stage_name: str) -> None:
+    """Queue a stage for every processed source file.
+
+    The upgrade path when a new stage is added: rather than backfilling data in a
+    migration, re-run the real code path over what is already stored. Existing
+    artifacts make it cheap — this is what replayable stages are for.
+    """
+    from api import queue
+    from api.db.enums import JobStage
+    from api.db.models import SourceFile
+
+    stage = JobStage(stage_name)
+    async with SessionFactory() as session:
+        source_files = (
+            await session.execute(sa.select(SourceFile.id).order_by(SourceFile.received_at))
+        ).scalars().all()
+        queued = 0
+        for source_file_id in source_files:
+            if await queue.enqueue(session, stage, source_file_id=source_file_id):
+                queued += 1
+        await session.commit()
+        print(f"queued {queued} {stage.value} job(s) across {len(source_files)} file(s)")
+
+
 async def _create_user(email: str, password: str, library_name: str, kind: str) -> None:
     email = email.strip().lower()
     async with SessionFactory() as session:
@@ -62,7 +95,19 @@ def main() -> None:
     create.add_argument("--kind", default=LibraryKind.PERSONAL.value,
                         choices=[k.value for k in LibraryKind])
 
+    sub.add_parser("seed-forms", help="load api/forms/seed/*.yaml into the registry")
+
+    enqueue = sub.add_parser("enqueue-stage", help="re-run a pipeline stage over every file")
+    enqueue.add_argument("stage")
+
     args = parser.parse_args()
+    if args.command == "seed-forms":
+        asyncio.run(_seed_forms())
+        return
+    if args.command == "enqueue-stage":
+        asyncio.run(_enqueue_stage(args.stage))
+        return
+
     if args.command == "create-user":
         password = args.password or getpass.getpass("password: ")
         if len(password) < 12:

@@ -21,6 +21,12 @@ class AuditEvent(Base):
     __table_args__ = (sa.Index("ix_audit_event_entity", "entity_type", "entity_id"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
+    # Monotonic insertion order. `created_at` cannot serve: it defaults to
+    # now(), which is the transaction's start time, so two events written in one
+    # transaction carry the same timestamp.
+    sequence: Mapped[int] = mapped_column(
+        sa.BigInteger, sa.Identity(always=False), nullable=False, unique=True
+    )
     entity_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
     entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     action: Mapped[str] = mapped_column(sa.Text, nullable=False)

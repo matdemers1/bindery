@@ -16,14 +16,27 @@ class Document(Base):
     100-page bundle produces thirty rows over one file. Wrong boundaries are a
     metadata edit — the original bytes are never touched.
 
-    Correspondent, document type, known form and embedding columns are added in
-    Phases 3 and 5, when the tables they point at exist.
+    Correspondent, document type and embedding columns are added in Phases 3 and
+    5, when the tables they point at exist.
+
+    **Segments are superseded, never deleted.** Re-segmenting a bundle would
+    otherwise mean destroying document rows, which invariant 3 forbids and which
+    would make undo (REQ-037) a reconstruction rather than a flip. Live segments
+    are the rows with `superseded_at IS NULL`; everything else is history.
     """
 
     __tablename__ = "document"
     __table_args__ = (
         sa.CheckConstraint("page_start >= 1", name="page_start_positive"),
         sa.CheckConstraint("page_end >= page_start", name="page_range_ordered"),
+        # REQ-033: a document's library must be its source file's library. A
+        # composite foreign key enforces it declaratively — no trigger, and no
+        # call site that can forget.
+        sa.ForeignKeyConstraint(
+            ["source_file_id", "library_id"],
+            ["source_file.id", "source_file.library_id"],
+            name="fk_document_source_file_library",
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -61,9 +74,23 @@ class Document(Base):
         server_default=ReviewState.PENDING_CLASSIFICATION.value,
         index=True,
     )
+    # A registry match is a fact, not an opinion (REQ-038).
+    known_form_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("known_form.id"), index=True
+    )
+
     # Keeps a 5,000-document backlog import out of the daily review queue.
     is_backlog: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.false()
+    )
+
+    # Set when a re-segmentation replaced this row. The exclusion constraint on
+    # overlapping page ranges applies only to live rows, so history can overlap
+    # freely while the current set stays coherent.
+    superseded_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    # The audit event that superseded it — what `undo` walks back.
+    superseded_by_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("audit_event.id")
     )
 
     created_at: Mapped[datetime] = created_at()

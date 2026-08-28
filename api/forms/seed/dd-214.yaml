@@ -1,0 +1,21 @@
+code: DD-214
+name: DD-214 — Certificate of Release or Discharge from Active Duty
+description: >
+  The single document Bindery is measured on. Matched on the full form title,
+  which is printed at the head of every variant, plus the form number in the
+  footer. A DD-215 (correction) is explicitly excluded: it references the DD-214
+  by name and would otherwise match.
+match_rules:
+  scope: any_page
+  max_pages: 4
+  all:
+    - phrase: certificate of release or discharge from active duty
+  any:
+    - regex: \bdd\s?form\s?214\b
+    - regex: \bdd\s?214\b
+    - phrase: date entered ad this period
+  none:
+    - phrase: correction to dd form 214
+    - regex: \bdd\s?form\s?215\b
+    - phrase: worksheet
+field_extractors: {}

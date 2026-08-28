@@ -1,0 +1,15 @@
+code: MARRIAGE
+name: Marriage Licence or Certificate
+match_rules:
+  scope: any_page
+  max_pages: 3
+  all:
+    - regex: \b(certificate|licen[cs]e) of marriage\b|\bmarriage (certificate|licen[cs]e)\b
+  any:
+    - phrase: joined in marriage
+    - phrase: solemnized
+    - phrase: officiant
+    - phrase: date of marriage
+  none:
+    - phrase: application for a marriage license
+field_extractors: {}

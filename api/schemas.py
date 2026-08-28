@@ -3,7 +3,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LoginRequest(BaseModel):
@@ -64,7 +64,44 @@ class DocumentOut(BaseModel):
     redundancy: str
     review_state: str
     is_backlog: bool
+    known_form_id: uuid.UUID | None
     created_at: datetime
+
+    @property
+    def page_count(self) -> int:
+        return self.page_end - self.page_start + 1
+
+
+class SegmentIn(BaseModel):
+    page_start: int = Field(ge=1)
+    page_end: int = Field(ge=1)
+    title: str | None = None
+
+
+class SegmentReplaceIn(BaseModel):
+    """The complete segment set for a file.
+
+    A partial edit has no valid intermediate state — segments must always cover
+    the file exactly — so the whole cover is submitted at once.
+    """
+
+    segments: list[SegmentIn] = Field(min_length=1)
+
+
+class SegmentListOut(BaseModel):
+    source_file_id: uuid.UUID
+    page_count: int
+    segments: list[DocumentOut]
+
+
+class KnownFormOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    code: str
+    name: str
+    description: str | None
+    enabled: bool
 
 
 class PageOut(BaseModel):
@@ -80,10 +117,23 @@ class SourceFileDetailOut(BaseModel):
     pages: list[PageOut]
 
 
+class DocumentDetailOut(BaseModel):
+    """Everything the viewer needs to show a page range as a standalone document."""
+
+    document: DocumentOut
+    source_file: SourceFileOut
+    known_form: KnownFormOut | None
+    pages: list[PageOut]
+
+
 class PageHitOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    # Absolute position in the source file.
     page_number: int
+    # Position within this document. Page numbers are always disambiguated
+    # (REQ-030): "page 2 of this document (page 48 of the file)".
+    document_page_number: int
     # Contains <mark> tags from ts_headline. The client renders it as markup and
     # is responsible for allowing only <mark>.
     snippet: str
@@ -93,12 +143,18 @@ class PageHitOut(BaseModel):
 class SearchResultOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    document_id: uuid.UUID
     source_file_id: uuid.UUID
     library_id: uuid.UUID
+    title: str | None
     original_filename: str | None
-    page_count: int | None
+    page_start: int
+    page_end: int
+    file_page_count: int | None
     state: str
     received_at: datetime
+    known_form_code: str | None
+    known_form_name: str | None
     best_page: PageHitOut
     matching_pages: int
 
@@ -154,10 +210,12 @@ class HealthOut(BaseModel):
 
 
 __all__ = [
+    "DocumentDetailOut",
     "DocumentOut",
     "FacetOut",
     "HealthOut",
     "JobOut",
+    "KnownFormOut",
     "LibraryOut",
     "LoginRequest",
     "PageHitOut",
@@ -165,6 +223,9 @@ __all__ = [
     "PipelineStatusOut",
     "SearchResponseOut",
     "SearchResultOut",
+    "SegmentIn",
+    "SegmentListOut",
+    "SegmentReplaceIn",
     "SourceFileDetailOut",
     "SourceFileOut",
     "StageCount",

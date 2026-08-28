@@ -3,6 +3,7 @@
 from api.db.models.audit_event import AuditEvent
 from api.db.models.document import Document
 from api.db.models.job import Job
+from api.db.models.known_form import KnownForm
 from api.db.models.library import Library
 from api.db.models.membership import Membership
 from api.db.models.page import Page
@@ -16,6 +17,7 @@ __all__ = [
     "Document",
     "DocumentTag",
     "Job",
+    "KnownForm",
     "Library",
     "Membership",
     "Page",

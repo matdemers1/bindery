@@ -1,0 +1,12 @@
+code: "1098"
+name: Form 1098 — Mortgage Interest Statement
+match_rules:
+  scope: any_page
+  max_pages: 3
+  all:
+    - phrase: mortgage interest statement
+  any:
+    - regex: \bform\s?1098\b
+    - phrase: mortgage interest received from payer
+    - phrase: outstanding mortgage principal
+field_extractors: {}

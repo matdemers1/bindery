@@ -1,0 +1,16 @@
+code: VA-RATING
+name: VA Rating Decision
+description: >
+  The decision narrative that sets a disability percentage. Distinct from the
+  award letter, which states the resulting payment.
+match_rules:
+  scope: any_page
+  all:
+    - phrase: rating decision
+  any:
+    - phrase: department of veterans affairs
+    - phrase: veterans benefits administration
+    - phrase: evaluation of
+  none:
+    - phrase: this is not a rating decision
+field_extractors: {}

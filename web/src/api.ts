@@ -52,21 +52,74 @@ export interface UploadResult {
 }
 
 export interface PageHit {
+  /** Absolute position in the source file. */
   page_number: number;
+  /** Position within this document — page numbers are always disambiguated. */
+  document_page_number: number;
   /** Contains <mark> tags from ts_headline. Rendered through a sanitizer. */
   snippet: string;
   rank: number;
 }
 
 export interface SearchResult {
+  document_id: string;
   source_file_id: string;
   library_id: string;
+  title: string | null;
   original_filename: string | null;
-  page_count: number | null;
+  page_start: number;
+  page_end: number;
+  file_page_count: number | null;
   state: string;
   received_at: string;
+  known_form_code: string | null;
+  known_form_name: string | null;
   best_page: PageHit;
   matching_pages: number;
+}
+
+export interface Document {
+  id: string;
+  library_id: string;
+  source_file_id: string;
+  page_start: number;
+  page_end: number;
+  title: string | null;
+  summary: string | null;
+  document_date: string | null;
+  sensitivity: string;
+  redundancy: string;
+  review_state: string;
+  is_backlog: boolean;
+  known_form_id: string | null;
+  created_at: string;
+}
+
+export interface KnownForm {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+}
+
+export interface DocumentDetail {
+  document: Document;
+  source_file: SourceFile;
+  known_form: KnownForm | null;
+  pages: PageSummary[];
+}
+
+export interface SegmentList {
+  source_file_id: string;
+  page_count: number;
+  segments: Document[];
+}
+
+export interface SegmentInput {
+  page_start: number;
+  page_end: number;
+  title: string | null;
 }
 
 export interface Facet {
@@ -129,15 +182,21 @@ export interface PipelineStatus {
 export interface SearchParams {
   q: string;
   libraryIds?: string[];
-  states?: string[];
+  knownFormCodes?: string[];
   sourceFileId?: string;
   limit?: number;
 }
 
-function searchQueryString({ q, libraryIds, states, sourceFileId, limit }: SearchParams) {
+function searchQueryString({
+  q,
+  libraryIds,
+  knownFormCodes,
+  sourceFileId,
+  limit,
+}: SearchParams) {
   const params = new URLSearchParams({ q });
   libraryIds?.forEach((id) => params.append("library_id", id));
-  states?.forEach((state) => params.append("state", state));
+  knownFormCodes?.forEach((code) => params.append("known_form", code));
   if (sourceFileId) params.set("source_file_id", sourceFileId);
   if (limit) params.set("limit", String(limit));
   return params.toString();
@@ -160,6 +219,17 @@ export const api = {
     request<SearchResponse>(`/search?${searchQueryString(params)}`, { signal }),
 
   file: (id: string) => request<SourceFileDetail>(`/files/${id}`),
+  document: (id: string) => request<DocumentDetail>(`/documents/${id}`),
+
+  segments: (fileId: string) => request<SegmentList>(`/files/${fileId}/segments`),
+  replaceSegments: (fileId: string, segments: SegmentInput[]) =>
+    request<SegmentList>(`/files/${fileId}/segments`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ segments }),
+    }),
+  undoSegments: (fileId: string) =>
+    request<SegmentList>(`/files/${fileId}/segments/undo`, { method: "POST" }),
   pageBoxes: (id: string, page: number, signal?: AbortSignal) =>
     request<PageBoxes>(`/files/${id}/pages/${page}/boxes`, { signal }),
 
@@ -179,4 +249,6 @@ export const fileUrl = {
   render: (id: string, page: number) => `/api/files/${id}/pages/${page}/render`,
   thumb: (id: string, page: number) => `/api/files/${id}/pages/${page}/thumb`,
   pdf: (id: string) => `/api/files/${id}/pdf`,
+  /** Just this document's pages, extracted as a standalone PDF. */
+  documentPdf: (documentId: string) => `/api/documents/${documentId}/pdf`,
 };

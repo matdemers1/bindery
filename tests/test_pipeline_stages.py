@@ -15,14 +15,25 @@ import sqlalchemy as sa
 from api.artifacts import derived_for
 from api.config import get_settings
 from api.db.enums import IngestSource, JobStage, JobState, LibraryKind, SourceFileState
-from api.db.models import Job, Library, Page, SourceFile
+from api.db.models import Document, Job, Library, Page, SourceFile
 from api.queue import ClaimedJob
 from api.storage.blobs import blob_path
 from tests.corpus.fixtures import CLEAN_SCAN, render_text_page
 from worker.stages.normalize import run_normalize
 from worker.stages.page import run_page
 
-pytestmark = pytest.mark.slow
+import shutil
+
+# The api test image carries no OCR toolchain — these suites belong to the
+# `test-worker` service (`make test-pipeline`). Skipping rather than failing
+# means `-m slow` is safe to run against either image.
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(
+        shutil.which("ocrmypdf") is None,
+        reason="OCR toolchain not present; run this suite with `make test-pipeline`",
+    ),
+]
 
 
 def _job(stage: JobStage, source_file_id: uuid.UUID) -> ClaimedJob:
@@ -142,7 +153,32 @@ async def test_page_stage_creates_rows_renders_and_thumbnails(session, ingested)
     assert (root / page.thumb_path).stat().st_size < (root / page.render_path).stat().st_size
 
     await session.refresh(ingested)
+    # The page stage hands off to segmentation; `segment` is what completes a
+    # file (Phase 2).
+    assert ingested.state is SourceFileState.SEGMENTING
+
+
+async def test_the_full_chain_ends_in_a_segmented_searchable_file(session, ingested) -> None:
+    """normalize -> page -> segment, the whole pipeline as it stands today."""
+    from worker.stages.segment import run_segment
+
+    await run_normalize(session, _job(JobStage.NORMALIZE, ingested.id))
+    await run_page(session, _job(JobStage.PAGE, ingested.id))
+    await run_segment(session, _job(JobStage.SEGMENT, ingested.id))
+    await session.commit()
+
+    await session.refresh(ingested)
     assert ingested.state is SourceFileState.PROCESSED
+
+    # A single-page scan is one document over pages 1..N — the common case.
+    documents = (
+        await session.execute(
+            sa.select(Document).where(
+                Document.source_file_id == ingested.id, Document.superseded_at.is_(None)
+            )
+        )
+    ).scalars().all()
+    assert [(d.page_start, d.page_end) for d in documents] == [(1, 1)]
 
 
 async def test_the_page_text_is_searchable(session, ingested) -> None:

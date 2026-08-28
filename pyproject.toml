@@ -23,12 +23,15 @@ dependencies = [
     "pyjwt",
     "python-multipart",
     "pgvector",
+    # Known-form seed definitions (api/forms/seed/*.yaml), read by both images.
+    "pyyaml",
+    # Page extraction for segment export; also used by the pipeline.
+    "pikepdf",
 ]
 
 [project.optional-dependencies]
 worker = [
     "ocrmypdf",
-    "pikepdf",
     "pypdf",
     "pillow",
     # HEIC/HEIF from an iPhone camera roll (REQ-006).

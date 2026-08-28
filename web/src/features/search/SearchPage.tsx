@@ -10,7 +10,7 @@ export default function SearchPage({ libraries }: { libraries: Library[] }) {
   const [params, setParams] = useSearchParams();
   const query = params.get("q") ?? "";
   const libraryFilter = params.getAll("library");
-  const stateFilter = params.getAll("state");
+  const formFilter = params.getAll("form");
 
   const [draft, setDraft] = useState(query);
   const [response, setResponse] = useState<SearchResponse | null>(null);
@@ -26,13 +26,16 @@ export default function SearchPage({ libraries }: { libraries: Library[] }) {
     const controller = new AbortController();
     setLoading(true);
     api
-      .search({ q: query, libraryIds: libraryFilter, states: stateFilter }, controller.signal)
+      .search(
+        { q: query, libraryIds: libraryFilter, knownFormCodes: formFilter },
+        controller.signal,
+      )
       .then(setResponse)
       .catch(() => {})
       .finally(() => setLoading(false));
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, libraryFilter.join(","), stateFilter.join(",")]);
+  }, [query, libraryFilter.join(","), formFilter.join(",")]);
 
   const update = useCallback(
     (mutate: (next: URLSearchParams) => void) => {
@@ -83,7 +86,7 @@ export default function SearchPage({ libraries }: { libraries: Library[] }) {
           response={response}
           libraryName={libraryName}
           libraryFilter={libraryFilter}
-          stateFilter={stateFilter}
+          formFilter={formFilter}
           onToggle={toggle}
           onSuggestion={(suggestion) => update((next) => next.set("q", suggestion))}
         />
@@ -125,14 +128,14 @@ function Results({
   response,
   libraryName,
   libraryFilter,
-  stateFilter,
+  formFilter,
   onToggle,
   onSuggestion,
 }: {
   response: SearchResponse;
   libraryName: (id: string) => string;
   libraryFilter: string[];
-  stateFilter: string[];
+  formFilter: string[];
   onToggle: (key: string, value: string) => void;
   onSuggestion: (suggestion: string) => void;
 }) {
@@ -172,11 +175,13 @@ function Results({
           onToggle={(value) => onToggle("library", value)}
         />
         <FacetGroup
-          title="State"
-          facets={response.facets.state ?? []}
-          selected={stateFilter}
-          label={(value) => value.replace(/_/g, " ")}
-          onToggle={(value) => onToggle("state", value)}
+          title="Known form"
+          facets={response.facets.known_form ?? []}
+          selected={formFilter}
+          label={(value) =>
+            response.facets.known_form?.find((facet) => facet.value === value)?.label ?? value
+          }
+          onToggle={(value) => onToggle("form", value)}
         />
       </aside>
 
@@ -186,9 +191,9 @@ function Results({
         </p>
         <ul className="space-y-3">
           {response.results.map((result) => (
-            <li key={result.source_file_id}>
+            <li key={result.document_id}>
               <Link
-                to={`/file/${result.source_file_id}/page/${result.best_page.page_number}?q=${encodeURIComponent(response.query)}`}
+                to={`/document/${result.document_id}/page/${result.best_page.document_page_number}?q=${encodeURIComponent(response.query)}`}
                 className="flex gap-4 rounded-lg border border-edge bg-surface p-4 hover:border-accent/60"
               >
                 <img
@@ -198,13 +203,26 @@ function Results({
                   className="h-28 w-20 shrink-0 rounded border border-edge object-cover object-top"
                 />
                 <div className="min-w-0">
-                  <p className="truncate font-medium">
-                    {result.original_filename ?? "(no filename)"}
+                  <p className="flex items-center gap-2">
+                    <span className="truncate font-medium">
+                      {result.title ?? result.original_filename ?? "(untitled)"}
+                    </span>
+                    {result.known_form_code && (
+                      <span
+                        title={result.known_form_name ?? undefined}
+                        className="shrink-0 rounded-full border border-accent/50 px-2 py-0.5 text-xs text-accent"
+                      >
+                        {result.known_form_code}
+                      </span>
+                    )}
                   </p>
                   <p className="mt-0.5 text-xs text-muted">
-                    {/* Page numbers are always disambiguated. */}
-                    Page {result.best_page.page_number}
-                    {result.page_count ? ` of ${result.page_count}` : ""}
+                    {/* Page numbers are always disambiguated (REQ-030). */}
+                    Page {result.best_page.document_page_number} of this document
+                    {" · page "}
+                    {result.best_page.page_number}
+                    {result.file_page_count ? ` of ${result.file_page_count}` : ""} in{" "}
+                    {result.original_filename ?? "the file"}
                     {result.matching_pages > 1 &&
                       ` · ${result.matching_pages - 1} more matching ${
                         result.matching_pages === 2 ? "page" : "pages"

@@ -5,6 +5,7 @@ import { ApiError, api, type Library, type User } from "./api";
 import CommandPalette from "./features/palette/CommandPalette";
 import PipelinePage from "./features/pipeline/PipelinePage";
 import SearchPage from "./features/search/SearchPage";
+import SegmentationPage from "./features/segmentation/SegmentationPage";
 import ViewerPage from "./features/viewer/ViewerPage";
 import Shell from "./components/Shell";
 import Login from "./pages/Login";
@@ -68,7 +69,15 @@ export default function App() {
       >
         <Routes>
           <Route path="/" element={<SearchPage libraries={libraries} />} />
-          <Route path="/file/:fileId/page/:pageNumber" element={<ViewerPage />} />
+          {/* Documents are the normal path: search returns page ranges, not files. */}
+          <Route
+            path="/document/:documentId/page/:pageNumber"
+            element={<ViewerPage mode="document" />}
+          />
+          <Route path="/document/:documentId" element={<Navigate to="page/1" replace />} />
+          {/* The whole bundle, for when the cut itself is what you're looking at. */}
+          <Route path="/file/:fileId/page/:pageNumber" element={<ViewerPage mode="file" />} />
+          <Route path="/file/:fileId/segments" element={<SegmentationPage />} />
           <Route path="/file/:fileId" element={<Navigate to="page/1" replace />} />
           <Route path="/pipeline" element={<PipelinePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

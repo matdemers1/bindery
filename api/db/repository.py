@@ -55,18 +55,35 @@ async def list_libraries(session: AsyncSession, user_id: uuid.UUID) -> Sequence[
 async def list_documents(
     session: AsyncSession, user_id: uuid.UUID, *, limit: int = 50, offset: int = 0
 ) -> Sequence[Document]:
-    """Documents the user can see. Empty until segmentation lands in Phase 2."""
+    """Live documents the user can see. Superseded segments are history."""
     library_ids = await visible_library_ids(session, user_id)
     if not library_ids:
         return []
     result = await session.execute(
         sa.select(Document)
-        .where(Document.library_id.in_(library_ids))
+        .where(Document.library_id.in_(library_ids), Document.superseded_at.is_(None))
         .order_by(Document.created_at.desc())
         .limit(limit)
         .offset(offset)
     )
     return result.scalars().all()
+
+
+async def get_document(
+    session: AsyncSession, user_id: uuid.UUID, document_id: uuid.UUID
+) -> Document | None:
+    """A live document, or None if it does not exist *or* is not the caller's."""
+    library_ids = await visible_library_ids(session, user_id)
+    if not library_ids:
+        return None
+    result = await session.execute(
+        sa.select(Document).where(
+            Document.id == document_id,
+            Document.library_id.in_(library_ids),
+            Document.superseded_at.is_(None),
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def list_source_files(

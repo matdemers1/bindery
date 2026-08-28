@@ -68,12 +68,35 @@ async def _run_one(job: queue.ClaimedJob) -> None:
 
 
 async def _slot(worker_id: str, stopping: asyncio.Event, in_flight: set[uuid.UUID]) -> None:
-    """One claim loop. Runs until `stopping` is set and its current job is done."""
+    """One claim loop. Runs until `stopping` is set and its current job is done.
+
+    Claiming is wrapped because a slot that dies takes a third of the pipeline
+    with it and *looks* fine from outside — the container stays up, the health
+    check passes, and jobs simply stop being picked up. That is precisely the
+    silent failure invariant 8 exists to prevent, so a failure here is logged
+    loudly and the loop backs off rather than exiting.
+    """
     stages = list(STAGES)
+    failures = 0
+
     while not stopping.is_set():
-        async with SessionFactory() as session:
-            job = await queue.claim(session, stages, worker_id)
-            await session.commit()
+        try:
+            async with SessionFactory() as session:
+                job = await queue.claim(session, stages, worker_id)
+                await session.commit()
+            failures = 0
+        except Exception:
+            failures += 1
+            # Exponential up to a minute: a database that is down or a schema
+            # that has moved under us should not be hammered.
+            backoff = min(IDLE_POLL_SECONDS * 2**failures, 60.0)
+            log.exception(
+                "slot could not claim a job (failure %s); retrying in %.0fs",
+                failures, backoff,
+            )
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stopping.wait(), timeout=backoff)
+            continue
 
         if job is None:
             with contextlib.suppress(TimeoutError):
@@ -102,6 +125,16 @@ async def _reclaimer(stopping: asyncio.Event) -> None:
             await asyncio.wait_for(stopping.wait(), timeout=RECLAIM_INTERVAL_SECONDS)
 
 
+def _report_unexpected_exit(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        log.critical("worker task %s died: %r", task.get_name(), error)
+    else:
+        log.warning("worker task %s exited", task.get_name())
+
+
 async def main() -> None:
     settings = get_settings()
     worker_id = f"{os.uname().nodename}:{os.getpid()}"
@@ -125,6 +158,11 @@ async def main() -> None:
     ]
     tasks.append(asyncio.create_task(_reclaimer(stopping), name="reclaimer"))
     tasks.append(asyncio.create_task(watch_inbox(stopping), name="watched-folder"))
+
+    # Last line of defence: if a task exits despite the guards above, say so
+    # rather than letting the worker sit there looking healthy.
+    for task in tasks:
+        task.add_done_callback(_report_unexpected_exit)
 
     await stopping.wait()
     log.info("shutdown requested; finishing in-flight work")

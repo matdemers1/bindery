@@ -1,0 +1,14 @@
+code: TITLE
+name: Vehicle Certificate of Title
+match_rules:
+  scope: any_page
+  max_pages: 2
+  all:
+    - phrase: certificate of title
+  any:
+    - phrase: vehicle identification number
+    - regex: \bvin\b
+    - phrase: odometer reading
+  none:
+    - phrase: certificate of title insurance
+field_extractors: {}

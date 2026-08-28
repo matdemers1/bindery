@@ -1,0 +1,17 @@
+code: DEED
+name: Property Deed
+description: >
+  Vital-tier. Requires both the conveyance language and a recording marker, so a
+  purchase agreement that merely mentions a deed does not match.
+match_rules:
+  scope: any_page
+  all:
+    - regex: \b(warranty|quitclaim|grant|bargain and sale)\s+deed\b
+  any:
+    - phrase: does hereby grant bargain sell and convey
+    - phrase: conveys and warrants
+    - phrase: recorded in the office of the register of deeds
+    - phrase: book and page
+  none:
+    - phrase: deed of trust rider
+field_extractors: {}

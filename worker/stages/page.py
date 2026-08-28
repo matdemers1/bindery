@@ -26,8 +26,9 @@ from PIL import Image
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import queue
 from api.artifacts import derived_for, relative_to_data
-from api.db.enums import SourceFileState
+from api.db.enums import JobStage, SourceFileState
 from api.db.models import Page, SourceFile
 from api.queue import ClaimedJob
 from worker import subprocess_util
@@ -120,6 +121,7 @@ async def run_page(session: AsyncSession, job: ClaimedJob) -> None:
     await session.execute(
         sa.update(SourceFile)
         .where(SourceFile.id == source_file.id)
-        .values(page_count=len(pages), state=SourceFileState.PROCESSED.value)
+        .values(page_count=len(pages), state=SourceFileState.SEGMENTING.value)
     )
+    await queue.enqueue(session, JobStage.SEGMENT, source_file_id=source_file.id)
     log.info("paged %s into %s rows", source_file.original_filename, len(pages))

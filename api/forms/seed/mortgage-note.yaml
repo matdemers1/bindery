@@ -1,0 +1,13 @@
+code: MORTGAGE-NOTE
+name: Mortgage Promissory Note
+match_rules:
+  scope: any_page
+  all:
+    - phrase: promissory note
+  any:
+    - phrase: borrowers promise to pay
+    - phrase: principal and interest
+    - phrase: in return for a loan that i have received
+  none:
+    - phrase: mortgage interest statement
+field_extractors: {}

@@ -1,0 +1,19 @@
+code: INS-DEC
+name: Insurance Declarations Page
+description: >
+  The page that states coverage, limits and the policy period. Excludes the
+  policy booklet, which repeats the phrase but runs to dozens of pages.
+match_rules:
+  scope: any_page
+  max_pages: 6
+  all:
+    - phrase: declarations
+  any:
+    - phrase: policy number
+    - phrase: coverage limits
+    - phrase: policy period
+    - phrase: named insured
+  none:
+    - phrase: policy booklet
+    - phrase: table of contents
+field_extractors: {}

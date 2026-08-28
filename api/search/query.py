@@ -6,14 +6,18 @@ Body text is matched with Postgres full-text search over `page.text_tsv` — GIN
 indexed, page-granular — so a hit is always "page 47 of Army Records 2019.pdf"
 and never just "somewhere in this 100-page file" (REQ-020).
 
-Page hits are then rolled up: one row per source file, showing its best-ranked
-page and how many others matched. That keeps a bundle from flooding the results
-with thirty rows of itself while still pointing at the exact page.
+Page hits are then rolled up **to documents** (ADR-001): one row per document,
+its best-ranked page surfaced, and a count of how many of its pages matched. In
+a 100-page bundle cut into thirty documents, that is what turns a hit into "the
+DD-214" rather than "the bundle containing it".
+
+**Known forms are boosted** (REQ-040). A registry match is a fact, so a document
+Bindery *knows* is a DD-214 outranks a continuation sheet that merely mentions
+the phrase.
 
 Trigram fuzzy matching (REQ-023) covers *names*, which Postgres FTS is bad at —
-it is the "Hoda" → "Honda" path. In this phase only `document.title` and
-`tag.name` exist to match against; correspondent and asset names join the same
-query when those tables arrive in Phase 5.
+the "Hoda" → "Honda" path. Correspondent and asset names join the same query
+when those tables arrive in Phase 5.
 
 Scoping is not optional and not a parameter a caller can forget: every query in
 this module takes the caller's visible library set and filters on it.
@@ -27,7 +31,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.db.enums import SourceFileState
-from api.db.models import Document, Page, SourceFile, Tag
+from api.db.models import Document, KnownForm, Page, SourceFile, Tag
 
 # ts_headline settings: two short fragments, marked up for the results list.
 HEADLINE_OPTIONS = (
@@ -38,6 +42,12 @@ HEADLINE_OPTIONS = (
 SUGGESTION_THRESHOLD = 0.3
 MAX_SUGGESTIONS = 5
 
+# Rank bonuses. ts_rank_cd on a normal hit lands well under 1, so a document the
+# registry identifies as the thing being searched for leads decisively, while the
+# general bonus for *being* a recognised form only breaks ties (REQ-040).
+NAMED_FORM_BOOST = 1.0
+ANY_FORM_BOOST = 0.05
+
 
 @dataclass
 class SearchFilters:
@@ -45,6 +55,7 @@ class SearchFilters:
     received_from: date | None = None
     received_to: date | None = None
     states: list[SourceFileState] = field(default_factory=list)
+    known_form_codes: list[str] = field(default_factory=list)
     # Restrict to one file — the "search inside this bundle" path (REQ-118).
     source_file_id: uuid.UUID | None = None
 
@@ -52,6 +63,7 @@ class SearchFilters:
 @dataclass(frozen=True)
 class PageHit:
     page_number: int
+    document_page_number: int
     snippet: str
     rank: float
     thumb_path: str | None
@@ -60,15 +72,19 @@ class PageHit:
 
 @dataclass(frozen=True)
 class SearchResult:
+    document_id: uuid.UUID
     source_file_id: uuid.UUID
     library_id: uuid.UUID
+    title: str | None
     original_filename: str | None
-    sha256: str
-    page_count: int | None
+    page_start: int
+    page_end: int
+    file_page_count: int | None
     state: SourceFileState
     received_at: datetime
+    known_form_code: str | None
+    known_form_name: str | None
     best_page: PageHit
-    # How many pages in this file matched, so a bundle can say "and 4 more".
     matching_pages: int
 
 
@@ -97,8 +113,102 @@ def _tsquery(query: str):
     return sa.func.websearch_to_tsquery("english", query)
 
 
+def _normalized(column):
+    """Lowercase with separators stripped, so "DD-214" == "dd 214" == "dd214"."""
+    return sa.func.replace(
+        sa.func.replace(sa.func.lower(column), "-", ""), " ", ""
+    )
+
+
+def _form_names_the_query(query: str):
+    """Does this query name a known form?
+
+    Matched on the normalised code or the form's name — deliberately not a
+    substring of the code, or a query of "dd" would claim every DD form.
+    """
+    normalized_query = query.strip().lower().replace("-", "").replace(" ", "")
+    predicates = [_normalized(KnownForm.code) == normalized_query]
+    if len(query.strip()) >= 3:
+        predicates.append(KnownForm.name.op("ILIKE")(f"%{query.strip()}%"))
+    return sa.and_(KnownForm.code.is_not(None), sa.or_(*predicates))
+
+
+def _filters(filters: SearchFilters, allowed: list[uuid.UUID]) -> list:
+    conditions = [
+        Document.library_id.in_(allowed),
+        Document.superseded_at.is_(None),
+    ]
+    if filters.received_from:
+        conditions.append(SourceFile.received_at >= filters.received_from)
+    if filters.received_to:
+        conditions.append(SourceFile.received_at < filters.received_to)
+    if filters.states:
+        conditions.append(SourceFile.state.in_([state.value for state in filters.states]))
+    if filters.source_file_id:
+        conditions.append(SourceFile.id == filters.source_file_id)
+    if filters.known_form_codes:
+        conditions.append(KnownForm.code.in_(filters.known_form_codes))
+    return conditions
+
+
+def _columns(rank):
+    """The shared shape of both match branches."""
+    return [
+        Page.id.label("page_id"),
+        Page.page_number.label("page_number"),
+        Page.render_path.label("render_path"),
+        Page.thumb_path.label("thumb_path"),
+        rank.label("rank"),
+        Document.id.label("document_id"),
+        Document.title.label("title"),
+        Document.page_start.label("page_start"),
+        Document.page_end.label("page_end"),
+        Document.library_id.label("library_id"),
+        SourceFile.id.label("source_file_id"),
+        SourceFile.original_filename.label("original_filename"),
+        SourceFile.page_count.label("file_page_count"),
+        SourceFile.state.label("state"),
+        SourceFile.received_at.label("received_at"),
+        KnownForm.code.label("known_form_code"),
+        KnownForm.name.label("known_form_name"),
+    ]
+
+
+def _joins(statement):
+    """A document owns a page when the page falls inside its range.
+
+    This is the join that makes "the DD-214" a result rather than "the bundle".
+    """
+    return (
+        statement.join(SourceFile, SourceFile.id == Page.source_file_id)
+        .join(
+            Document,
+            sa.and_(
+                Document.source_file_id == Page.source_file_id,
+                # Plain comparisons, deliberately. Phrasing this as int4range
+                # containment to reach the GiST index the exclusion constraint
+                # maintains was measurably *slower*: the planner reaches for
+                # `uq_page_source_file_id_page_number` here, and that btree
+                # already covers (source_file_id, page_number).
+                Page.page_number >= Document.page_start,
+                Page.page_number <= Document.page_end,
+            ),
+        )
+        .outerjoin(KnownForm, KnownForm.id == Document.known_form_id)
+    )
+
+
 def _scoped_pages(query: str, visible: list[uuid.UUID], filters: SearchFilters):
-    """Every matching page the caller is allowed to see, ranked but not rendered.
+    """Every match the caller may see, from two independent branches.
+
+    **Text** — pages whose `tsvector` matches the query. Page-granular, GIN
+    indexed, the primary path.
+
+    **Known form** — documents the registry has *identified*, when the query
+    names that form. This branch is why "find my DD-214" is a certainty rather
+    than a ranked guess: OCR may have read the footer as "DD FORM 214", so a
+    literal text search for "DD-214" would miss it entirely. Bindery already
+    knows what the document is, and search should not have to rediscover it.
 
     Deliberately no `ts_headline` here. Generating a snippet means re-parsing the
     full page text, and this set can be tens of thousands of pages — the snippet
@@ -109,39 +219,30 @@ def _scoped_pages(query: str, visible: list[uuid.UUID], filters: SearchFilters):
     allowed = filters.library_ids or visible
     # A caller cannot widen their scope by asking for a library they cannot see.
     allowed = [library_id for library_id in allowed if library_id in set(visible)]
+    if not allowed:
+        return None, allowed
 
-    conditions = [
-        Page.text_tsv.op("@@")(tsquery),
-        SourceFile.library_id.in_(allowed),
-    ]
-    if filters.received_from:
-        conditions.append(SourceFile.received_at >= filters.received_from)
-    if filters.received_to:
-        conditions.append(SourceFile.received_at < filters.received_to)
-    if filters.states:
-        conditions.append(SourceFile.state.in_([state.value for state in filters.states]))
-    if filters.source_file_id:
-        conditions.append(SourceFile.id == filters.source_file_id)
+    shared = _filters(filters, allowed)
 
-    return (
-        sa.select(
-            Page.id.label("page_id"),
-            Page.source_file_id.label("source_file_id"),
-            Page.page_number.label("page_number"),
-            Page.render_path.label("render_path"),
-            Page.thumb_path.label("thumb_path"),
-            sa.func.ts_rank_cd(Page.text_tsv, tsquery).label("rank"),
-            SourceFile.library_id.label("library_id"),
-            SourceFile.original_filename.label("original_filename"),
-            SourceFile.sha256.label("sha256"),
-            SourceFile.page_count.label("page_count"),
-            SourceFile.state.label("state"),
-            SourceFile.received_at.label("received_at"),
+    # A recognised document beats an unrecognised one on an otherwise equal hit.
+    any_form_bonus = sa.case((KnownForm.code.is_not(None), ANY_FORM_BOOST), else_=0.0)
+    text_matches = _joins(
+        sa.select(*_columns(sa.func.ts_rank_cd(Page.text_tsv, tsquery) + any_form_bonus))
+    ).where(sa.and_(Page.text_tsv.op("@@")(tsquery), *shared))
+
+    # Anchored at the document's first page: that is where a reader expects a
+    # form to open, regardless of which page carried the fingerprint.
+    form_matches = _joins(
+        sa.select(*_columns(sa.literal(NAMED_FORM_BOOST)))
+    ).where(
+        sa.and_(
+            Page.page_number == Document.page_start,
+            _form_names_the_query(query),
+            *shared,
         )
-        .join(SourceFile, SourceFile.id == Page.source_file_id)
-        .where(sa.and_(*conditions)),
-        allowed,
     )
+
+    return sa.union_all(text_matches, form_matches), allowed
 
 
 async def search(
@@ -159,24 +260,21 @@ async def search(
         return SearchResponse(query=query, total=0, results=[], facets={}, suggestions=[])
 
     pages, allowed = _scoped_pages(query, visible_library_ids, filters)
-    if not allowed:
+    if pages is None:
         return SearchResponse(query=query, total=0, results=[], facets={}, suggestions=[])
     matches = pages.subquery("matches")
 
-    # One row per file: its best page, and how many pages matched in total.
-    best = (
-        sa.select(
-            matches,
-            sa.func.count().over(partition_by=matches.c.source_file_id).label("matching_pages"),
-            sa.func.row_number()
-            .over(
-                partition_by=matches.c.source_file_id,
-                order_by=(matches.c.rank.desc(), matches.c.page_number),
-            )
-            .label("row_number"),
+    # One row per document: its best page, and how many of its pages matched.
+    best = sa.select(
+        matches,
+        sa.func.count().over(partition_by=matches.c.document_id).label("matching_pages"),
+        sa.func.row_number()
+        .over(
+            partition_by=matches.c.document_id,
+            order_by=(matches.c.rank.desc(), matches.c.page_number),
         )
-        .subquery("best")
-    )
+        .label("row_number"),
+    ).subquery("best")
     rolled = sa.select(best).where(best.c.row_number == 1).subquery("rolled")
 
     total = (
@@ -211,15 +309,21 @@ async def search(
 
     results = [
         SearchResult(
+            document_id=row.document_id,
             source_file_id=row.source_file_id,
             library_id=row.library_id,
+            title=row.title,
             original_filename=row.original_filename,
-            sha256=row.sha256,
-            page_count=row.page_count,
+            page_start=row.page_start,
+            page_end=row.page_end,
+            file_page_count=row.file_page_count,
             state=SourceFileState(row.state),
             received_at=row.received_at,
+            known_form_code=row.known_form_code,
+            known_form_name=row.known_form_name,
             best_page=PageHit(
                 page_number=row.page_number,
+                document_page_number=row.page_number - row.page_start + 1,
                 snippet=row.snippet,
                 rank=float(row.rank),
                 thumb_path=row.thumb_path,
@@ -233,9 +337,7 @@ async def search(
     facets = await _facets(session, rolled)
     # Only offer a correction when the query found nothing — otherwise it is a
     # distraction from results the user already has.
-    suggestions = (
-        await suggest(session, query, allowed) if total == 0 else []
-    )
+    suggestions = await suggest(session, query, allowed) if total == 0 else []
 
     return SearchResponse(
         query=query, total=total, results=results, facets=facets, suggestions=suggestions
@@ -244,29 +346,37 @@ async def search(
 
 async def _facets(session: AsyncSession, rolled) -> dict[str, list[Facet]]:
     """Counts computed over the *matched* set, so each facet narrows honestly."""
-    library_rows = (
-        await session.execute(
-            sa.select(rolled.c.library_id, sa.func.count())
-            .group_by(rolled.c.library_id)
-            .order_by(sa.func.count().desc())
-        )
-    ).all()
-    state_rows = (
-        await session.execute(
-            sa.select(rolled.c.state, sa.func.count())
-            .group_by(rolled.c.state)
-            .order_by(sa.func.count().desc())
-        )
-    ).all()
+
+    async def counts(column, label_column=None):
+        selected = [column, sa.func.count()] if label_column is None else [
+            column, label_column, sa.func.count()
+        ]
+        group = [column] if label_column is None else [column, label_column]
+        return (
+            await session.execute(
+                sa.select(*selected)
+                .where(column.is_not(None))
+                .group_by(*group)
+                .order_by(sa.func.count().desc())
+            )
+        ).all()
+
+    library_rows = await counts(rolled.c.library_id)
+    state_rows = await counts(rolled.c.state)
+    form_rows = await counts(rolled.c.known_form_code, rolled.c.known_form_name)
 
     return {
         "library": [
-            Facet(value=str(library_id), label=str(library_id), count=count)
-            for library_id, count in library_rows
+            Facet(value=str(value), label=str(value), count=count)
+            for value, count in library_rows
         ],
         "state": [
-            Facet(value=str(state), label=str(state).replace("_", " "), count=count)
-            for state, count in state_rows
+            Facet(value=str(value), label=str(value).replace("_", " "), count=count)
+            for value, count in state_rows
+        ],
+        "known_form": [
+            Facet(value=code, label=name or code, count=count)
+            for code, name, count in form_rows
         ],
     }
 
@@ -281,30 +391,31 @@ async def suggest(
     join this union in Phase 5.
     """
     similarity = sa.func.similarity
-    titles = (
-        sa.select(
-            Document.title.label("name"), similarity(Document.title, query).label("score")
-        )
-        .where(
-            Document.title.is_not(None),
-            Document.library_id.in_(allowed),
-            similarity(Document.title, query) > SUGGESTION_THRESHOLD,
-        )
+    titles = sa.select(
+        Document.title.label("name"), similarity(Document.title, query).label("score")
+    ).where(
+        Document.title.is_not(None),
+        Document.library_id.in_(allowed),
+        Document.superseded_at.is_(None),
+        similarity(Document.title, query) > SUGGESTION_THRESHOLD,
     )
-    tags = (
-        sa.select(Tag.name.label("name"), similarity(Tag.name, query).label("score"))
-        .where(
-            sa.or_(Tag.library_id.in_(allowed), Tag.library_id.is_(None)),
-            similarity(Tag.name, query) > SUGGESTION_THRESHOLD,
-        )
+    tags = sa.select(
+        Tag.name.label("name"), similarity(Tag.name, query).label("score")
+    ).where(
+        sa.or_(Tag.library_id.in_(allowed), Tag.library_id.is_(None)),
+        similarity(Tag.name, query) > SUGGESTION_THRESHOLD,
     )
-    union = titles.union_all(tags).subquery("candidates")
+    forms = sa.select(
+        KnownForm.name.label("name"), similarity(KnownForm.code, query).label("score")
+    ).where(
+        KnownForm.enabled.is_(True),
+        similarity(KnownForm.code, query) > SUGGESTION_THRESHOLD,
+    )
+    union = titles.union_all(tags, forms).subquery("candidates")
 
     rows = (
         await session.execute(
-            sa.select(union.c.name)
-            .order_by(union.c.score.desc())
-            .limit(MAX_SUGGESTIONS)
+            sa.select(union.c.name).order_by(union.c.score.desc()).limit(MAX_SUGGESTIONS)
         )
     ).scalars().all()
 

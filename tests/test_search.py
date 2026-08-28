@@ -45,6 +45,19 @@ async def bundle(session, signed_in):
                 thumb_path=f"derived/x/thumbs/{number:04d}.webp",
             )
         )
+    # From Phase 2 on, search rolls page hits up to documents (ADR-001), so an
+    # un-segmented file has nothing to return. This bundle is deliberately left
+    # whole — one document over all 100 pages — because these tests are about
+    # the text layer, not the cut.
+    session.add(
+        Document(
+            library_id=library.id,
+            source_file_id=source_file.id,
+            page_start=1,
+            page_end=100,
+            title="Army Records 2019",
+        )
+    )
     await session.commit()
     return user, library, source_file
 
@@ -158,17 +171,8 @@ async def test_trigram_suggests_a_correction_when_nothing_matched(
     client, bundle, session
 ) -> None:
     """REQ-023 — 'Hoda' finds 'Honda', which FTS alone will never do."""
-    _, library, source_file = bundle
+    _, library, _ = bundle
     session.add(Tag(library_id=library.id, name="Honda", slug="honda"))
-    session.add(
-        Document(
-            library_id=library.id,
-            source_file_id=source_file.id,
-            page_start=1,
-            page_end=1,
-            title="Honda Accord Title",
-        )
-    )
     await session.commit()
 
     body = (await client.get("/api/search", params={"q": "Hoda"})).json()

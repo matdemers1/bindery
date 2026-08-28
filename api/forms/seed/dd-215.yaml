@@ -1,0 +1,14 @@
+code: DD-215
+name: DD-215 — Correction to DD Form 214
+description: >
+  Issued to amend a DD-214. Deliberately matched on its own form number so it is
+  never filed as the discharge certificate itself.
+match_rules:
+  scope: any_page
+  max_pages: 3
+  all:
+    - regex: \bdd\s?form\s?215\b
+  any:
+    - phrase: correction to dd form 214
+    - phrase: correction to certificate of release or discharge
+field_extractors: {}

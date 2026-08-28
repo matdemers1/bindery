@@ -1,0 +1,17 @@
+code: VA-AWARD
+name: VA Award Letter
+description: >
+  States monthly entitlement and effective date. Matched on the benefit language
+  rather than "rating", so it does not collide with a rating decision.
+match_rules:
+  scope: any_page
+  all:
+    - phrase: department of veterans affairs
+  any:
+    - phrase: we have granted the following benefits
+    - phrase: your monthly entitlement amount
+    - phrase: award letter
+    - phrase: summary of benefits
+  none:
+    - phrase: rating decision
+field_extractors: {}
