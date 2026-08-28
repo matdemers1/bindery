@@ -1,0 +1,19 @@
+FROM python:3.13-slim
+
+# OCR toolchain — see Architecture.md L5
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      tesseract-ocr tesseract-ocr-eng \
+      ghostscript \
+      poppler-utils \
+      qpdf \
+      unpaper \
+      pngquant \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY pyproject.toml .
+RUN pip install --no-cache-dir .
+COPY worker/ ./worker/
+COPY api/ ./api/
+
+CMD ["python", "-m", "worker.runner"]

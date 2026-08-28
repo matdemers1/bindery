@@ -1,0 +1,32 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [api, worker, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile.${{ matrix.service }}
+          push: true
+          tags: ghcr.io/${{ github.repository }}/${{ matrix.service }}:${{ github.sha }}
+
+# Deploy is deliberately manual: pull and restart on the ZimaOS host.
+# You choose when the thing holding your passport restarts.

@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Env & secrets
+.env
+.env.local
+*.pem
+infra/cloudflared/*.json
+
+# Data — never commit the archive
+/data/
+*.sqlite
+
+# Golden corpus contains real personal documents.
+# Tracked deliberately in this PRIVATE repo; never publish this repo.
+!tests/corpus/
+
+# OS
+.DS_Store

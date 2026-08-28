@@ -1,0 +1,56 @@
+# Bindery — see D3 Cloud Vault/Bindery/Architecture.md
+# INVARIANT: no service publishes a host port. Ingress is Cloudflare Tunnel only (ADR-006).
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    env_file: ../.env
+    volumes:
+      - ${DATA_ROOT}:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # NOTE: migrations are NOT run here. Apply them explicitly.
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    env_file: ../.env
+    volumes:
+      - ${DATA_ROOT}:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+    depends_on:
+      - api
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - web
+      - api
+
+volumes:
+  pgdata:
