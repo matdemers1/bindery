@@ -680,3 +680,33 @@ def test_connection_settings_survive_an_awkward_password(monkeypatch) -> None:
         _ = urlsplit(
             "postgresql://bindery:aB3/xY9/qq/Zz@db.internal:6543/bindery"
         ).port
+
+
+async def test_the_dump_is_readable_by_the_restore_tool(session, archive) -> None:
+    """The gap the restore drill found on the real host.
+
+    `pg_dump` 17 dumps a Postgres 16 server perfectly well and writes an archive
+    `pg_restore` 16 refuses: *unsupported version (1.16) in file header*. A
+    backup that cannot be restored is not a backup, and the failure only appears
+    at restore time — which is exactly the moment it must not.
+
+    So the dump is checked here for being *readable*, not merely non-empty.
+    """
+    import shutil
+    import subprocess
+
+    if not shutil.which("pg_dump"):
+        pytest.skip("pg_dump is not installed in this image")
+
+    report = await integrity.check(session, library_ids=[archive["library"].id])
+    result = backup.run_backup(report, destination=archive["tmp"] / "readable")
+
+    listing = subprocess.run(
+        ["pg_restore", "--list", str(result.database_dump)],
+        capture_output=True, check=False,
+    )
+    assert listing.returncode == 0, (
+        "pg_restore cannot read the archive pg_dump just wrote — the client and "
+        f"server versions have drifted apart:\n{listing.stderr.decode()}"
+    )
+    assert b"document" in listing.stdout, "the dump should contain the schema"
