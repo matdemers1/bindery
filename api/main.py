@@ -11,11 +11,13 @@ from api.routers import (
     documents,
     files,
     health,
+    library,
     pipeline,
     review,
     rules,
     search,
     segments,
+    settings,
     upload,
 )
 
@@ -31,9 +33,11 @@ app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
+app.include_router(library.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(files.router, prefix="/api")
 app.include_router(segments.router, prefix="/api")
 app.include_router(pipeline.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
 app.include_router(rules.router, prefix="/api")
+app.include_router(settings.router, prefix="/api")

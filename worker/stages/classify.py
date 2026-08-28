@@ -63,7 +63,7 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
         log.info("document %s is no longer live; skipping", job.document_id)
         return
 
-    provider = get_provider()
+    provider = await get_provider(session)
     library_ids = [document.library_id]
 
     known_form = (

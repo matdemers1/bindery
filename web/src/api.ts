@@ -222,6 +222,62 @@ export interface RuleDryRun {
   matches: { document_id: string; title: string | null; changes: Record<string, unknown> }[];
 }
 
+export interface ArchiveEntry {
+  document_id: string;
+  source_file_id: string;
+  title: string | null;
+  original_filename: string | null;
+  page_start: number;
+  page_end: number;
+  file_page_count: number | null;
+  document_date: string | null;
+  received_at: string;
+  /** How it got in: web_upload | watched_folder | camera | bulk_import */
+  ingest_source: string;
+  correspondent: string | null;
+  document_type: string | null;
+  known_form: string | null;
+  review_state: string;
+  sensitivity: string;
+  is_backlog: boolean;
+  sha256: string;
+  tags: TagRef[];
+}
+
+export interface ArchiveStats {
+  documents: number;
+  files: number;
+  pages: number;
+  needs_review: number;
+  unclassified: number;
+}
+
+export interface Archive {
+  total: number;
+  entries: ArchiveEntry[];
+  stats: ArchiveStats;
+}
+
+export interface Tree {
+  group_by: string;
+  groups: { label: string; count: number }[];
+}
+
+export interface Settings {
+  anthropic_key_configured: boolean;
+  anthropic_key_hint: string | null;
+  model: string;
+  prompt_version: string;
+}
+
+export interface SettingsTest {
+  ok: boolean;
+  detail: string;
+  model: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+}
+
 export interface Job {
   id: string;
   source_file_id: string | null;
@@ -294,6 +350,25 @@ export const api = {
     request<PageBoxes>(`/files/${id}/pages/${page}/boxes`, { signal }),
 
   pipeline: () => request<PipelineStatus>("/pipeline"),
+
+  archive: (params: Record<string, string | string[]> = {}) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (Array.isArray(value)) value.forEach((v) => search.append(key, v));
+      else if (value) search.set(key, value);
+    }
+    return request<Archive>(`/archive?${search}`);
+  },
+  tree: (groupBy: string) => request<Tree>(`/archive/tree?group_by=${groupBy}`),
+
+  settings: () => request<Settings>("/settings"),
+  updateSettings: (body: Partial<Record<"anthropic_api_key" | "model" | "prompt_version", string>>) =>
+    request<Settings>("/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  testAi: () => request<SettingsTest>("/settings/test-ai", { method: "POST" }),
 
   review: () => request<ReviewQueue>("/review"),
   why: (documentId: string) => request<WhyPanel>(`/documents/${documentId}/why`),

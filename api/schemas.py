@@ -286,6 +286,79 @@ class PipelineStatusOut(BaseModel):
     in_flight: list[JobOut]
 
 
+class ArchiveEntryOut(BaseModel):
+    """One row of the archive browser: what it is, and how it got here."""
+
+    document_id: uuid.UUID
+    source_file_id: uuid.UUID
+    title: str | None
+    original_filename: str | None
+    page_start: int
+    page_end: int
+    file_page_count: int | None
+    document_date: date | None
+    received_at: datetime
+    # web_upload | watched_folder | camera | bulk_import
+    ingest_source: str
+    correspondent: str | None
+    document_type: str | None
+    known_form: str | None
+    review_state: str
+    sensitivity: str
+    is_backlog: bool
+    sha256: str
+    tags: list["TagOut"]
+
+
+class ArchiveStatsOut(BaseModel):
+    documents: int = 0
+    files: int = 0
+    pages: int = 0
+    needs_review: int = 0
+    unclassified: int = 0
+
+
+class ArchiveOut(BaseModel):
+    total: int
+    entries: list[ArchiveEntryOut]
+    stats: ArchiveStatsOut
+
+
+class TreeGroupOut(BaseModel):
+    label: str
+    count: int
+
+
+class TreeOut(BaseModel):
+    group_by: str
+    groups: list[TreeGroupOut]
+
+
+class SettingsOut(BaseModel):
+    """What the client is allowed to know. Never the key itself."""
+
+    anthropic_key_configured: bool
+    # Last four characters, so you can tell which key is loaded without seeing it.
+    anthropic_key_hint: str | None
+    model: str
+    prompt_version: str
+
+
+class SettingsUpdateIn(BaseModel):
+    # None means "leave alone"; empty string means "clear it".
+    anthropic_api_key: str | None = None
+    model: str | None = None
+    prompt_version: str | None = None
+
+
+class SettingsTestOut(BaseModel):
+    ok: bool
+    detail: str
+    model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
 class HealthOut(BaseModel):
     status: str
     database: str
@@ -293,6 +366,9 @@ class HealthOut(BaseModel):
 
 
 __all__ = [
+    "ArchiveEntryOut",
+    "ArchiveOut",
+    "ArchiveStatsOut",
     "ClassificationOut",
     "DocumentDetailOut",
     "DocumentOut",
@@ -316,10 +392,15 @@ __all__ = [
     "SegmentIn",
     "SegmentListOut",
     "SegmentReplaceIn",
+    "SettingsOut",
+    "SettingsTestOut",
+    "SettingsUpdateIn",
     "SourceFileDetailOut",
     "SourceFileOut",
     "StageCount",
     "TagOut",
+    "TreeGroupOut",
+    "TreeOut",
     "UploadResult",
     "UserOut",
     "WhyPanelOut",

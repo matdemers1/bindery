@@ -8,6 +8,7 @@ from api.db.models.known_form import KnownForm
 from api.db.models.library import Library
 from api.db.models.membership import Membership
 from api.db.models.page import Page
+from api.db.models.setting import Setting
 from api.db.models.source_file import SourceFile
 from api.db.models.tag import DocumentTag, Tag, live_tag_links
 from api.db.models.taxonomy import Correspondent, DocumentType, Rule
@@ -29,6 +30,7 @@ __all__ = [
     "Page",
     "RefreshToken",
     "Rule",
+    "Setting",
     "SourceFile",
     "Tag",
     "live_tag_links",

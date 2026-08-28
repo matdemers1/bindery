@@ -4,9 +4,11 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { ApiError, api, type Library, type User } from "./api";
 import CommandPalette from "./features/palette/CommandPalette";
 import PipelinePage from "./features/pipeline/PipelinePage";
+import ArchivePage from "./features/archive/ArchivePage";
 import ReviewPage from "./features/review/ReviewPage";
 import RulesPage from "./features/rules/RulesPage";
 import SearchPage from "./features/search/SearchPage";
+import SettingsPage from "./features/settings/SettingsPage";
 import SegmentationPage from "./features/segmentation/SegmentationPage";
 import ViewerPage from "./features/viewer/ViewerPage";
 import Shell from "./components/Shell";
@@ -81,7 +83,9 @@ export default function App() {
           <Route path="/file/:fileId/page/:pageNumber" element={<ViewerPage mode="file" />} />
           <Route path="/file/:fileId/segments" element={<SegmentationPage />} />
           <Route path="/file/:fileId" element={<Navigate to="page/1" replace />} />
+          <Route path="/archive" element={<ArchivePage />} />
           <Route path="/review" element={<ReviewPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/rules" element={<RulesPage libraries={libraries} />} />
           <Route path="/pipeline" element={<PipelinePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

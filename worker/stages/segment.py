@@ -106,7 +106,7 @@ async def confirm_ambiguous(
         ProviderUnavailableError,
     )
 
-    provider = get_provider()
+    provider = await get_provider()
     if not provider.available():
         log.info("no provider available; leaving %s ambiguous seam(s) uncut", len(ambiguous))
         return []

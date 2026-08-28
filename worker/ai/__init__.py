@@ -29,23 +29,39 @@ def set_provider(provider: AIProvider | None) -> None:
     _override = provider
 
 
-def get_provider() -> AIProvider:
+async def get_provider(session=None) -> AIProvider:
+    """Resolve the provider, preferring settings a human set over the environment.
+
+    Reads the database on every call rather than caching, so adding a key in the
+    UI takes effect on the next document instead of on the next restart. The
+    cost is one indexed lookup per classification, against a call that takes
+    seconds.
+    """
     if _override is not None:
         return _override
 
     settings = get_settings()
-    if not settings.anthropic_api_key:
+    api_key = settings.anthropic_api_key
+    model = settings.bindery_model
+    prompt_version = settings.bindery_prompt_version
+
+    if session is not None:
+        from api import settings_store
+
+        api_key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
+        model = await settings_store.get(session, settings_store.BINDERY_MODEL) or model
+        prompt_version = (
+            await settings_store.get(session, settings_store.PROMPT_VERSION) or prompt_version
+        )
+
+    if not api_key:
         # Not an error. Retrieval never depends on the API being reachable
         # (invariant 7), so an unconfigured archive is a working archive.
-        return UnavailableProvider(prompt_version=settings.bindery_prompt_version)
+        return UnavailableProvider(prompt_version=prompt_version)
 
     from worker.ai.claude import ClaudeProvider
 
-    return ClaudeProvider(
-        api_key=settings.anthropic_api_key,
-        model=settings.bindery_model,
-        prompt_version=settings.bindery_prompt_version,
-    )
+    return ClaudeProvider(api_key=api_key, model=model, prompt_version=prompt_version)
 
 
 __all__ = [

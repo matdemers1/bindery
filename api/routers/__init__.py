@@ -3,15 +3,17 @@ from api.routers import (
     documents,
     files,
     health,
+    library,
     pipeline,
     review,
     rules,
     search,
     segments,
+    settings,
     upload,
 )
 
 __all__ = [
-    "auth", "documents", "files", "health", "pipeline", "review", "rules",
-    "search", "segments", "upload",
+    "auth", "documents", "files", "health", "library", "pipeline", "review", "rules",
+    "search", "segments", "settings", "upload",
 ]

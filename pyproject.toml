@@ -27,6 +27,8 @@ dependencies = [
     "pyyaml",
     # Page extraction for segment export; also used by the pipeline.
     "pikepdf",
+    # Encrypts secrets held in the settings table.
+    "cryptography",
 ]
 
 [project.optional-dependencies]
