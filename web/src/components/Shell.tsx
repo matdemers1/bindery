@@ -66,6 +66,7 @@ export default function Shell({
             <Tab to="/archive">Archive</Tab>
             <Tab to="/review">Review</Tab>
             <Tab to="/rules">Rules</Tab>
+            <Tab to="/import">Import</Tab>
             <Tab to="/pipeline">Pipeline</Tab>
             <Tab to="/settings">Settings</Tab>
           </nav>

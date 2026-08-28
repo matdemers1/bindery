@@ -278,6 +278,52 @@ export interface SettingsTest {
   output_tokens: number | null;
 }
 
+export interface ImportSession {
+  id: string;
+  library_id: string;
+  root_path: string;
+  state: string;
+  pass_number: number;
+  sample_size: number;
+  dry_run: {
+    total_files?: number;
+    total_bytes?: number;
+    by_extension?: Record<string, number>;
+    already_in_archive?: number;
+    duplicates_within_batch?: number;
+    new_files?: number;
+    estimated_pages?: number;
+    skipped_unsupported?: number;
+    skipped_hidden?: number;
+    errors?: { path: string; error: string }[];
+  };
+  cost_estimate: {
+    estimated_pages?: number;
+    interactive_usd?: number;
+    batch_usd?: number;
+    exceeds_alarm?: boolean;
+    alarm_threshold_usd?: number;
+  };
+  progress: Record<string, number>;
+  last_error: string | null;
+  created_at: string;
+}
+
+export interface ImportItem {
+  path: string;
+  state: string;
+  byte_size: number | null;
+  sha256: string | null;
+  source_file_id: string | null;
+  error: string | null;
+}
+
+export interface BulkResult {
+  matched: number;
+  operation_id: string | null;
+  changes: { document_id: string; title: string | null; changes: Record<string, unknown> }[];
+}
+
 export interface Job {
   id: string;
   source_file_id: string | null;
@@ -369,6 +415,40 @@ export const api = {
       body: JSON.stringify(body),
     }),
   testAi: () => request<SettingsTest>("/settings/test-ai", { method: "POST" }),
+
+  imports: () => request<ImportSession[]>("/imports"),
+  startImport: (body: { library_id: string; root_path: string; sample_size?: number }) =>
+    request<ImportSession>("/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  importSession: (id: string) => request<ImportSession>(`/imports/${id}`),
+  importItems: (id: string, state?: string) =>
+    request<ImportItem[]>(`/imports/${id}/items${state ? `?state=${state}` : ""}`),
+  sampleImport: (id: string) =>
+    request<ImportSession>(`/imports/${id}/sample`, { method: "POST" }),
+  runImport: (id: string, batch = 50) =>
+    request<ImportSession>(`/imports/${id}/run?batch=${batch}`, { method: "POST" }),
+  pauseImport: (id: string) =>
+    request<ImportSession>(`/imports/${id}/pause`, { method: "POST" }),
+  curateImport: (id: string) =>
+    request<ImportSession>(`/imports/${id}/curate`, { method: "POST" }),
+
+  bulkPreview: (documentIds: string[], actions: Record<string, unknown>) =>
+    request<BulkResult>("/bulk/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_ids: documentIds, actions }),
+    }),
+  bulkApply: (documentIds: string[], actions: Record<string, unknown>) =>
+    request<BulkResult>("/bulk/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_ids: documentIds, actions }),
+    }),
+  bulkUndo: (operationId: string) =>
+    request<BulkResult>(`/bulk/${operationId}/undo`, { method: "POST" }),
 
   review: () => request<ReviewQueue>("/review"),
   why: (documentId: string) => request<WhyPanel>(`/documents/${documentId}/why`),

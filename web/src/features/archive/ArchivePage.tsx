@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
-import { api, type Archive, type ArchiveEntry, type Tree, fileUrl } from "../../api";
+import { ApiError, api, type Archive, type ArchiveEntry, type BulkResult, type Tree, fileUrl } from "../../api";
 import { SourceChip } from "../why/WhyPanel";
 
 /**
@@ -34,6 +34,9 @@ export default function ArchivePage() {
   const [archive, setArchive] = useState<Archive | null>(null);
   const [tree, setTree] = useState<Tree | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [lastOperation, setLastOperation] = useState<BulkResult | null>(null);
+  const [bulkNotice, setBulkNotice] = useState<string | null>(null);
 
   const groupBy = params.get("group") ?? "year";
   const filters = {
@@ -178,6 +181,38 @@ export default function ArchivePage() {
             )}
           </div>
 
+          {selected.size > 0 && (
+            <BulkBar
+              selected={selected}
+              onDone={async (result, message) => {
+                setLastOperation(result);
+                setBulkNotice(message);
+                setSelected(new Set());
+                await load();
+              }}
+              onClear={() => setSelected(new Set())}
+            />
+          )}
+
+          {bulkNotice && (
+            <p className="mb-3 flex items-center gap-3 text-sm text-accent">
+              {bulkNotice}
+              {lastOperation?.operation_id && (
+                <button
+                  onClick={async () => {
+                    await api.bulkUndo(lastOperation.operation_id!);
+                    setLastOperation(null);
+                    setBulkNotice("Undone.");
+                    await load();
+                  }}
+                  className="rounded border border-edge px-2 py-0.5 text-xs text-muted"
+                >
+                  Undo
+                </button>
+              )}
+            </p>
+          )}
+
           {loading && !archive ? (
             <ul className="space-y-2">
               {[0, 1, 2, 3].map((n) => (
@@ -193,7 +228,20 @@ export default function ArchivePage() {
               </p>
               <ul className="space-y-2">
                 {archive?.entries.map((entry) => (
-                  <Row key={entry.document_id} entry={entry} />
+                  <Row
+                    key={entry.document_id}
+                    entry={entry}
+                    selected={selected.has(entry.document_id)}
+                    onToggle={() =>
+                      setSelected((current) => {
+                        const next = new Set(current);
+                        next.has(entry.document_id)
+                          ? next.delete(entry.document_id)
+                          : next.add(entry.document_id);
+                        return next;
+                      })
+                    }
+                  />
                 ))}
               </ul>
             </>
@@ -204,17 +252,33 @@ export default function ArchivePage() {
   );
 }
 
-function Row({ entry }: { entry: ArchiveEntry }) {
+function Row({
+  entry,
+  selected,
+  onToggle,
+}: {
+  entry: ArchiveEntry;
+  selected: boolean;
+  onToggle: () => void;
+}) {
   const isSegment =
     entry.file_page_count !== null &&
     entry.page_end - entry.page_start + 1 < entry.file_page_count;
 
   return (
-    <li>
-      <Link
-        to={`/document/${entry.document_id}/page/1`}
-        className="flex gap-3 rounded-lg border border-edge bg-surface p-3 hover:border-accent/60"
-      >
+    <li
+      className={`flex gap-3 rounded-lg border bg-surface p-3 ${
+        selected ? "border-accent" : "border-edge hover:border-accent/60"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onToggle}
+        aria-label={`Select ${entry.title ?? entry.original_filename ?? "document"}`}
+        className="mt-1 shrink-0 accent-amber-400"
+      />
+      <Link to={`/document/${entry.document_id}/page/1`} className="flex min-w-0 flex-1 gap-3">
         <img
           src={fileUrl.thumb(entry.source_file_id, entry.page_start)}
           alt=""
@@ -267,6 +331,93 @@ function Row({ entry }: { entry: ArchiveEntry }) {
         </div>
       </Link>
     </li>
+  );
+}
+
+/**
+ * Bulk edit (T-4.6). The preview is the apply path with writes off, so what it
+ * shows is what happens — and the whole operation undoes as one action, because
+ * undoing a thousand documents one at a time is the same as no undo.
+ */
+function BulkBar({
+  selected,
+  onDone,
+  onClear,
+}: {
+  selected: Set<string>;
+  onDone: (result: BulkResult, message: string) => void;
+  onClear: () => void;
+}) {
+  const [tags, setTags] = useState("");
+  const [preview, setPreview] = useState<BulkResult | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const actions = () => ({
+    add_tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+  });
+
+  return (
+    <div className="mb-3 rounded-lg border border-accent/40 bg-surface p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm">
+          {selected.size} selected
+        </span>
+        <input
+          value={tags}
+          onChange={(event) => {
+            setTags(event.target.value);
+            setPreview(null);
+          }}
+          placeholder="Add tags, comma separated"
+          className="min-w-0 flex-1 rounded-md border border-edge bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
+        />
+        <button
+          onClick={async () => {
+            setBusy(true);
+            try {
+              setPreview(await api.bulkPreview([...selected], actions()));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          disabled={busy || !tags.trim()}
+          className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+        >
+          Preview
+        </button>
+        <button
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const result = await api.bulkApply([...selected], actions());
+              onDone(result, `Tagged ${result.matched} documents.`);
+            } catch (error) {
+              onDone(
+                { matched: 0, operation_id: null, changes: [] },
+                error instanceof ApiError ? error.message : "That didn't work.",
+              );
+            } finally {
+              setBusy(false);
+            }
+          }}
+          disabled={busy || !preview}
+          title={preview ? undefined : "Preview it first"}
+          className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
+        >
+          Apply
+        </button>
+        <button onClick={onClear} className="text-sm text-muted hover:underline">
+          Clear
+        </button>
+      </div>
+
+      {preview && (
+        <p className="mt-2 text-xs text-muted">
+          Would change {preview.matched} of {selected.size} selected. Nothing has been
+          written.
+        </p>
+      )}
+    </div>
   );
 }
 
