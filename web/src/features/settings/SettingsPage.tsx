@@ -3,6 +3,7 @@ import { Settings as SettingsIcon } from "lucide-react";
 import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 
+import LogViewer from "../../components/LogViewer";
 import PendingReviewPanel from "../../components/PendingReview";
 import { ApiError, api, type ApiTokenRecord, type IssuedApiToken, type Settings, type SettingsTest } from "../../api";
 
@@ -163,6 +164,19 @@ export default function SettingsPage() {
 
       <NotificationSettings settings={settings} onSaved={load} />
       <ApiTokens />
+
+      <section className="mt-6">
+        <h2 className="text-base font-medium">Diagnostics</h2>
+        <p className="mb-3 mt-1 max-w-2xl text-sm text-muted">
+          Everything the archive logs, kept and searchable. This used to go to the
+          container&apos;s output and nowhere else, which meant explaining a failure
+          started with finding a terminal.
+        </p>
+        {/* Warnings and above by default: the reason anyone opens a log is to
+            find the red line, and the informational chatter of a healthy
+            pipeline buries it. */}
+        <LogViewer title="Recent activity" defaultLevel="warning" />
+      </section>
     </div>
   );
 }

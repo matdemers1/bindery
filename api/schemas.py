@@ -889,3 +889,54 @@ class OcrTextOut(BaseModel):
     pages: list[OcrPageTextOut]
     characters: int
     empty_pages: int
+
+
+# --------------------------------------------------------------------------
+# Diagnostics and per-file pipeline progress
+# --------------------------------------------------------------------------
+
+
+class LogEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    sequence: int
+    level: str
+    logger: str
+    message: str
+    # Whole, not truncated: the bottom of a traceback is the useful end.
+    detail: str | None
+    source_file_id: uuid.UUID | None
+    document_id: uuid.UUID | None
+    job_id: uuid.UUID | None
+    stage: str | None
+    context: dict
+    created_at: datetime
+
+
+class LogPageOut(BaseModel):
+    entries: list[LogEntryOut]
+    next_before_sequence: int | None = None
+    # If this is climbing, what you are reading is behind reality.
+    pending_writes: int = 0
+
+
+class FileProgressOut(BaseModel):
+    source_file_id: uuid.UUID
+    original_filename: str | None
+    byte_size: int
+    page_count: int | None
+    state: str
+    received_at: datetime
+    ingest_source: str
+    document_count: int
+    active_stage: str | None
+    failed_stage: str | None
+    last_error: str | None
+    attempts: int
+    dead_lettered: bool
+
+
+class PipelineFilesOut(BaseModel):
+    files: list[FileProgressOut]
+    stages: list[str]

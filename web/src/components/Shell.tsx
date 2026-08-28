@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router";
 import {
   Activity,
-  Camera,
   ClipboardCheck,
   FolderTree,
   Import,
@@ -104,13 +103,6 @@ export default function Shell({
   const [reviewCount, setReviewCount] = useState(0);
   const [unhealthy, setUnhealthy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const camera = useRef<HTMLInputElement>(null);
-
-  // Rendered only where a camera exists: on a desktop the capture attribute is
-  // ignored and the button would just be a second, worse file picker.
-  const hasCamera =
-    typeof navigator !== "undefined" &&
-    (navigator.maxTouchPoints > 0 || /Android|iPhone|iPad/.test(navigator.userAgent));
 
   useEffect(() => {
     localStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
@@ -222,40 +214,18 @@ export default function Shell({
             className="hidden"
             onChange={(event) => void upload(event.target.files)}
           />
-          {/*
-            Camera capture (REQ-007). `capture="environment"` opens the rear
-            camera directly instead of the photo picker, which is the whole
-            point: a receipt is photographed where you are standing.
-          */}
-          <input
-            ref={camera}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(event) => void upload(event.target.files)}
-          />
-
-          <button
-            onClick={() => input.current?.click()}
-            disabled={busy || libraries.length === 0}
+          {/* A link to a page, not a file dialog. Opening the OS picker here
+              meant everything after it happened somewhere you could not watch:
+              the dialog closed, a toast said a number, and the files went off
+              to be processed with no way to see what became of them. */}
+          <NavLink
+            to="/add"
             title="Add files"
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink"
           >
             <Plus size={16} strokeWidth={2.5} />
-            {!collapsed && (busy ? "Adding…" : "Add files")}
-          </button>
-
-          {hasCamera && (
-            <button
-              onClick={() => camera.current?.click()}
-              disabled={busy || libraries.length === 0}
-              className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-lg border border-edge px-3 py-2 text-sm disabled:opacity-50"
-            >
-              <Camera size={16} />
-              {!collapsed && "Photograph"}
-            </button>
-          )}
+            {!collapsed && "Add files"}
+          </NavLink>
 
           <button
             onClick={onOpenPalette}
@@ -316,7 +286,7 @@ export default function Shell({
       {dragging && (
         <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-ink/70">
           <p className="rounded-xl border-2 border-dashed border-accent px-8 py-6 text-lg text-accent">
-            Drop to add to the archive
+            {busy ? "Adding…" : "Drop to add to the archive"}
           </p>
         </div>
       )}

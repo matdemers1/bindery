@@ -16,8 +16,11 @@ import os
 import signal
 import uuid
 
-from api import health_panel, notify, queue, settings_store
+import sqlalchemy as sa
+
+from api import eventlog, health_panel, notify, queue, settings_store
 from api.config import get_settings
+from api.db.models import Document, SourceFile
 from api.db.session import SessionFactory, engine
 from worker.ingest.watched_folder import watch_inbox
 from worker.stages import STAGES
@@ -25,6 +28,10 @@ from worker.stages import STAGES
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
 )
+# Everything logged from here on is also written to `event_log`, so a failure is
+# explainable from the screen you noticed it on rather than from the host's
+# terminal scrollback.
+eventlog.install()
 log = logging.getLogger("bindery.worker")
 
 IDLE_POLL_SECONDS = 2.0
@@ -40,35 +47,80 @@ class UnknownStageError(RuntimeError):
     """A job names a stage this build does not implement."""
 
 
+async def _library_of(job: queue.ClaimedJob) -> uuid.UUID | None:
+    """Which library this job's work belongs to.
+
+    Looked up so that every log line the stage writes carries it: log messages
+    routinely contain filenames, and the boundary that governs a document has to
+    govern its diagnostics too.
+    """
+    try:
+        async with SessionFactory() as session:
+            if job.source_file_id:
+                return await session.scalar(
+                    sa.select(SourceFile.library_id).where(SourceFile.id == job.source_file_id)
+                )
+            if job.document_id:
+                return await session.scalar(
+                    sa.select(Document.library_id).where(Document.id == job.document_id)
+                )
+    except Exception:
+        # Never let a diagnostic lookup stop real work.
+        log.debug("could not resolve library for job %s", job.id)
+    return None
+
+
 async def _run_one(job: queue.ClaimedJob) -> None:
     """Execute a claimed job in its own session, then record the outcome.
 
     The outcome is written in a *separate* session from the stage's own work, so
     a stage that poisons its transaction can still be marked failed.
     """
-    try:
-        stage_fn = STAGES.get(job.stage)
-        if stage_fn is None:
-            raise UnknownStageError(f"no implementation for stage {job.stage.value}")
-        async with SessionFactory() as session:
-            await stage_fn(session, job)
-            await session.commit()
-    except Exception as exc:  # every failure is recorded; none escape this loop
-        log.exception("job %s (%s) failed", job.id, job.stage.value)
-        async with SessionFactory() as session:
-            state = await queue.fail(session, job.id, job.attempts, repr(exc))
-            await session.commit()
-        if state is queue.JobState.DEAD_LETTER:
-            log.error(
-                "job %s (%s) dead-lettered after %s attempts",
-                job.id, job.stage.value, job.attempts,
-            )
-        return
+    # Bound once, here, so every line any stage writes — including lines from
+    # code that has never heard of the event log — is attributable to this job,
+    # this file and this library.
+    with eventlog.bind(
+        job_id=job.id,
+        stage=job.stage.value,
+        source_file_id=job.source_file_id,
+        document_id=job.document_id,
+        library_id=await _library_of(job),
+        attempt=job.attempts,
+    ):
+        try:
+            stage_fn = STAGES.get(job.stage)
+            if stage_fn is None:
+                raise UnknownStageError(f"no implementation for stage {job.stage.value}")
+            log.info("%s started", job.stage.value)
+            async with SessionFactory() as session:
+                await stage_fn(session, job)
+                await session.commit()
+        except Exception as exc:  # every failure is recorded; none escape this loop
+            async with SessionFactory() as session:
+                state = await queue.fail(session, job.id, job.attempts, repr(exc))
+                await session.commit()
 
-    async with SessionFactory() as session:
-        await queue.succeed(session, job.id)
-        await session.commit()
-    log.info("job %s (%s) succeeded", job.id, job.stage.value)
+            # One line per failure, at the level the *outcome* deserves. Logging
+            # an attempt that is about to be retried at ERROR fills the error
+            # filter with things that then succeed, and an error filter you
+            # learn to ignore is the same as not having one. The traceback is
+            # attached either way — it is the thing worth having.
+            if state is queue.JobState.DEAD_LETTER:
+                log.error(
+                    "gave up on %s after %s attempts — it will not retry on its own: %s",
+                    job.stage.value, job.attempts, exc, exc_info=exc,
+                )
+            else:
+                log.warning(
+                    "%s failed (attempt %s of %s), retrying shortly: %s",
+                    job.stage.value, job.attempts, queue.MAX_ATTEMPTS, exc, exc_info=exc,
+                )
+            return
+
+        async with SessionFactory() as session:
+            await queue.succeed(session, job.id)
+            await session.commit()
+        log.info("%s finished", job.stage.value)
 
 
 async def _slot(worker_id: str, stopping: asyncio.Event, in_flight: set[uuid.UUID]) -> None:
@@ -202,6 +254,11 @@ async def main() -> None:
     tasks.append(asyncio.create_task(_reclaimer(stopping), name="reclaimer"))
     tasks.append(asyncio.create_task(watch_inbox(stopping), name="watched-folder"))
     tasks.append(asyncio.create_task(_health_monitor(stopping), name="health-monitor"))
+    tasks.append(
+        asyncio.create_task(
+            eventlog.drain_forever(stopping, SessionFactory), name="log-drain"
+        )
+    )
 
     # Last line of defence: if a task exits despite the guards above, say so
     # rather than letting the worker sit there looking healthy.

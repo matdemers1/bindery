@@ -305,6 +305,38 @@ about 5x. Each classification is costed at the rates of the model that actually
 ran, so switching to Haiku does not make last month cheaper, and an unrecognised
 model is costed at the top rate so the tripwire errs towards alarming.
 
+## Diagnostics
+
+`api/eventlog.py`. Every log line the application writes is also persisted to
+`event_log`, so a failure is explainable from the screen you noticed it on
+rather than from the host's terminal scrollback.
+
+It is a `logging.Handler` rather than a bespoke `log_event()` call, which is the
+whole reason it works: there were already 75 log statements saying the right
+things to the wrong place, and a handler adopts all of them — including the ones
+written next year by someone who has never read the module.
+
+Three rules, each of which is a specific piece of that file:
+
+- **Logging must never break the thing it is logging.** `emit` cannot raise and
+  cannot block; it drops onto a bounded queue and returns. Overflow drops the
+  record, counts it, and reports the count *through the log*.
+- **A log row must not roll back with the failure it describes.** The drain owns
+  its own session.
+- **Context travels with the work.** `eventlog.bind()` in the job runner tags
+  every line a stage writes with the job, file, stage and library — so the
+  boundary that governs a document governs its diagnostics, because log messages
+  routinely contain filenames.
+
+Log level matches the *outcome*, not the event: a retryable attempt is a
+warning, a dead-letter is an error. Logging attempts that later succeed at ERROR
+fills the error filter with noise, and an error filter you learn to ignore is
+the same as not having one.
+
+Not pruned. A few hundred bytes per job is tens of megabytes over the archive's
+life, and a scheduled delete would be the one thing here that removes rows on
+its own.
+
 ## Deployment
 
 `docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) runs lint and the

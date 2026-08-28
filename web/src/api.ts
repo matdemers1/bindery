@@ -747,6 +747,27 @@ export const api = {
   revokeApiToken: (id: string) =>
     request<ApiTokenRecord>(`/tokens/${id}/revoke`, { method: "POST" }),
 
+
+  logs: (params: {
+    source_file_id?: string;
+    level?: string;
+    q?: string;
+    before_sequence?: number;
+    limit?: number;
+  } = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    }
+    return request<LogPage>(`/logs${query.size ? `?${query}` : ""}`);
+  },
+
+  pipelineFiles: (ids?: string[]) => {
+    const query = new URLSearchParams();
+    (ids ?? []).forEach((id) => query.append("ids", id));
+    return request<PipelineFiles>(`/pipeline/files${query.size ? `?${query}` : ""}`);
+  },
+
   upload: (libraryId: string, file: File) => {
     const form = new FormData();
     form.append("library_id", libraryId);
@@ -945,6 +966,51 @@ export interface ApiTokenRecord {
 
 export interface IssuedApiToken extends ApiTokenRecord {
   secret: string;
+}
+
+
+// --- Diagnostics and per-file progress -----------------------------------
+
+export interface LogEntry {
+  id: string;
+  sequence: number;
+  level: "debug" | "info" | "warning" | "error" | "critical";
+  logger: string;
+  message: string;
+  detail: string | null;
+  source_file_id: string | null;
+  document_id: string | null;
+  job_id: string | null;
+  stage: string | null;
+  context: Record<string, string>;
+  created_at: string;
+}
+
+export interface LogPage {
+  entries: LogEntry[];
+  next_before_sequence: number | null;
+  pending_writes: number;
+}
+
+export interface FileProgress {
+  source_file_id: string;
+  original_filename: string | null;
+  byte_size: number;
+  page_count: number | null;
+  state: string;
+  received_at: string;
+  ingest_source: string;
+  document_count: number;
+  active_stage: string | null;
+  failed_stage: string | null;
+  last_error: string | null;
+  attempts: number;
+  dead_lettered: boolean;
+}
+
+export interface PipelineFiles {
+  files: FileProgress[];
+  stages: string[];
 }
 
 /** Blob URLs. Authenticated and library-scoped server-side; no token in the URL. */
