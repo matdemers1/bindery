@@ -43,6 +43,26 @@ ALREADY_HAS_TEXT = 6
 # ocrmypdf exit code: the input could not be coerced to PDF/A.
 PDFA_CONVERSION_FAILED = 10
 
+# ...but it is not the only way that failure arrives. A PDF with a DeviceN
+# colour space — routine in professionally printed forms, which is to say in tax
+# documents — fails PDF/A conversion with a *generic* exit 1 and one of these
+# messages instead. Detecting only exit code 10 meant a real 1099 and a real W-2
+# retried five times and gave up, unsearchable, for a reason that has nothing to
+# do with reading them.
+PDFA_FAILURE_SIGNATURES = (
+    "ColorConversionNeededError",
+    "ColorConversionStrategy",
+    "DeviceN",
+    "not permitted in PDF/A",
+)
+
+
+def _is_pdfa_failure(error: subprocess_util.CommandError) -> bool:
+    if error.returncode == PDFA_CONVERSION_FAILED:
+        return True
+    message = str(error)
+    return any(signature in message for signature in PDFA_FAILURE_SIGNATURES)
+
 
 
 def _word_count(boxes: dict) -> int:
@@ -110,11 +130,16 @@ async def _run_ocr(
             ok_codes=(0, ALREADY_HAS_TEXT),
         )
     except subprocess_util.CommandError as exc:
-        if exc.returncode != PDFA_CONVERSION_FAILED:
+        if not _is_pdfa_failure(exc):
             raise
         # PDF/A is a nice-to-have for archival fidelity; searchability is not
-        # negotiable. Fall back rather than fail the document.
-        log.warning("PDF/A conversion failed for %s; falling back to plain PDF", source.name)
+        # negotiable. Fall back rather than fail the document — and note that
+        # for a DeviceN document plain PDF is arguably the *better* artifact,
+        # since it keeps the original colour space instead of mangling it.
+        log.warning(
+            "PDF/A conversion failed for %s; falling back to plain PDF (%s)",
+            source.name, str(exc)[:200],
+        )
         code, _, _ = await subprocess_util.run(
             _ocr_argv(source, output, sidecar, pdfa=False, image=image, force=force),
             timeout=OCR_TIMEOUT_SECONDS,

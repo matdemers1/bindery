@@ -1,19 +1,56 @@
-import { Activity } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { Activity, Loader, RotateCw, ScrollText } from "lucide-react";
 
+import { api, type FileProgress, type Job, type PipelineStatus } from "../../api";
+import LogViewer from "../../components/LogViewer";
 import PageHeader from "../../components/PageHeader";
-import { useCallback, useState } from "react";
-
-import { api, type PipelineStatus } from "../../api";
-import { useLiveQuery } from "../../live/LiveProvider";
 import PendingReviewPanel from "../../components/PendingReview";
+import { useLiveQuery } from "../../live/LiveProvider";
+import PipelineFlow, { FileRow } from "../add/PipelineFlow";
 
+/**
+ * The pipeline, as a pipeline.
+ *
+ * This screen used to be three lists and a table of stage/state counts. The
+ * table was the honest shape of the data and the wrong shape for the question:
+ * nobody wants to know that `normalize` has two rows in `queued`, they want to
+ * know *which document is stuck and why*.
+ *
+ * So it now shows the same stage chain as the add page — one visual language
+ * for one concept — plus the files themselves, and a failure list that names
+ * the document rather than just the stage that dropped it.
+ *
+ * The distinction that earns its place here is **retrying** versus **gave up**.
+ * A job that failed and will try again is put back on the queue, so it reads as
+ * `queued` in the database and used to be reported as perfectly healthy. Two
+ * tax documents failed on a loop underneath a screen that said "Nothing
+ * failed."
+ */
 export default function PipelinePage() {
   const [status, setStatus] = useState<PipelineStatus | null>(null);
+  const [files, setFiles] = useState<FileProgress[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [logFor, setLogFor] = useState<FileProgress | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
-  const load = useCallback(() => api.pipeline().then(setStatus).catch(() => {}), []);
+  const load = useCallback(async () => {
+    const [jobs, progress] = await Promise.allSettled([
+      api.pipeline(),
+      api.pipelineFiles(),
+    ]);
+    if (jobs.status === "fulfilled") setStatus(jobs.value);
+    if (progress.status === "fulfilled") setFiles(progress.value.files);
+  }, []);
 
   useLiveQuery(["jobs", "files", "review"], load);
+
+  // The job knows which file it belongs to but not what it is called, and a
+  // failure you cannot name is a failure you cannot go and look at.
+  const nameOf = useMemo(() => {
+    const names = new Map(files.map((f) => [f.source_file_id, f.original_filename]));
+    return (job: Job) =>
+      (job.source_file_id && names.get(job.source_file_id)) || null;
+  }, [files]);
 
   async function retry(jobId: string) {
     setBusy(jobId);
@@ -25,141 +62,187 @@ export default function PipelinePage() {
     }
   }
 
-  if (!status) {
-    return <div className="mx-auto max-w-4xl py-8 text-center text-muted">Loading…</div>;
-  }
-
-  const quiet =
-    status.counts.length === 0 && status.attention.length === 0 && status.in_flight.length === 0;
+  const attention = status?.attention ?? [];
+  const retrying = attention.filter((job) => job.state === "queued");
+  const gaveUp = attention.filter((job) => job.state !== "queued");
+  const visible = showAll ? files : files.slice(0, 10);
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="mx-auto max-w-4xl space-y-5">
       <PageHeader icon={Activity} title="Pipeline">
-        Every job in the archive, and every one that needs a human.
+        Where every file is, and anything that needs you.
       </PageHeader>
 
-      {/* Above the job list on purpose. "Nothing in flight" is true and was
-          also, until now, the only thing this screen said while documents sat
-          permanently unclassified. */}
-      <div className="mb-6">
-        <PendingReviewPanel />
-      </div>
+      <PendingReviewPanel />
 
-      {quiet ? (
-        <p className="rounded-lg border border-edge p-8 text-center text-sm text-muted">
-          Nothing in flight.
-        </p>
-      ) : (
-        <>
-          <Section title="Needs attention" count={status.attention.length}>
-            {status.attention.length === 0 ? (
-              <Quiet>Nothing failed.</Quiet>
-            ) : (
-              <ul className="divide-y divide-edge rounded-lg border border-edge">
-                {status.attention.map((job) => (
-                  <li key={job.id} className="flex items-start justify-between gap-4 p-4">
-                    <div className="min-w-0">
-                      <p className="text-sm">
-                        <span className="font-medium">{job.stage}</span>
-                        <StateChip state={job.state} />
-                        <span className="ml-2 text-xs text-muted">
-                          {job.attempts} {job.attempts === 1 ? "attempt" : "attempts"}
-                        </span>
-                      </p>
-                      {job.last_error && (
-                        <p className="mt-1 font-mono text-xs break-words text-red-400/90">
-                          {job.last_error}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => retry(job.id)}
-                      disabled={busy === job.id}
-                      className="shrink-0 rounded-md border border-edge px-3 py-1.5 text-sm hover:border-accent/60 disabled:opacity-40"
-                    >
-                      {busy === job.id ? "Retrying…" : "Retry"}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
+      {files.length > 0 && <PipelineFlow files={files} />}
 
-          <Section title="In flight" count={status.in_flight.length}>
-            {status.in_flight.length === 0 ? (
-              <Quiet>Idle.</Quiet>
-            ) : (
-              <ul className="divide-y divide-edge rounded-lg border border-edge">
-                {status.in_flight.map((job) => (
-                  <li key={job.id} className="p-4 text-sm">
-                    <span className="font-medium">{job.stage}</span>
-                    <StateChip state={job.state} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
+      {gaveUp.length > 0 && (
+        <JobList
+          tone="bad"
+          title="Gave up"
+          blurb="These stopped retrying on their own. Nothing was lost — the originals are stored — but they will not move again without you."
+          jobs={gaveUp}
+          nameOf={nameOf}
+          busy={busy}
+          onRetry={retry}
+        />
+      )}
 
-          <Section title="All jobs">
-            <table className="w-full text-sm">
-              <thead className="text-xs text-muted uppercase">
-                <tr>
-                  <th className="py-2 text-left font-medium">Stage</th>
-                  <th className="py-2 text-left font-medium">State</th>
-                  <th className="py-2 text-right font-medium">Count</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-edge">
-                {status.counts.map((row) => (
-                  <tr key={`${row.stage}-${row.state}`}>
-                    <td className="py-2">{row.stage}</td>
-                    <td className="py-2 text-muted">{row.state.replace(/_/g, " ")}</td>
-                    <td className="py-2 text-right font-mono">{row.count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Section>
-        </>
+      {retrying.length > 0 && (
+        <JobList
+          tone="warn"
+          title="Retrying"
+          blurb="These failed and are backing off before another attempt. They still read as queued in the database, which is why this screen used to call them healthy."
+          jobs={retrying}
+          nameOf={nameOf}
+          busy={busy}
+          onRetry={retry}
+        />
+      )}
+
+      {(status?.in_flight.length ?? 0) > 0 && (
+        <section className="rounded-xl border border-edge bg-surface">
+          <header className="flex items-center gap-2 border-b border-edge px-4 py-3">
+            <Loader size={15} className="animate-spin text-accent" />
+            <h2 className="text-sm font-medium">Running now</h2>
+          </header>
+          <ul className="divide-y divide-edge/60">
+            {status?.in_flight.map((job) => (
+              <li key={job.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                <span className="rounded bg-edge px-1.5 text-[11px] text-neutral-300">
+                  {job.stage}
+                </span>
+                <span className="min-w-0 flex-1 truncate">
+                  {nameOf(job) ?? "a document"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="rounded-xl border border-edge bg-surface">
+        <header className="flex items-center gap-2 border-b border-edge px-4 py-3">
+          <h2 className="text-sm font-medium">Files</h2>
+          <span className="text-xs text-muted">{files.length}</span>
+          <span className="flex-1" />
+          {files.length > 10 && (
+            <button
+              type="button"
+              onClick={() => setShowAll((value) => !value)}
+              className="rounded border border-edge px-2 py-1 text-xs text-muted hover:text-neutral-100"
+            >
+              {showAll ? "Show recent" : `Show all ${files.length}`}
+            </button>
+          )}
+        </header>
+        {files.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted">
+            Nothing has been added yet.
+          </p>
+        ) : (
+          <ul className="divide-y divide-edge/60">
+            {visible.map((file) => (
+              <FileRow key={file.source_file_id} file={file} onShowLog={setLogFor} />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {logFor && (
+        <LogViewer
+          sourceFileId={logFor.source_file_id}
+          title={`Log — ${logFor.original_filename ?? "file"}`}
+          onClose={() => setLogFor(null)}
+        />
+      )}
+
+      {!logFor && (
+        <details className="rounded-xl border border-edge bg-surface">
+          <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-sm font-medium">
+            <ScrollText size={15} className="text-accent" />
+            Everything the pipeline logged
+          </summary>
+          <div className="border-t border-edge p-3">
+            <LogViewer title="Pipeline log" defaultLevel="warning" />
+          </div>
+        </details>
       )}
     </div>
   );
 }
 
-function Section({
+function JobList({
+  tone,
   title,
-  count,
-  children,
+  blurb,
+  jobs,
+  nameOf,
+  busy,
+  onRetry,
 }: {
+  tone: "bad" | "warn";
   title: string;
-  count?: number;
-  children: React.ReactNode;
+  blurb: string;
+  jobs: Job[];
+  nameOf: (job: Job) => string | null;
+  busy: string | null;
+  onRetry: (jobId: string) => void;
 }) {
+  const bad = tone === "bad";
   return (
-    <section className="mb-8">
-      <h2 className="mb-2 text-xs font-medium tracking-wide text-muted uppercase">
-        {title}
-        {count !== undefined && count > 0 && <span className="ml-2 text-accent">{count}</span>}
-      </h2>
-      {children}
+    <section
+      className={`rounded-xl border ${
+        bad ? "border-red-900/70 bg-red-950/20" : "border-amber-900/70 bg-amber-950/15"
+      }`}
+    >
+      <header className="px-4 pb-2 pt-3">
+        <h2
+          className={`flex items-center gap-2 text-sm font-medium ${
+            bad ? "text-red-300" : "text-amber-300"
+          }`}
+        >
+          {title}
+          <span className="rounded-full bg-black/30 px-1.5 text-[11px]">{jobs.length}</span>
+        </h2>
+        <p className="mt-1 max-w-2xl text-xs text-muted">{blurb}</p>
+      </header>
+      <ul className="divide-y divide-white/5">
+        {jobs.map((job) => (
+          <li key={job.id} className="flex items-start gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="flex flex-wrap items-baseline gap-2 text-sm">
+                <span className="font-medium">{nameOf(job) ?? "(unnamed file)"}</span>
+                <span className="rounded bg-black/30 px-1.5 text-[11px] text-neutral-300">
+                  {job.stage}
+                </span>
+                <span className="text-xs text-muted">
+                  {job.attempts} of 5 attempts
+                  {job.state === "queued" && job.scheduled_for
+                    ? ` · next ${new Date(job.scheduled_for).toLocaleTimeString()}`
+                    : ""}
+                </span>
+              </p>
+              {job.last_error && (
+                // Verbatim and wrapped rather than truncated: the specific
+                // message is the whole diagnosis.
+                <p className="mt-1.5 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded bg-black/30 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-red-300/90">
+                  {job.last_error}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => onRetry(job.id)}
+              disabled={busy === job.id}
+              className="flex shrink-0 items-center gap-1.5 rounded-md border border-edge px-2.5 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+            >
+              <RotateCw size={12} className={busy === job.id ? "animate-spin" : ""} />
+              {busy === job.id ? "Retrying…" : "Retry now"}
+            </button>
+          </li>
+        ))}
+      </ul>
     </section>
-  );
-}
-
-function Quiet({ children }: { children: React.ReactNode }) {
-  return <p className="rounded-lg border border-edge p-4 text-sm text-muted">{children}</p>;
-}
-
-function StateChip({ state }: { state: string }) {
-  const tone =
-    state === "dead_letter"
-      ? "border-red-500/40 text-red-400"
-      : state === "failed"
-        ? "border-amber-500/40 text-amber-400"
-        : "border-edge text-muted";
-  return (
-    <span className={`ml-2 rounded-full border px-2 py-0.5 text-xs ${tone}`}>
-      {state.replace(/_/g, " ")}
-    </span>
   );
 }

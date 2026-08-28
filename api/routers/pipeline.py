@@ -31,7 +31,14 @@ from api.schemas import (
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
-# States a human is expected to act on, newest first.
+# What a person is expected to look at.
+#
+# `FAILED` is almost never persisted: `queue.fail` puts a job that will retry
+# back to `QUEUED` with its error attached, and only a job that has exhausted
+# its attempts becomes `DEAD_LETTER`. Selecting on those two states alone
+# therefore reported "nothing failed" while two documents were failing on a
+# loop — so a queued job carrying an error counts as needing attention too, and
+# is labelled as retrying rather than as broken.
 ATTENTION_STATES = (JobState.DEAD_LETTER, JobState.FAILED)
 
 
@@ -58,7 +65,16 @@ async def status_(
     attention = (
         await session.execute(
             repository.visible_jobs(library_ids)
-            .where(Job.state.in_([state.value for state in ATTENTION_STATES]))
+            .where(
+                sa.or_(
+                    Job.state.in_([state.value for state in ATTENTION_STATES]),
+                    sa.and_(
+                        Job.state == JobState.QUEUED.value,
+                        Job.attempts > 0,
+                        Job.last_error.is_not(None),
+                    ),
+                )
+            )
             .order_by(Job.updated_at.desc())
             .limit(50)
         )

@@ -321,3 +321,63 @@ async def test_progress_does_not_leak_other_libraries(
 
     body = (await client.get("/api/pipeline/files")).json()
     assert all(f["original_filename"] != "not-yours.pdf" for f in body["files"])
+
+
+# --------------------------------------------------------------------------
+# A job that is retrying is not a job that is fine
+# --------------------------------------------------------------------------
+
+
+async def test_a_retrying_job_needs_attention(client, session, signed_in) -> None:
+    """`queue.fail` puts a job that will retry back to QUEUED with its error.
+
+    Selecting only DEAD_LETTER and FAILED therefore reported "nothing failed"
+    while two real tax documents were failing on a loop — the pipeline screen's
+    single job is to make that impossible.
+    """
+    from api.db.enums import JobStage, JobState
+    from api.db.models import Job
+
+    _, library = await signed_in()
+    source_file = SourceFile(
+        library_id=library.id, sha256=uuid.uuid4().hex * 2, byte_size=10,
+        original_filename="1099.pdf", ingest_source=IngestSource.WEB_UPLOAD,
+        state=SourceFileState.RECEIVED,
+    )
+    session.add(source_file)
+    await session.flush()
+    session.add(
+        Job(
+            source_file_id=source_file.id, stage=JobStage.NORMALIZE,
+            state=JobState.QUEUED, attempts=3,
+            last_error="CommandError('ocrmypdf exited 1: ColorConversionNeededError')",
+        )
+    )
+    await session.commit()
+
+    body = (await client.get("/api/pipeline")).json()
+    stages = [job["stage"] for job in body["attention"]]
+    assert "normalize" in stages, "a job retrying after three failures is not idle"
+    assert any("ColorConversionNeededError" in (j["last_error"] or "") for j in body["attention"])
+
+
+async def test_a_healthy_queued_job_is_not_flagged(client, session, signed_in) -> None:
+    """Work waiting its turn is the normal case and must stay quiet."""
+    from api.db.enums import JobStage, JobState
+    from api.db.models import Job
+
+    _, library = await signed_in()
+    source_file = SourceFile(
+        library_id=library.id, sha256=uuid.uuid4().hex * 2, byte_size=10,
+        original_filename="fresh.pdf", ingest_source=IngestSource.WEB_UPLOAD,
+        state=SourceFileState.RECEIVED,
+    )
+    session.add(source_file)
+    await session.flush()
+    session.add(
+        Job(source_file_id=source_file.id, stage=JobStage.NORMALIZE, state=JobState.QUEUED)
+    )
+    await session.commit()
+
+    body = (await client.get("/api/pipeline")).json()
+    assert body["attention"] == []

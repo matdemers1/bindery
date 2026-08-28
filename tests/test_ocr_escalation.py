@@ -138,3 +138,52 @@ async def test_ocr_text_is_scoped_to_the_caller(client, session, scanned, user_f
     response = await client.get(f"/api/files/{stranger.id}/text")
     assert response.status_code == 404
     assert "private matters" not in response.text
+
+
+# --------------------------------------------------------------------------
+# PDF/A conversion failures that do not use the PDF/A exit code
+# --------------------------------------------------------------------------
+
+
+def test_pdfa_failures_are_recognised_by_message_not_only_exit_code() -> None:
+    """A real 1099 and a real W-2 dead-lettered because of this.
+
+    Both carry a DeviceN colour space — routine in professionally printed forms.
+    ocrmypdf refuses the PDF/A conversion and exits **1**, not 10, so the
+    fallback that exists precisely for this never fired and two tax documents
+    retried five times and gave up unsearchable.
+    """
+    from worker.stages.normalize import _is_pdfa_failure
+    from worker.subprocess_util import CommandError
+
+    colour = CommandError(
+        ["ocrmypdf"], 1,
+        "ColorConversionNeededError: The input PDF has an unusual DeviceN color "
+        "space that cannot be represented in PDF/A",
+    )
+    ghostscript = CommandError(
+        ["ocrmypdf"], 1,
+        "GPL Ghostscript 10.05.1: Setting Overprint Mode to 1 not permitted in "
+        "PDF/A-2, overprint mode not set",
+    )
+    by_code = CommandError(["ocrmypdf"], 10, "could not convert to PDF/A")
+
+    assert _is_pdfa_failure(colour)
+    assert _is_pdfa_failure(ghostscript)
+    assert _is_pdfa_failure(by_code)
+
+
+def test_a_genuinely_unreadable_file_is_still_a_failure() -> None:
+    """The fallback must not swallow errors that have nothing to do with PDF/A.
+
+    A file that is not a PDF should fail loudly and land on the pipeline screen,
+    not be quietly retried as plain PDF and fail again for a confusing reason.
+    """
+    from worker.stages.normalize import _is_pdfa_failure
+    from worker.subprocess_util import CommandError
+
+    assert not _is_pdfa_failure(CommandError(["ocrmypdf"], 2, "InputFileError"))
+    assert not _is_pdfa_failure(CommandError(["ocrmypdf"], 8, "EncryptedPdfError"))
+    assert not _is_pdfa_failure(
+        CommandError(["ocrmypdf"], 3, "MissingDependencyError: tesseract not found")
+    )

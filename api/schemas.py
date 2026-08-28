@@ -292,6 +292,9 @@ class JobOut(BaseModel):
     state: str
     attempts: int
     last_error: str | None
+    # A queued job with attempts > 0 is retrying after a failure, and this is
+    # when it next runs — without it the screen can only say "queued", which
+    # reads as "fine".
     scheduled_for: datetime
     updated_at: datetime
 
