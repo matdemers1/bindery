@@ -96,6 +96,8 @@ services:
       - ../alembic:/app/alembic:ro
       # ruff and pytest read their config from here.
       - ../pyproject.toml:/app/pyproject.toml:ro
+      # test_trust_and_export.py asserts on the restore drill's own contents.
+      - ../scripts:/app/scripts:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -121,6 +123,8 @@ services:
       - ../alembic:/app/alembic:ro
       # ruff and pytest read their config from here.
       - ../pyproject.toml:/app/pyproject.toml:ro
+      # test_trust_and_export.py asserts on the restore drill's own contents.
+      - ../scripts:/app/scripts:ro
     depends_on:
       postgres:
         condition: service_healthy
