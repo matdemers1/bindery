@@ -334,6 +334,48 @@ class TreeOut(BaseModel):
     groups: list[TreeGroupOut]
 
 
+class ImportStartIn(BaseModel):
+    library_id: uuid.UUID
+    # Absolute, and resolved inside the worker container — not on your laptop.
+    root_path: str
+    sample_size: int = Field(200, ge=1, le=5000)
+
+
+class ImportSessionOut(BaseModel):
+    id: uuid.UUID
+    library_id: uuid.UUID
+    root_path: str
+    state: str
+    pass_number: int
+    sample_size: int
+    dry_run: dict[str, Any]
+    cost_estimate: dict[str, Any]
+    progress: dict[str, int]
+    last_error: str | None
+    created_at: datetime
+
+
+class ImportItemOut(BaseModel):
+    path: str
+    state: str
+    byte_size: int | None
+    sha256: str | None
+    source_file_id: uuid.UUID | None
+    error: str | None
+
+
+class BulkEditIn(BaseModel):
+    document_ids: list[uuid.UUID] = Field(min_length=1)
+    actions: dict[str, Any]
+
+
+class BulkResultOut(BaseModel):
+    matched: int
+    # Present only after an apply; this is what undo takes.
+    operation_id: uuid.UUID | None
+    changes: list[dict[str, Any]]
+
+
 class SettingsOut(BaseModel):
     """What the client is allowed to know. Never the key itself."""
 
@@ -369,12 +411,17 @@ __all__ = [
     "ArchiveEntryOut",
     "ArchiveOut",
     "ArchiveStatsOut",
+    "BulkEditIn",
+    "BulkResultOut",
     "ClassificationOut",
     "DocumentDetailOut",
     "DocumentOut",
     "FacetOut",
     "FieldProvenanceOut",
     "HealthOut",
+    "ImportItemOut",
+    "ImportSessionOut",
+    "ImportStartIn",
     "JobOut",
     "KnownFormOut",
     "LibraryOut",

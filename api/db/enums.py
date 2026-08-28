@@ -88,3 +88,27 @@ class ActorType(StrEnum):
     AI = "ai"
     RULE = "rule"
     SYSTEM = "system"
+
+
+class ImportState(StrEnum):
+    """Stages of a backlog import. Nothing is processed before `dry_run` is seen."""
+
+    SCANNING = "scanning"
+    DRY_RUN = "dry_run"
+    SAMPLING = "sampling"
+    # The highest-leverage human hour in the project: merging near-duplicate
+    # tags before the other 4,800 documents are classified against them.
+    CURATING = "curating"
+    IMPORTING = "importing"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ImportItemState(StrEnum):
+    PENDING = "pending"
+    SAMPLED = "sampled"
+    INGESTED = "ingested"
+    DUPLICATE = "duplicate"
+    SKIPPED = "skipped"
+    FAILED = "failed"

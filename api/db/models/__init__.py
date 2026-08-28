@@ -3,6 +3,12 @@
 from api.db.models.audit_event import AuditEvent
 from api.db.models.classification import Classification, FieldProvenance
 from api.db.models.document import Document
+from api.db.models.importing import (
+    BatchRequest,
+    BatchSubmission,
+    ImportItem,
+    ImportSession,
+)
 from api.db.models.job import Job
 from api.db.models.known_form import KnownForm
 from api.db.models.library import Library
@@ -17,12 +23,16 @@ from api.db.models.user import AppUser, RefreshToken
 __all__ = [
     "AppUser",
     "AuditEvent",
+    "BatchRequest",
+    "BatchSubmission",
     "Classification",
     "Correspondent",
     "Document",
     "DocumentTag",
     "DocumentType",
     "FieldProvenance",
+    "ImportItem",
+    "ImportSession",
     "Job",
     "KnownForm",
     "Library",

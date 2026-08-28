@@ -3,6 +3,7 @@ from api.routers import (
     documents,
     files,
     health,
+    imports,
     library,
     pipeline,
     review,
@@ -14,6 +15,6 @@ from api.routers import (
 )
 
 __all__ = [
-    "auth", "documents", "files", "health", "library", "pipeline", "review", "rules",
+    "auth", "documents", "files", "health", "imports", "library", "pipeline", "review", "rules",
     "search", "segments", "settings", "upload",
 ]

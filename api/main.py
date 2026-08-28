@@ -11,6 +11,7 @@ from api.routers import (
     documents,
     files,
     health,
+    imports,
     library,
     pipeline,
     review,
@@ -34,6 +35,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
 app.include_router(library.router, prefix="/api")
+app.include_router(imports.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(files.router, prefix="/api")
 app.include_router(segments.router, prefix="/api")
