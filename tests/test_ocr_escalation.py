@@ -328,3 +328,62 @@ def test_ghostscript_giving_up_counts_as_a_pdfa_failure() -> None:
     assert _is_pdfa_failure(
         CommandError(["ocrmypdf"], 7, "SubprocessOutputError: Ghostscript PDF/A rendering failed")
     )
+
+
+def test_the_refusals_that_have_a_safe_answer() -> None:
+    """ocrmypdf refuses these by default and is right to, in general.
+
+    It is wrong for this application because of a property the rest of the
+    system guarantees: the original is never modified. Everything OCR writes is
+    a derived artifact beside a blob that still holds the exact bytes that
+    arrived, so invalidating a signature on the copy costs nothing real — and
+    refusing would leave every signed form you own unsearchable.
+    """
+    from worker.stages.normalize import _remedy_for
+    from worker.subprocess_util import CommandError
+
+    signed = _remedy_for(
+        CommandError(["ocrmypdf"], 2, "DigitalSignatureError: Input PDF has a digital signature.")
+    )
+    assert signed is not None and "--invalidate-digital-signatures" in signed[0]
+
+    xfa = _remedy_for(
+        CommandError(["ocrmypdf"], 2, "InputFileError: This PDF contains dynamic XFA forms")
+    )
+    assert xfa is not None and "--force-ocr" in xfa[0]
+
+
+def test_failures_with_no_safe_answer_are_still_failures() -> None:
+    """The remedies must not become a blanket retry.
+
+    A file that is not a PDF, or is encrypted, has no second attempt that would
+    work — it belongs on the pipeline screen where a person can see it.
+    """
+    from worker.stages.normalize import _remedy_for
+    from worker.subprocess_util import CommandError
+
+    assert _remedy_for(CommandError(["ocrmypdf"], 2, "InputFileError: not a PDF")) is None
+    assert _remedy_for(CommandError(["ocrmypdf"], 8, "EncryptedPdfError")) is None
+    assert _remedy_for(CommandError(["ocrmypdf"], 3, "MissingDependencyError")) is None
+
+
+def test_a_degenerate_image_is_refused_in_plain_language() -> None:
+    """laser.png was 10x5 pixels. img2pdf handed it to pikepdf, which rejected
+    the page size with a bare ValueError and a traceback naming none of it."""
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+
+    import pytest as _pytest
+    from PIL import Image
+
+    from api.db.models import SourceFile
+    from worker.stages.normalize import _prepare_image
+
+    with _tempfile.TemporaryDirectory() as scratch:
+        tiny = _Path(scratch) / "laser.png"
+        Image.new("RGBA", (10, 5)).save(tiny)
+        source_file = SourceFile(
+            library_id=None, sha256="x" * 64, byte_size=1, original_filename="laser.png"
+        )
+        with _pytest.raises(ValueError, match="too small to be a document"):
+            _prepare_image(source_file, tiny)

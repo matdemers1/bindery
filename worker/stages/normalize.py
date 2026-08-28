@@ -164,21 +164,16 @@ async def _run_ocr(
             ok_codes=(0, ALREADY_HAS_TEXT),
         )
     except subprocess_util.CommandError as exc:
-        if not _is_pdfa_failure(exc):
+        remedy = _remedy_for(exc)
+        if remedy is None:
             raise
-        # PDF/A is a nice-to-have for archival fidelity; searchability is not
-        # negotiable. Fall back rather than fail the document — and note that
-        # for a DeviceN document plain PDF is arguably the *better* artifact,
-        # since it keeps the original colour space instead of mangling it.
-        log.warning(
-            "PDF/A conversion failed for %s; falling back to plain PDF (%s)",
-            source.name, str(exc)[:200],
-        )
+        extra, why = remedy
+        log.warning("%s: %s (%s)", source.name, why, str(exc)[:160])
         code, _, _ = await subprocess_util.run(
             _ocr_argv(
                 source, output, sidecar,
-                pdfa=False, image=image, force=force, scanned=scanned,
-            ),
+                pdfa=not _is_pdfa_failure(exc), image=image, force=force, scanned=scanned,
+            ) + extra,
             timeout=OCR_TIMEOUT_SECONDS,
             ok_codes=(0, ALREADY_HAS_TEXT),
         )
@@ -187,6 +182,43 @@ async def _run_ocr(
         # Nothing to add: the original is already the searchable artifact.
         output.write_bytes(source.read_bytes())
         log.info("%s already carried a full text layer; copied through", source.name)
+
+
+
+def _remedy_for(error: subprocess_util.CommandError) -> tuple[list[str], str] | None:
+    """One more attempt for the refusals that have a safe answer, or None.
+
+    Every one of these is a case where ocrmypdf is right to refuse by default
+    and wrong for this application, because of a property the rest of the
+    system guarantees: **the original is never modified.** Everything written
+    here is a derived artifact sitting beside a blob that still holds the exact
+    bytes that arrived.
+    """
+    message = str(error)
+
+    if _is_pdfa_failure(error):
+        # PDF/A is a nice-to-have for archival fidelity; searchability is not
+        # negotiable. For a DeviceN document plain PDF is arguably the better
+        # artifact anyway, since it keeps the original colour space.
+        return [], "PDF/A conversion failed, falling back to plain PDF"
+
+    if "DigitalSignatureError" in message:
+        # OCR would invalidate the signature — on the *copy*. The signed
+        # original stays in the blob store, byte for byte, and is what an
+        # export hands back. Refusing instead would mean every signed form you
+        # own is unsearchable, which is a strange price for protecting a
+        # signature on a file nobody will ever verify from here.
+        return (
+            ["--invalidate-digital-signatures"],
+            "signed PDF: OCR-ing a copy, the signed original is untouched",
+        )
+
+    if "XFA" in message or "LiveCycle" in message:
+        # A dynamic XFA form has no static content for ocrmypdf to pass
+        # through, so rasterizing is the only way to read it at all.
+        return ["--force-ocr"], "dynamic XFA form: rasterizing to read it"
+
+    return None
 
 
 def _is_heif(source_file: SourceFile, original: Path) -> bool:
@@ -231,12 +263,36 @@ def _prepare_image(source_file: SourceFile, original: Path):
         log.debug("could not pre-read %s: %s", original.name, error)
         return None
 
+    # A page has to be big enough to be a page. img2pdf hands these to pikepdf,
+    # which rejects the resulting page size with a bare ValueError and a
+    # traceback that says nothing about the cause — so they are refused here,
+    # in terms a person can act on. A 10x5 pixel file is a laser-cutter
+    # artifact, not a document, and no amount of OCR will find text in it.
+    if min(image.size) < MIN_IMAGE_PIXELS:
+        width, height = image.size
+        image.close()
+        raise ValueError(
+            f"{width}x{height} pixels is too small to be a document page "
+            f"(each side must be at least {MIN_IMAGE_PIXELS}px)"
+        )
+
     has_alpha = image.mode in {"RGBA", "LA", "PA"} or (
         image.mode == "P" and "transparency" in image.info
     )
-    if not has_alpha and not _is_heif(source_file, original):
+    # ocrmypdf refuses CMYK without an embedded ICC profile rather than guess a
+    # conversion. Pillow's guess is the same one every viewer already makes, and
+    # a scan that reads is worth more than a colour space that is exactly right.
+    is_cmyk = image.mode == "CMYK"
+
+    if not has_alpha and not is_cmyk and not _is_heif(source_file, original):
         image.close()
         return None
+
+    if is_cmyk and not has_alpha:
+        converted = image.convert("RGB")
+        image.close()
+        log.info("converted %s from CMYK to RGB", source_file.original_filename)
+        return converted
 
     if has_alpha:
         rgba = image.convert("RGBA")
@@ -309,6 +365,11 @@ async def _ocr_input(source_file: SourceFile, original: Path):
         yield OcrInput(converted, digital_native=False)
 
 
+
+
+# Below this, a PDF page cannot be constructed at all — and nothing this small
+# holds readable text anyway.
+MIN_IMAGE_PIXELS = 16
 
 
 # Enough text that the pages plainly came from a computer rather than a camera.
