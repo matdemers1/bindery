@@ -72,7 +72,12 @@ docker compose --env-file .env -f infra/docker-compose.yml --profile test \
   run --rm test python -m pytest tests/test_permissions.py   # the leak suite (Phase 7)
 ```
 
-## Current State — Phases 0-3 built; the R-01 gate is still open
+## Current State — deployed and running; the R-01 gate is still open
+
+**Live on the ZimaOS host at `bindery.d3cloud.io`** since 2026-08-28 — see
+`docs/zimaos-deploy.md`, and read its "two quirks" section before touching the
+host, because ZimaOS's read-only root and split `HOME` break SSH keys and
+private registry pulls in ways that look like unrelated problems.
 
 **Phase 1** (retrieval) and **Phase 2** (bundles, known forms) are built and
 verified. **Phase 3** (classification, provenance, the gate, rules, undo) is
@@ -91,7 +96,6 @@ Still open:
   fixtures to `tests/corpus/<name>/`. **This gates Phase 3's REQ-058 and
   Phase 2's REQ-035 boundary F1.**
 - **T-1.13** — the Brother Scan-to-SMB spike. Needs the scanner.
-- **T-0.5** — Cloudflare Tunnel + Access. Needs the dashboard.
 - **No live Claude API call has ever been made.** Prompt quality, cost per
   document and cache hit rate are unmeasured. With `ANTHROPIC_API_KEY` unset the
   archive works and classification defers, which is the designed behaviour
