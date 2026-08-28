@@ -36,7 +36,12 @@ from worker.ocr.word_boxes import extract_word_boxes
 log = logging.getLogger("bindery.worker.normalize")
 
 OCR_TIMEOUT_SECONDS = 60 * 60
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif"}
+IMAGE_SUFFIXES = {
+    ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif",
+    # A screenshot or a phone photo saved in one of these carries no DPI
+    # metadata either, so it needs the same --image-dpi treatment.
+    ".gif", ".webp", ".bmp",
+}
 HEIF_SUFFIXES = {".heic", ".heif"}
 # ocrmypdf exit code: every page already carried text, so there was nothing to do.
 ALREADY_HAS_TEXT = 6

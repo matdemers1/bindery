@@ -377,12 +377,25 @@ Two families, and only one pipeline.
   export for every format. The original is never replaced — the PDF is a derived
   artifact beside the blob, and an export still hands back the .xlsx.
 
-`convert.CONVERTIBLE` and `walker.OFFICE` must stay in step, or the importer
-skips a format the pipeline can handle.
+`convert.CONVERTIBLE` and `walker.SUPPORTED` must stay in step, or the importer
+skips a format the pipeline can handle — `tests/test_ocr_escalation.py` asserts
+it, along with the fact that the scanned and office sets never overlap.
 
-Deliberately still unsupported: source code, config, markup. They are not
-archive material and would bury the things that are. The importer's
-`skipped_unsupported` counter is the honest report of that.
+The supported list came from auditing a real 80,000-file archive rather than
+from guessing, and every addition was verified against an actual file before
+being added. Deliberate exclusions, each for its own reason:
+
+| Excluded | Why |
+|---|---|
+| `.one`, `.onetoc2` | **Genuinely archive material** — college notes — but no converter works. LibreOffice fails to load it outright. A gap to report, not to paper over. |
+| `.psd`, `.indd`, `.skp` | Design sources, not documents |
+| `.zip`, `.gz`, `.rar` | Unpacking is a separate decision with its own hazards — nesting, bombs, and what "the original" means afterwards |
+| code, build output, 3D printing, game data, media, binaries | Not archive material, and they would bury the things that are |
+
+`.html` is supported because a saved order confirmation or pay statement is
+ordinary archive material. Be aware that generated documentation — a Javadoc
+tree, for instance — is also HTML, so pointing the importer at a code folder
+picks it up. That is a folder-choice problem, not a format problem.
 
 Gotchas worth keeping: `soffice` **exits 0 on several failures**, so the output
 file's existence is the only trustworthy signal; each conversion needs its own

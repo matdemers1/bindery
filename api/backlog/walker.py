@@ -18,18 +18,45 @@ from pathlib import Path
 
 log = logging.getLogger("bindery.import.walk")
 
-# Scans and photographs...
-SCANNED = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif"}
-# ...and documents that never touched a scanner. A spreadsheet of account
-# numbers is exactly the sort of thing an archive is for, and it was being
-# skipped as unsupported. These are converted to PDF on the way in.
+# Scans and photographs. All of these reach OCR directly — verified against
+# ocrmypdf rather than assumed, including the less common raster formats a
+# phone or a screenshot tool produces.
+SCANNED = {
+    ".pdf",
+    ".jpg", ".jpeg", ".png", ".tif", ".tiff",
+    ".heic", ".heif",
+    ".gif", ".webp", ".bmp",
+}
+
+# Documents that never touched a scanner. A spreadsheet of account numbers is
+# exactly the sort of thing an archive is for, and these were being skipped as
+# unsupported. Converted to PDF on the way in — see `worker/convert.py`.
 OFFICE = {
     ".doc", ".docx", ".odt", ".rtf",
     ".xls", ".xlsx", ".ods", ".csv",
     ".ppt", ".pptx", ".odp",
     ".txt", ".md",
+    # Saved web pages: an order confirmation, a pay statement printed to file.
+    # Ordinary archive material, and the reason a whole `.mht` bank statement
+    # was previously unreachable.
+    ".html", ".htm", ".mht", ".mhtml",
+    # Apple iWork. LibreOffice reads these through libetonyek.
+    ".pages", ".numbers", ".key",
 }
+
 SUPPORTED = SCANNED | OFFICE
+
+# Deliberately absent, after auditing a real 80,000-file tree:
+#
+#   .psd            design sources, not documents
+#   .one .onetoc2   OneNote — no converter exists that works; tested, it fails
+#   .zip .gz .rar   archives; unpacking is a separate decision with its own
+#                   hazards (nesting, bombs, and what "the original" then means)
+#   .mca .gcode .stl .3mf .class .jar .js .java .swift .plist .json .xml …
+#                   code, build output, 3D printing and game data
+#   .exe .ipa .wav .mp4
+#
+# The `skipped_unsupported` counter is the honest report of all of it.
 # Directories that are never documents.
 SKIP_DIRS = {".git", ".svn", "node_modules", "__pycache__", ".Trash", "$RECYCLE.BIN",
              ".Spotlight-V100", ".fseventsd", ".TemporaryItems", "@eaDir"}

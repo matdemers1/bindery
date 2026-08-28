@@ -360,6 +360,11 @@ async def test_a_page_that_yields_text_is_never_forced(
         ("letter.docx", "docx"),
         ("accounts.xlsx", "xlsx"),
         ("notes.txt", "txt"),
+        # Added after auditing a real archive: a saved pay statement was sitting
+        # in a banking folder as .mht, and a proposal as .pages, both unreachable.
+        ("statement.html", "html"),
+        ("screenshot.webp", "webp"),
+        ("scan.gif", "gif"),
     ],
 )
 async def test_office_documents_become_searchable(session, tmp_path, name, builder) -> None:
@@ -433,4 +438,19 @@ def _office_fixture(kind: str, path) -> bytes:
         sheet["A1"] = "Institution"
         sheet["A2"] = "Meridian Credit Union"
         book.save(path)
+    elif kind == "html":
+        path.write_text(
+            "<html><body><h1>Meridian Credit Union</h1>"
+            "<p>Statement of account, 2019.</p></body></html>"
+        )
+    elif kind in {"webp", "gif"}:
+        # Reuse the corpus renderer, which is already tuned to produce pages
+        # Tesseract can actually read — a hand-rolled PIL image at default font
+        # size reaches OCR fine and comes back as gibberish, which would test
+        # the format plumbing while looking like a format failure.
+        from PIL import Image
+
+        rendered = render_text_page("Meridian Credit Union", path.with_suffix(".png"))
+        with Image.open(rendered) as image:
+            image.convert("RGB").save(path, kind.upper())
     return path.read_bytes()

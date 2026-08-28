@@ -41,6 +41,13 @@ CONVERTIBLE = {
     ".ppt", ".pptx", ".odp",
     # Plain text and notes
     ".txt", ".md",
+    # Saved web pages. `.mht`/`.mhtml` are a whole page in one file, which is
+    # how a browser saves a statement you cannot download as a PDF.
+    ".html", ".htm", ".mht", ".mhtml",
+    # Apple iWork, via libetonyek. Note that `.pages` files often carry no
+    # embedded preview PDF — the ones audited here did not — so extracting a
+    # preview is not a shortcut and the real import filter is what does it.
+    ".pages", ".numbers", ".key",
 }
 
 # Conversion is a cold start of an office suite, not a filter. Generous, but

@@ -187,3 +187,76 @@ def test_a_genuinely_unreadable_file_is_still_a_failure() -> None:
     assert not _is_pdfa_failure(
         CommandError(["ocrmypdf"], 3, "MissingDependencyError: tesseract not found")
     )
+
+
+# --------------------------------------------------------------------------
+# The supported-format audit (T-8.14)
+# --------------------------------------------------------------------------
+
+
+def test_every_convertible_format_is_also_offered_by_the_importer() -> None:
+    """The two lists have to agree.
+
+    `convert.CONVERTIBLE` decides what the pipeline can turn into a PDF and
+    `walker.SUPPORTED` decides what the importer will even pick up. If they
+    drift, a format is either skipped despite being handled, or imported and
+    then failed at OCR — both silent from the outside.
+    """
+    from api.backlog.walker import SUPPORTED
+    from worker.convert import CONVERTIBLE
+
+    missing = sorted(CONVERTIBLE - SUPPORTED)
+    assert not missing, f"the pipeline converts these but the importer skips them: {missing}"
+
+
+def test_scanned_and_office_formats_do_not_overlap() -> None:
+    """A format goes to OCR directly or through LibreOffice, never both.
+
+    An overlap would mean `_ocr_input` and `_looks_like_image` disagree about a
+    file, and which branch won would depend on statement order.
+    """
+    from api.backlog.walker import OFFICE, SCANNED
+
+    assert not (SCANNED & OFFICE)
+
+
+def test_the_formats_the_audit_found_are_supported() -> None:
+    """Named individually so removing one is a deliberate act, not a typo.
+
+    Each of these was found in a real archive and verified to convert: the
+    `.mht` was a saved pay statement, the `.pages` a proposal, and the raster
+    formats went through ocrmypdf untouched.
+    """
+    from api.backlog.walker import SUPPORTED
+
+    for suffix in (
+        ".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic",
+        ".gif", ".webp", ".bmp",
+        ".doc", ".docx", ".odt", ".rtf",
+        ".xls", ".xlsx", ".ods", ".csv",
+        ".ppt", ".pptx", ".odp",
+        ".txt", ".md",
+        ".html", ".htm", ".mht", ".mhtml",
+        ".pages", ".numbers", ".key",
+    ):
+        assert suffix in SUPPORTED, f"{suffix} should be importable"
+
+
+def test_things_that_are_not_documents_stay_out() -> None:
+    """Deliberate exclusions, so re-adding one is a decision rather than a slip.
+
+    OneNote is the interesting case: it is genuinely archive material — college
+    notes — and is excluded only because no converter works. LibreOffice fails
+    to load it outright. That is a gap to report, not to paper over.
+    """
+    from api.backlog.walker import SUPPORTED
+
+    for suffix in (
+        ".one", ".onetoc2",     # no working converter
+        ".psd", ".indd", ".skp",  # design sources
+        ".zip", ".gz", ".rar",    # archives
+        ".js", ".java", ".class", ".jar", ".json", ".xml", ".plist", ".swift",
+        ".gcode", ".stl", ".3mf", ".mca",
+        ".exe", ".ipa", ".wav", ".mp4",
+    ):
+        assert suffix not in SUPPORTED, f"{suffix} is not archive material"
