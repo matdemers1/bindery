@@ -108,6 +108,37 @@ class ClassificationResponse:
     raw_response: dict[str, Any]
 
 
+class BoundaryVerdict(BaseModel):
+    """Whether a candidate seam really starts a new document."""
+
+    page: int = Field(description="The page the candidate boundary is at.")
+    starts_new_document: bool = Field(
+        description="True if a different document begins on this page."
+    )
+    reason: str = Field(description="One short sentence, citing what you saw.")
+
+
+class BoundaryConfirmation(BaseModel):
+    verdicts: list[BoundaryVerdict] = Field(default_factory=list)
+
+
+@dataclass
+class BoundaryWindow:
+    """A candidate seam, with the pages either side of it."""
+
+    page: int
+    reasons: list[str]
+    # (page_number, text) for a few pages before and after the candidate.
+    before: list[tuple[int, str]] = field(default_factory=list)
+    after: list[tuple[int, str]] = field(default_factory=list)
+
+
+@dataclass
+class BoundaryRequest:
+    source_file_id: str
+    windows: list[BoundaryWindow]
+
+
 class AIProviderError(RuntimeError):
     """The provider could not produce a valid result.
 
@@ -134,3 +165,11 @@ class AIProvider(Protocol):
     def available(self) -> bool: ...
 
     async def classify(self, request: ClassificationRequest) -> ClassificationResponse: ...
+
+    async def confirm_boundaries(self, request: BoundaryRequest) -> BoundaryConfirmation:
+        """Rule on seams the heuristics could not settle (REQ-035).
+
+        Only ambiguous candidates reach here — cheap signals do the easy work,
+        so the expensive one only sees the cases that need judgement.
+        """
+        ...

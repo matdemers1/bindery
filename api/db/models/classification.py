@@ -48,6 +48,13 @@ class Classification(Base):
         JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")
     )
 
+    # Typed values a known form declared extractors for (REQ-041). Stored per
+    # classification, not on the document: they are the output of one prompt
+    # version, and a better prompt should produce a new set beside the old one.
+    extracted_fields: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
+    )
+
     # Cache health (REQ-053) and cost, straight from `usage`.
     usage: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")

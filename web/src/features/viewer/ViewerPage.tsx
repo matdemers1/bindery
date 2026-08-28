@@ -10,6 +10,7 @@ import {
   fileUrl,
 } from "../../api";
 import { matchesTerm, queryTerms } from "../../lib/highlight";
+import WhyPanel from "../why/WhyPanel";
 
 /**
  * Renders a page range as if it were a standalone document (ADR-001), while
@@ -34,6 +35,7 @@ export default function ViewerPage({ mode }: { mode: "document" | "file" }) {
   const [document_, setDocument] = useState<DocumentDetail | null>(null);
   const [boxes, setBoxes] = useState<PageBoxes | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showWhy, setShowWhy] = useState(false);
 
   useEffect(() => {
     setError(null);
@@ -167,6 +169,14 @@ export default function ViewerPage({ mode }: { mode: "document" | "file" }) {
             <NavButton onClick={() => go(localPage + 1)} disabled={localPage >= pageCount}>
               Next →
             </NavButton>
+            {mode === "document" && (
+              <button
+                onClick={() => setShowWhy((open) => !open)}
+                className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted hover:border-accent/60"
+              >
+                Why?
+              </button>
+            )}
             <Link
               to={`/file/${fileId}/segments`}
               className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted hover:border-accent/60"
@@ -191,7 +201,16 @@ export default function ViewerPage({ mode }: { mode: "document" | "file" }) {
           </div>
         </header>
 
-        <PageCanvas fileId={fileId} page={filePage} boxes={boxes} query={query} />
+        <div className={showWhy ? "grid gap-6 xl:grid-cols-[1fr_22rem]" : ""}>
+          <PageCanvas fileId={fileId} page={filePage} boxes={boxes} query={query} />
+          {showWhy && mode === "document" && (
+            <WhyPanel
+              documentId={routeId}
+              fileId={fileId}
+              onClose={() => setShowWhy(false)}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

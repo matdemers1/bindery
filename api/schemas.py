@@ -197,6 +197,8 @@ class ClassificationOut(BaseModel):
     structural_signals: dict[str, Any]
     gate_decision: str | None
     gate_reasons: list[str]
+    # Typed values from a known form's extractors (REQ-041).
+    extracted_fields: dict[str, str]
     usage: dict[str, Any]
     created_at: datetime
 

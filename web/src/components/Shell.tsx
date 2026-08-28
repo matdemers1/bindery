@@ -63,6 +63,8 @@ export default function Shell({
 
           <nav className="flex items-center gap-1 text-sm">
             <Tab to="/">Search</Tab>
+            <Tab to="/review">Review</Tab>
+            <Tab to="/rules">Rules</Tab>
             <Tab to="/pipeline">Pipeline</Tab>
           </nav>
 

@@ -162,6 +162,66 @@ export interface PageBoxes {
   lines: { words: Word[] }[];
 }
 
+export interface TagRef {
+  id: string;
+  name: string;
+  /** ai | rule | human — what makes an AI value visually distinct. */
+  source: "ai" | "rule" | "human";
+}
+
+export interface ClassificationRecord {
+  id: string;
+  model: string;
+  prompt_version: string;
+  /** The model's own numbers. Shown, never decisive. */
+  confidence: Record<string, number>;
+  /** The facts the gate actually read. */
+  structural_signals: Record<string, unknown>;
+  gate_decision: string | null;
+  gate_reasons: string[];
+  usage: Record<string, number>;
+  created_at: string;
+}
+
+export interface FieldProvenanceRecord {
+  field_name: string;
+  /** Absolute page in the source file. */
+  page_number: number | null;
+  snippet: string | null;
+  confidence: number | null;
+}
+
+export interface WhyPanel {
+  document: Document;
+  classification: ClassificationRecord | null;
+  provenance: FieldProvenanceRecord[];
+  tags: TagRef[];
+}
+
+export interface ReviewQueue {
+  total: number;
+  documents: Document[];
+}
+
+export interface RuleRecord {
+  id: string;
+  library_id: string;
+  name: string;
+  enabled: boolean;
+  priority: number;
+  conditions: { all: { field: string; operator: string; value: string }[] };
+  actions: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface RuleDryRun {
+  rule_id: string;
+  examined: number;
+  matched: number;
+  truncated: boolean;
+  matches: { document_id: string; title: string | null; changes: Record<string, unknown> }[];
+}
+
 export interface Job {
   id: string;
   source_file_id: string | null;
@@ -234,6 +294,32 @@ export const api = {
     request<PageBoxes>(`/files/${id}/pages/${page}/boxes`, { signal }),
 
   pipeline: () => request<PipelineStatus>("/pipeline"),
+
+  review: () => request<ReviewQueue>("/review"),
+  why: (documentId: string) => request<WhyPanel>(`/documents/${documentId}/why`),
+  undo: (documentId: string) =>
+    request<Document>(`/documents/${documentId}/undo`, { method: "POST" }),
+  accept: (documentId: string) =>
+    request<Document>(`/documents/${documentId}/accept`, { method: "POST" }),
+
+  rules: () => request<RuleRecord[]>("/rules"),
+  createRule: (body: {
+    library_id: string;
+    name: string;
+    conditions: unknown;
+    actions: unknown;
+  }) =>
+    request<RuleRecord>("/rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  dryRunRule: (ruleId: string) =>
+    request<RuleDryRun>(`/rules/${ruleId}/dry-run`, { method: "POST" }),
+  setRuleEnabled: (ruleId: string, enabled: boolean) =>
+    request<RuleRecord>(`/rules/${ruleId}/${enabled ? "enable" : "disable"}`, {
+      method: "POST",
+    }),
   retryJob: (id: string) => request<Job>(`/pipeline/jobs/${id}/retry`, { method: "POST" }),
 
   upload: (libraryId: string, file: File) => {

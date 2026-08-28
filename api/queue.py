@@ -109,6 +109,49 @@ async def requeue(session: AsyncSession, job_id: uuid.UUID) -> None:
     )
 
 
+async def requeue_stage(
+    session: AsyncSession,
+    stage: JobStage,
+    *,
+    source_file_id: uuid.UUID | None = None,
+    document_id: uuid.UUID | None = None,
+    prompt_version: str | None = None,
+) -> bool:
+    """Enqueue a stage, or reset an existing job so it runs again.
+
+    `enqueue` deliberately refuses to disturb existing work, which is right for
+    the pipeline and wrong for a deliberate replay — a stage that has already
+    succeeded once would otherwise never run again.
+    """
+    if await enqueue(
+        session, stage,
+        source_file_id=source_file_id, document_id=document_id,
+        prompt_version=prompt_version,
+    ):
+        return True
+
+    result = await session.execute(
+        sa.update(Job)
+        .where(
+            Job.stage == stage.value,
+            Job.source_file_id.is_not_distinct_from(source_file_id),
+            Job.document_id.is_not_distinct_from(document_id),
+            Job.prompt_version.is_not_distinct_from(prompt_version),
+            Job.state != JobState.RUNNING.value,
+        )
+        .values(
+            state=JobState.QUEUED.value,
+            attempts=0,
+            scheduled_for=_now(),
+            locked_at=None,
+            locked_by=None,
+            last_error=None,
+            updated_at=_now(),
+        )
+    )
+    return bool(result.rowcount)
+
+
 async def claim(
     session: AsyncSession, stages: list[JobStage], worker_id: str
 ) -> ClaimedJob | None:

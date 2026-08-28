@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: up down build logs ps migrate revision test test-pipeline ocr-report seed-forms enqueue-stage shell psql create-user tunnel
+.PHONY: up down build logs ps migrate revision test test-pipeline ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
 
 build:            ## build all images
 	$(COMPOSE) build
@@ -50,6 +50,9 @@ seed-forms:       ## load the known-form registry from api/forms/seed/*.yaml
 
 enqueue-stage:    ## re-run a stage over every file: make enqueue-stage stage=segment
 	$(COMPOSE) exec api python -m api.cli enqueue-stage "$(stage)"
+
+reprocess:        ## re-classify documents left on an older prompt: make reprocess prompt=v1
+	$(COMPOSE) exec api python -m api.cli reprocess --prompt-version "$(prompt)"
 
 create-user:      ## make create-user email=you@example.com library=Household
 	$(COMPOSE) exec api python -m api.cli create-user --email "$(email)" --library "$(library)"

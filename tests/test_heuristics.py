@@ -200,11 +200,14 @@ def test_boundaries_become_a_gapless_cover() -> None:
 
 
 def test_weak_votes_alone_do_not_make_a_boundary() -> None:
+    """They become *ambiguous* rather than accepted — a candidate, not a cut."""
     weak = propose_layout_shift(
         [page(1, lines=30, line_length=48.0, left_margin=90.0),
          page(2, lines=8, line_length=14.0, left_margin=260.0)]
     )
-    assert assemble(weak, 2) == []
+    accepted, ambiguous = assemble(weak, 2)
+    assert accepted == []
+    assert [number for number, _ in ambiguous] == [2]
 
 
 def test_weak_votes_combine_into_a_boundary() -> None:
@@ -214,14 +217,15 @@ def test_weak_votes_combine_into_a_boundary() -> None:
         page(2, lines=8, line_length=14.0, left_margin=260.0, footer="1"),
     ]
     votes = propose_layout_shift(pages) + propose_page_number_reset(pages)
-    accepted = assemble(votes, 2)
+    accepted, ambiguous = assemble(votes, 2)
     assert [page_number for page_number, _ in accepted] == [2]
+    assert ambiguous == []
 
 
 def test_page_one_is_never_a_boundary() -> None:
     from worker.segment.heuristics.base import Boundary
 
-    assert assemble([Boundary(page=1, weight=99.0, reason="nonsense")], 5) == []
+    assert assemble([Boundary(page=1, weight=99.0, reason="nonsense")], 5) == ([], [])
 
 
 # --------------------------------------------------------------------------
@@ -250,3 +254,68 @@ def test_features_are_derived_from_the_word_boxes() -> None:
     # The footer band is the bottom 15% of the page: y >= 673.2.
     assert features.footer_text == "Page 1"
     assert not features.is_blank
+
+
+# --------------------------------------------------------------------------
+# Ambiguity and LLM confirmation (T-3.14, REQ-035)
+# --------------------------------------------------------------------------
+
+
+def test_a_confident_seam_is_accepted_without_asking_the_model() -> None:
+    """Cheap signals do the easy work; the model only sees what is left."""
+    from worker.segment.heuristics.base import Boundary
+
+    accepted, ambiguous = assemble([Boundary(page=4, weight=1.0, reason="blank page")], 10)
+    assert [page for page, _ in accepted] == [4]
+    assert ambiguous == []
+
+
+def test_a_weak_seam_is_ambiguous_rather_than_ignored() -> None:
+    from worker.segment.heuristics.base import Boundary
+
+    accepted, ambiguous = assemble([Boundary(page=4, weight=0.4, reason="layout shift")], 10)
+    assert accepted == []
+    assert [page for page, _ in ambiguous] == [4]
+
+
+def test_a_seam_below_the_ambiguity_floor_is_not_worth_a_model_call() -> None:
+    from worker.segment.heuristics.base import Boundary
+
+    accepted, ambiguous = assemble([Boundary(page=4, weight=0.2, reason="faint")], 10)
+    assert accepted == [] and ambiguous == []
+
+
+async def test_the_model_only_sees_ambiguous_seams() -> None:
+    from worker.ai import RecordedProvider, set_provider
+    from worker.stages.segment import confirm_ambiguous
+
+    provider = RecordedProvider(default={})
+    provider.boundary_verdicts = {6: True, 9: False}
+    set_provider(provider)
+    try:
+        pages = [page(n) for n in range(1, 12)]
+        confirmed = await confirm_ambiguous(
+            pages, [(6, ["layout shift"]), (9, ["layout shift"])], "file-1"
+        )
+    finally:
+        set_provider(None)
+
+    assert [p for p, _ in confirmed] == [6]
+    request = provider.boundary_requests[0]
+    assert [window.page for window in request.windows] == [6, 9]
+    # Each seam is shown with the pages either side of it, not the whole file.
+    assert [number for number, _ in request.windows[0].before] == [4, 5]
+    assert [number for number, _ in request.windows[0].after] == [6, 7]
+
+
+async def test_an_unavailable_provider_leaves_ambiguous_seams_uncut() -> None:
+    """Segmentation degrades to heuristics rather than failing."""
+    from worker.ai import UnavailableProvider, set_provider
+    from worker.stages.segment import confirm_ambiguous
+
+    set_provider(UnavailableProvider())
+    try:
+        confirmed = await confirm_ambiguous([page(1), page(2)], [(2, ["layout shift"])], "f")
+    finally:
+        set_provider(None)
+    assert confirmed == []

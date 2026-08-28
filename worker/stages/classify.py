@@ -141,6 +141,7 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
         structural_signals=signals.to_json(),
         gate_decision=verdict.decision.value,
         gate_reasons=verdict.reasons,
+        extracted_fields=dict(result.extracted_fields),
         usage=response.usage,
     )
     session.add(classification)

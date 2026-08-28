@@ -38,6 +38,14 @@ from worker.segment.heuristics import (
 
 log = logging.getLogger("bindery.worker.segment")
 
+# Below the acceptance threshold but above this, a seam is *ambiguous* — enough
+# signal to be worth a second opinion, not enough to act on. These are the only
+# candidates the model ever sees (REQ-035), which is what keeps segmentation
+# cost proportional to difficulty rather than to page count (R-06).
+AMBIGUOUS_FLOOR = 0.3
+# Pages either side of a seam that the model is shown.
+WINDOW_PAGES = 2
+
 # A seam needs this much agreement before it becomes a document boundary:
 # **one strong signal, or two weaker ones that agree.**
 #
@@ -50,19 +58,92 @@ log = logging.getLogger("bindery.worker.segment")
 BOUNDARY_THRESHOLD = 0.9
 
 
-def assemble(boundaries: list[Boundary], page_count: int) -> list[tuple[int, list[str]]]:
-    """Sum the votes per seam and keep the ones that clear the threshold."""
+def assemble(
+    boundaries: list[Boundary], page_count: int
+) -> tuple[list[tuple[int, list[str]]], list[tuple[int, list[str]]]]:
+    """Sum the votes per seam. Returns (accepted, ambiguous).
+
+    Accepted seams become boundaries outright. Ambiguous ones carry real but
+    insufficient signal, and are the only candidates worth spending a model call
+    on.
+    """
     votes: dict[int, list[Boundary]] = {}
     for boundary in boundaries:
         if 2 <= boundary.page <= page_count:  # page 1 is never a boundary
             votes.setdefault(boundary.page, []).append(boundary)
 
     accepted: list[tuple[int, list[str]]] = []
+    ambiguous: list[tuple[int, list[str]]] = []
     for page in sorted(votes):
         at_page = votes[page]
-        if sum(vote.weight for vote in at_page) >= BOUNDARY_THRESHOLD:
-            accepted.append((page, [vote.reason for vote in at_page]))
-    return accepted
+        score = sum(vote.weight for vote in at_page)
+        reasons = [vote.reason for vote in at_page]
+        if score >= BOUNDARY_THRESHOLD:
+            accepted.append((page, reasons))
+        elif score >= AMBIGUOUS_FLOOR:
+            ambiguous.append((page, reasons))
+    return accepted, ambiguous
+
+
+async def confirm_ambiguous(
+    pages: list, ambiguous: list[tuple[int, list[str]]], source_file_id: str
+) -> list[tuple[int, list[str]]]:
+    """Ask the model about the seams the heuristics could not settle.
+
+    Failure here is not failure of the stage: an unavailable provider means the
+    ambiguous seams simply stay unconfirmed, and the file is segmented on the
+    heuristics alone. Segmentation is a metadata edit either way, and the manual
+    editor is one click from every result.
+    """
+    if not ambiguous:
+        return []
+
+    from worker.ai import get_provider
+    from worker.ai.provider import (
+        AIProviderError,
+        BoundaryRequest,
+        BoundaryWindow,
+        ProviderUnavailableError,
+    )
+
+    provider = get_provider()
+    if not provider.available():
+        log.info("no provider available; leaving %s ambiguous seam(s) uncut", len(ambiguous))
+        return []
+
+    by_number = {page.number: page for page in pages}
+    windows = [
+        BoundaryWindow(
+            page=page,
+            reasons=reasons,
+            before=[
+                (number, by_number[number].text)
+                for number in range(page - WINDOW_PAGES, page)
+                if number in by_number
+            ],
+            after=[
+                (number, by_number[number].text)
+                for number in range(page, page + WINDOW_PAGES)
+                if number in by_number
+            ],
+        )
+        for page, reasons in ambiguous
+    ]
+
+    try:
+        confirmation = await provider.confirm_boundaries(
+            BoundaryRequest(source_file_id=source_file_id, windows=windows)
+        )
+    except (AIProviderError, ProviderUnavailableError) as exc:
+        log.warning("boundary confirmation unavailable (%s); using heuristics alone", exc)
+        return []
+
+    reasons_by_page = dict(ambiguous)
+    return [
+        (verdict.page, [*reasons_by_page.get(verdict.page, []), f"confirmed: {verdict.reason}"])
+        for verdict in confirmation.verdicts
+        if verdict.starts_new_document and verdict.page in reasons_by_page
+    ]
 
 
 def specs_from_boundaries(boundaries: list[int], page_count: int) -> list[SegmentSpec]:
@@ -121,7 +202,9 @@ async def run_segment(session: AsyncSession, job: ClaimedJob) -> None:
             else proposer(pages)
         )
 
-    accepted = assemble(votes, page_count)
+    accepted, ambiguous = assemble(votes, page_count)
+    confirmed = await confirm_ambiguous(pages, ambiguous, str(source_file.id))
+    accepted = sorted([*accepted, *confirmed])
     specs = specs_from_boundaries([page for page, _ in accepted], page_count)
 
     documents = await segments.replace(

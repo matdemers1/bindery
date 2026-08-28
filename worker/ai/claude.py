@@ -21,6 +21,8 @@ from pydantic import ValidationError
 
 from worker.ai.provider import (
     AIProviderError,
+    BoundaryConfirmation,
+    BoundaryRequest,
     Candidate,
     ClassificationRequest,
     ClassificationResponse,
@@ -36,13 +38,20 @@ PROMPT_DIR = Path(__file__).parent / "prompts"
 MAX_PAGES = 12
 MAX_CHARS_PER_PAGE = 6000
 MAX_TOKENS = 8000
+# A seam only needs the pages either side of it, trimmed — the decision is made
+# on letterheads and headings, not on body text.
+BOUNDARY_CHARS_PER_PAGE = 1500
+
+
+def load_prompt_named(name: str) -> str:
+    path = PROMPT_DIR / f"{name}.md"
+    if not path.is_file():
+        raise AIProviderError(f"no prompt file named {name!r}")
+    return path.read_text()
 
 
 def load_prompt(version: str) -> str:
-    path = PROMPT_DIR / f"classify_{version}.md"
-    if not path.is_file():
-        raise AIProviderError(f"no prompt file for version {version!r}")
-    return path.read_text()
+    return load_prompt_named(f"classify_{version}")
 
 
 def _render_candidates(label: str, candidates: list[Candidate]) -> str:
@@ -187,3 +196,60 @@ class ClaudeProvider:
             },
             raw_response=json.loads(result.model_dump_json()),
         )
+
+    async def confirm_boundaries(self, request: BoundaryRequest) -> BoundaryConfirmation:
+        """Rule on the seams the heuristics could not settle (REQ-035).
+
+        Every ambiguous candidate for a file goes in one request: they share the
+        same instructions, so batching them means one cached prefix instead of
+        one per seam, and the model sees the bundle's own conventions rather
+        than each seam in isolation.
+        """
+        if self._client is None:
+            raise ProviderUnavailableError("no Anthropic API key configured")
+        if not request.windows:
+            return BoundaryConfirmation()
+
+        instructions = load_prompt_named(f"boundaries_{self.prompt_version}")
+        parts: list[str] = []
+        for window in request.windows:
+            parts.append(f"## Candidate boundary at page {window.page}")
+            parts.append("")
+            parts.append(f"Heuristics flagged it because: {'; '.join(window.reasons)}.")
+            parts.append("")
+            sections = (("Before", window.before), ("From the candidate on", window.after))
+            for label, pages in sections:
+                parts.append(f"### {label}")
+                for number, text in pages:
+                    parts.append(f"--- page {number} ---")
+                    parts.append(text[:BOUNDARY_CHARS_PER_PAGE] or "(no text on this page)")
+                parts.append("")
+
+        try:
+            response = await self._client.messages.parse(
+                model=self.model,
+                max_tokens=MAX_TOKENS,
+                system=[
+                    {
+                        "type": "text",
+                        "text": instructions,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                thinking={"type": "adaptive"},
+                messages=[{"role": "user", "content": "\n".join(parts)}],
+                output_format=BoundaryConfirmation,
+            )
+        except anthropic.APIConnectionError as exc:
+            raise ProviderUnavailableError(f"could not reach the API: {exc}") from exc
+        except anthropic.APIStatusError as exc:
+            if exc.status_code >= 500 or exc.status_code == 429:
+                raise ProviderUnavailableError(f"upstream error {exc.status_code}") from exc
+            raise AIProviderError(f"API rejected the request ({exc.status_code})") from exc
+        except ValidationError as exc:
+            raise AIProviderError(f"response did not match the schema: {exc}") from exc
+
+        confirmation = getattr(response, "parsed_output", None)
+        if confirmation is None:
+            raise AIProviderError("structured output was empty")
+        return confirmation

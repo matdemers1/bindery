@@ -8,9 +8,13 @@ A self-hosted document archive that OCRs and indexes everything at the **page** 
 
 ## Status
 
-**Phase 1 — Retrieval.** Drop a 100-page bundle into the watched folder; it is OCR'd, indexed page by page, and searchable. Press ⌘K, type `dd214`, hit Enter, and the viewer opens on page 47 with the term highlighted. **No AI is involved in any of that** — which is the point: Phase 1 solves the stated problem on its own.
+**Phase 3 — Classification & Review.** Drop a 100-page bundle into the watched folder. It is OCR'd, indexed page by page, cut into its real constituent documents, and catalogued. Search returns *the DD-214*, not the file containing it. Click any field and the why-panel quotes the sentence and page it came from, and says plainly what decided the filing.
 
-Still open in Phase 1: the golden-corpus OCR accuracy figure (needs real documents) and the Brother Scan-to-SMB spike (needs the scanner). Phase 0's Cloudflare Tunnel setup also remains.
+Phases 1 and 2 involve **no AI at all**, which is the point: retrieval works on its own, and never depends on a third-party API being reachable.
+
+> ⚠️ **Phase 3 was built with its own entry gate open.** The golden-corpus OCR accuracy figure has never been measured, so auto-file precision (REQ-058) is unscored and the gate's weights are reasoned rather than calibrated. No live Claude API call has been made either. Details in `D3 Cloud Vault/Bindery/Phase Plans/Phase 3 — Classification & Review.md`.
+
+Also open: the Brother Scan-to-SMB spike (needs the scanner) and Phase 0's Cloudflare Tunnel setup (needs the dashboard).
 
 Full planning corpus lives in the Obsidian vault at `D3 Cloud Vault/Bindery/`.
 
@@ -34,6 +38,7 @@ cp .env.example .env      # fill in secrets; set HOST_DATA_ROOT
 make build
 make up
 make migrate
+make seed-forms
 make create-user email=you@example.com library=Household
 ```
 
@@ -54,6 +59,9 @@ it is twenty lines.
 | `make test` | default suite against a throwaway database |
 | `make test-pipeline` | OCR and pipeline suites (needs the OCR toolchain) |
 | `make ocr-report` | golden-corpus word accuracy — the R-01 gate |
+| `make seed-forms` | load the known-form registry from `api/forms/seed/*.yaml` |
+| `make enqueue-stage stage=segment` | re-run a pipeline stage over every file |
+| `make reprocess prompt=v1` | re-classify documents left on an older prompt version |
 | `make create-user email=… library=…` | there is no self-service registration |
 | `make psql` / `make logs` / `make shell` | the usual |
 

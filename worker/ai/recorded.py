@@ -15,6 +15,9 @@ from typing import Any
 
 from worker.ai.provider import (
     AIProviderError,
+    BoundaryConfirmation,
+    BoundaryRequest,
+    BoundaryVerdict,
     ClassificationRequest,
     ClassificationResponse,
     ClassificationResult,
@@ -38,6 +41,9 @@ class UnavailableProvider:
         raise ProviderUnavailableError(
             "no AI provider is configured; classification is deferred"
         )
+
+    async def confirm_boundaries(self, request: BoundaryRequest) -> BoundaryConfirmation:
+        raise ProviderUnavailableError("no AI provider is configured")
 
 
 class RecordedProvider:
@@ -65,6 +71,10 @@ class RecordedProvider:
         # Every request the provider saw, so tests can assert on what the prompt
         # actually contained (REQ-047).
         self.requests: list[ClassificationRequest] = []
+        self.boundary_requests: list[BoundaryRequest] = []
+        # page -> verdict. Anything not listed is treated as "not a boundary",
+        # which is the conservative answer.
+        self.boundary_verdicts: dict[int, bool] = {}
 
     @classmethod
     def from_directory(cls, directory: Path, **kwargs) -> "RecordedProvider":
@@ -92,4 +102,17 @@ class RecordedProvider:
             usage=dict(self._usage),
             raw_request={"recorded": True, "document_id": request.document_id},
             raw_response=payload,
+        )
+
+    async def confirm_boundaries(self, request: BoundaryRequest) -> BoundaryConfirmation:
+        self.boundary_requests.append(request)
+        return BoundaryConfirmation(
+            verdicts=[
+                BoundaryVerdict(
+                    page=window.page,
+                    starts_new_document=self.boundary_verdicts.get(window.page, False),
+                    reason="recorded",
+                )
+                for window in request.windows
+            ]
         )
