@@ -638,3 +638,31 @@ def test_a_missing_pg_dump_is_reported_as_a_deployment_problem(monkeypatch, tmp_
     monkeypatch.setattr(backup.shutil, "which", lambda _: None)
     with pytest.raises(RuntimeError, match="deployment problem"):
         backup.dump_database(tmp_path / "bindery.dump")
+
+
+def test_connection_settings_survive_an_awkward_password(monkeypatch) -> None:
+    """The real password on the deployed host broke a URL-on-the-command-line.
+
+    pg_dump reported *invalid integer value ... for connection option "port"* —
+    which reads like a misconfiguration and is actually the password being
+    parsed as `host:port`. Passing libpq settings through the environment makes
+    the question of what characters a password contains stop mattering.
+    """
+    from api.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://bindery:p%40ss%3Aw%2Frd@db.internal:6543/bindery",
+    )
+    try:
+        env = backup.connection_env()
+    finally:
+        get_settings.cache_clear()
+
+    assert env["PGHOST"] == "db.internal"
+    assert env["PGPORT"] == "6543"
+    assert env["PGDATABASE"] == "bindery"
+    assert env["PGUSER"] == "bindery"
+    # Percent-decoded, so what libpq receives is the actual password.
+    assert env["PGPASSWORD"] == "p@ss:w/rd"

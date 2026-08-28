@@ -27,6 +27,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from api.config import get_settings
 from api.export.integrity import IntegrityReport
@@ -50,10 +51,32 @@ def backup_root() -> Path:
     return Path(os.environ.get("BINDERY_BACKUP_ROOT", get_settings().data_root / "backups"))
 
 
+def connection_env() -> dict[str, str]:
+    """libpq settings from the SQLAlchemy URL, via the environment.
+
+    Not a connection string on the command line, for two reasons. A password
+    containing `@` or `:` makes a URL ambiguous — the real one here parsed as a
+    port and produced *invalid integer value ... for connection option "port"*,
+    which reads like a config error and is actually a quoting bug. And argv is
+    world-readable through `ps`, so a password on the command line is a password
+    anyone with a shell can see.
+    """
+    parsed = urlsplit(get_settings().database_url.replace("+asyncpg", ""))
+    env = {
+        "PGHOST": parsed.hostname or "localhost",
+        "PGPORT": str(parsed.port or 5432),
+        "PGDATABASE": (parsed.path or "/").lstrip("/"),
+    }
+    if parsed.username:
+        env["PGUSER"] = unquote(parsed.username)
+    if parsed.password:
+        env["PGPASSWORD"] = unquote(parsed.password)
+    return env
+
+
 def dump_database(destination: Path) -> Path:
     """`pg_dump -Fc`, the custom format, because it restores selectively."""
     destination.parent.mkdir(parents=True, exist_ok=True)
-    url = get_settings().database_url.replace("postgresql+asyncpg://", "postgresql://")
     if shutil.which("pg_dump") is None:
         raise RuntimeError(
             "pg_dump is not installed in this image, so no backup can be taken. "
@@ -61,9 +84,10 @@ def dump_database(destination: Path) -> Path:
         )
     try:
         subprocess.run(
-            ["pg_dump", "--format=custom", "--no-owner", f"--file={destination}", url],
+            ["pg_dump", "--format=custom", "--no-owner", f"--file={destination}"],
             check=True,
             capture_output=True,
+            env={**os.environ, **connection_env()},
         )
     except subprocess.CalledProcessError as error:
         # The reason matters — a version mismatch and a bad password look
