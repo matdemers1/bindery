@@ -1,0 +1,170 @@
+# Bindery — ZimaOS / CasaOS custom app
+#
+# Paste this into ZimaOS → Apps → Custom Install → Import (YAML).
+#
+# Before you do, three things must already be true. Each is a one-time step and
+# each is in docs/zimaos-deploy.md:
+#   1. `docker login ghcr.io` has been run on the Zima (the repo is private, so
+#      the images are private, so an anonymous pull returns "not found").
+#   2. The directories below exist on the 16 TB pool.
+#   3. Every `change-me` in the environment blocks has been replaced.
+#
+# INVARIANT (REQ-104): no service publishes a host port. Ingress is Cloudflare
+# Tunnel only (ADR-006). Do not add a `ports:` key to anything here — the whole
+# archive would become reachable from the LAN with no Access in front of it.
+#
+# Storage layout on the pool:
+#   /DATA/AppData/bindery/data      blobs, derived artifacts, inbox, exports
+#   /DATA/AppData/bindery/pgdata    the database
+# Adjust both if your pool is mounted elsewhere.
+
+name: bindery
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: bindery-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bindery
+      POSTGRES_PASSWORD: change-me-strong-database-password
+      POSTGRES_DB: bindery
+      # Checksums catch bit rot on the way out of the pool rather than on the
+      # way into a backup (R-09).
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - /DATA/AppData/bindery/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bindery -d bindery"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+
+  api:
+    image: ghcr.io/matdemers1/bindery/api:main
+    container_name: bindery-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &bindery-env
+      DATABASE_URL: postgresql+asyncpg://bindery:change-me-strong-database-password@postgres:5432/bindery
+      # openssl rand -base64 48
+      JWT_SECRET: change-me-to-a-long-random-string
+      JWT_ACCESS_TTL_MINUTES: "30"
+      JWT_REFRESH_TTL_DAYS: "30"
+      # Cloudflare terminates TLS, so the browser always speaks https.
+      COOKIE_SECURE: "true"
+      DATA_ROOT: /data
+      INBOX_ROOT: /data/inbox
+      # 3 OCR slots on a 16 GB Ryzen. Raise only after watching memory during a
+      # large bundle — OCRmyPDF is the memory-hungry part of this system.
+      WORKER_CONCURRENCY: "3"
+      OCR_LANGUAGES: eng
+      OCR_DESKEW: "true"
+      OCR_CLEAN: "true"
+      # Leave empty until you want classification. With no key the archive is
+      # fully functional and classification simply defers (REQ-055) — that is
+      # designed behaviour, not a broken state.
+      ANTHROPIC_API_KEY: ""
+      BINDERY_MODEL: claude-opus-5
+      BINDERY_PROMPT_VERSION: v1
+      BINDERY_HOSTNAME: bindery.d3cloud.io
+    volumes:
+      - /DATA/AppData/bindery/data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen('http://localhost:8000/api/health').read()"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    # NOTE (REQ-114): migrations are NOT run here. Apply them explicitly.
+
+  worker:
+    image: ghcr.io/matdemers1/bindery/worker:main
+    container_name: bindery-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *bindery-env
+    volumes:
+      - /DATA/AppData/bindery/data:/data
+    deploy:
+      resources:
+        limits:
+          # OCR is the reason this box has 16 GB. Three concurrent OCRmyPDF
+          # passes over a large scan is the peak this has to survive.
+          memory: 8G
+
+  web:
+    image: ghcr.io/matdemers1/bindery/web:main
+    container_name: bindery-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: bindery-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token change-me-cloudflare-tunnel-token
+    depends_on:
+      - web
+      - api
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+x-casaos:
+  architectures:
+    - amd64
+  main: web
+  author: Demers Design and Development
+  developer: matdemers1
+  category: Documents
+  title:
+    en_us: Bindery
+  tagline:
+    en_us: Finds the document you can't find
+  description:
+    en_us: >-
+      Self-hosted document archive. OCRs and indexes at the page level,
+      decomposes bundled PDFs into their real constituent documents without
+      modifying the original, and classifies with Claude against a taxonomy it
+      already knows.
+  # Deliberately not reachable from the LAN: ingress is the Cloudflare Tunnel,
+  # and the app opens at its hostname rather than at the Zima's IP.
+  scheme: https
+  hostname: bindery.d3cloud.io
+  index: /
+  port_map: ""
+  tips:
+    before_install:
+      en_us: >-
+        Run `docker login ghcr.io` on this host first — the images are private.
+        Create /DATA/AppData/bindery/{data,pgdata}. Replace every change-me
+        value. After install, apply migrations explicitly:
+        `docker exec bindery-api alembic upgrade head`.

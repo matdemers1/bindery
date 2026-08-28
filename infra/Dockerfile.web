@@ -5,6 +5,8 @@ RUN npm ci
 COPY web/ .
 RUN npm run build
 
-FROM nginx:alpine
+# Named `runtime` so all three images share one target name and CI needs no
+# per-service conditional.
+FROM nginx:alpine AS runtime
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY infra/nginx.conf /etc/nginx/conf.d/default.conf

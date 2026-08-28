@@ -75,9 +75,10 @@ jobs:
         with:
           context: .
           file: infra/Dockerfile.${{ matrix.service }}
-          # api and worker have a `dev` stage carrying the test harness; the
-          # deployed image must be the runtime one.
-          target: ${{ matrix.service == 'web' && '' || 'runtime' }}
+          # Every Dockerfile names its shipped stage `runtime`. Stating it is
+          # what stops the api and worker images shipping their `dev` stage,
+          # which carries the test harness and the whole source tree.
+          target: runtime
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
