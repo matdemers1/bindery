@@ -117,9 +117,18 @@ export default function AddPage({
     }
   }
 
+  // The cadence needs to know what the last poll returned, but the *effect*
+  // must not depend on it. It used to: `progress` was in the dependency list,
+  // and every poll called `setProgress` with a freshly built array, so each
+  // response re-ran the effect, which immediately polled again. That is a loop
+  // bounded only by network latency — it measured at around sixty requests a
+  // second. A ref carries the value across without making the effect re-run.
+  const latest = useRef<FileProgress[]>([]);
+
   const poll = useCallback(async () => {
     try {
       const result = await api.pipelineFiles(watching.length ? watching : undefined);
+      latest.current = result.files;
       setProgress(result.files);
     } catch {
       // The pipeline view is an observation; a failed poll should not take over
@@ -128,15 +137,35 @@ export default function AddPage({
   }, [watching]);
 
   useEffect(() => {
-    void poll();
-    const settled = progress.every(
-      (file) => file.state === "processed" || file.state === "duplicate" || file.dead_lettered,
-    );
-    // Stop hammering once everything has come to rest, but keep a slow tick so
-    // a retry or a rescan still shows up.
-    const timer = setInterval(() => void poll(), settled && progress.length ? 15000 : 2500);
-    return () => clearInterval(timer);
-  }, [poll, progress]);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    // A self-scheduling timeout rather than an interval: the next poll is only
+    // queued once the previous one has come back, so a slow response cannot
+    // stack requests on top of each other.
+    async function tick() {
+      await poll();
+      if (stopped) return;
+      const files = latest.current;
+      const settled =
+        files.length > 0 &&
+        files.every(
+          (file) =>
+            file.state === "processed" ||
+            file.state === "duplicate" ||
+            file.dead_lettered,
+        );
+      // Slow right down once everything has come to rest, but keep ticking so
+      // a retry or a rescan started elsewhere still shows up.
+      timer = setTimeout(tick, settled ? 15000 : 2500);
+    }
+
+    void tick();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [poll]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
