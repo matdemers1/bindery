@@ -6,6 +6,7 @@ import CommandPalette from "./features/palette/CommandPalette";
 import PipelinePage from "./features/pipeline/PipelinePage";
 import ArchivePage from "./features/archive/ArchivePage";
 import FilesPage from "./features/files/FilesPage";
+import LibrariesPage from "./features/household/LibrariesPage";
 import ImportPage from "./features/import/ImportPage";
 import OrganisePage from "./features/organise/OrganisePage";
 import ReviewPage from "./features/review/ReviewPage";
@@ -90,6 +91,7 @@ export default function App() {
           <Route path="/archive" element={<ArchivePage />} />
           <Route path="/files" element={<FilesPage />} />
           <Route path="/trust" element={<TrustPage />} />
+          <Route path="/libraries" element={<LibrariesPage />} />
           <Route path="/import" element={<ImportPage libraries={libraries} />} />
           <Route path="/organise" element={<OrganisePage libraries={libraries} />} />
           <Route path="/review" element={<ReviewPage />} />

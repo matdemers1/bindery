@@ -620,6 +620,37 @@ export const api = {
     return request<AuditPage>(`/audit${query.size ? `?${query}` : ""}`);
   },
 
+
+  // --- Phase 7 -----------------------------------------------------------
+
+  householdLibraries: () => request<LibraryDetail[]>("/household/libraries"),
+  createLibrary: (name: string, kind: string) =>
+    request<LibraryDetail>("/household/libraries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, kind }),
+    }),
+  setMemberRole: (libraryId: string, email: string, role: string) =>
+    request<Member>(`/household/libraries/${libraryId}/members`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, role }),
+    }),
+
+  /** Preview first: a move makes documents vanish from one person's view. */
+  previewMove: (sourceFileId: string, toLibraryId: string) =>
+    request<MovePlan>(`/source-files/${sourceFileId}/move/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to_library_id: toLibraryId }),
+    }),
+  moveFile: (sourceFileId: string, toLibraryId: string) =>
+    request<MovePlan>(`/source-files/${sourceFileId}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to_library_id: toLibraryId }),
+    }),
+
   upload: (libraryId: string, file: File) => {
     const form = new FormData();
     form.append("library_id", libraryId);
@@ -651,6 +682,8 @@ export interface FileTreeNode {
   sensitivity: string | null;
   review_state: string | null;
   byte_size: number | null;
+  library_id: string | null;
+  library_name: string | null;
   child_count: number;
 }
 
@@ -726,6 +759,36 @@ export interface AuditFilters {
   until?: string;
   before_sequence?: number;
   limit?: number;
+}
+
+
+// --- Phase 7: household and libraries ------------------------------------
+
+export interface Member {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  role: "owner" | "contributor" | "reader";
+}
+
+export interface LibraryDetail {
+  id: string;
+  name: string;
+  kind: string;
+  your_role: "owner" | "contributor" | "reader";
+  members: Member[];
+}
+
+export interface MovePlan {
+  source_file_id: string;
+  from_library_id: string;
+  to_library_id: string;
+  document_count: number;
+  documents: { id: string; title: string | null; page_start: number; page_end: number }[];
+  cleared_correspondents: string[];
+  cleared_types: string[];
+  cleared_tags: string[];
+  loses_metadata: boolean;
 }
 
 /** Blob URLs. Authenticated and library-scoped server-side; no token in the URL. */

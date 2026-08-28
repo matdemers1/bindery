@@ -70,6 +70,7 @@ export default function Shell({
             <Tab to="/rules">Rules</Tab>
             <Tab to="/import">Import</Tab>
             <Tab to="/pipeline">Pipeline</Tab>
+            <Tab to="/libraries">Libraries</Tab>
             <Tab to="/trust">Trust</Tab>
             <Tab to="/settings">Settings</Tab>
           </nav>

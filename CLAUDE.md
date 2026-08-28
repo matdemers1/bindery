@@ -201,6 +201,32 @@ the mirror. A twelve-page scan holding three documents is one file plus an
 `index.html` naming the page ranges, because splitting it would modify an
 original.
 
+## Household and libraries (Phase 7)
+
+The library is the access boundary (ADR-005). A permission bug here is not an
+inconvenience — it is the disclosure of one household member's medical history
+to another — so this phase is defended by tests, not by inspection.
+
+- **`api/db/scope.py` is the boundary.** `Depends(current_scope)` hands a route
+  queries that are already filtered. `require_visible` and `require_write`
+  return **404, not 403**, for an invisible library: a 403 confirms the thing
+  exists, and a probe should learn nothing.
+- **`tests/test_permission_boundary.py` is the leak suite.** Three users, three
+  libraries, one document that must never leak, and a parametrised sweep over
+  every read path. It caught the Phase 6 audit endpoint, which called the
+  permission helper and then discarded the answer.
+- **The route-coverage guard is the part that keeps it true.** It enumerates the
+  OpenAPI schema and fails if a GET route under `/api` is not exercised by the
+  sweep. Add new endpoints to `EVERY_READ_PATH`, or to `NOT_LIBRARY_SCOPED`
+  with a reason. It also asserts it examined a non-zero number of routes,
+  because its first version passed while examining none.
+- **A move is file-scoped, and defers a constraint.**
+  `fk_document_source_file_library` ties a document's library to its file's, and
+  no row order satisfies it midway, so `api/moves.py` sets the constraint
+  DEFERRED for that transaction (migration 0009). Taxonomy does not travel:
+  cross-library tags are *revoked*, never deleted, and named in the audit
+  `before`.
+
 ## Deployment
 
 `docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) runs lint and the

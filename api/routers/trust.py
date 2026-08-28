@@ -22,7 +22,8 @@ from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
 from api.db.enums import ActorType, Sensitivity
-from api.db.models import AppUser, AuditEvent, Document, Rule
+from api.db.models import AppUser, AuditEvent, Document, Library, Rule
+from api.db.scope import resolve
 from api.db.session import get_session
 from api.export import archive_export, backup, integrity, mirror
 from api.schemas import (
@@ -277,7 +278,8 @@ async def audit_log(
     Ordered by `sequence` rather than `created_at` because `now()` is
     transaction-scoped — events written together share a timestamp.
     """
-    await _visible(session, user)
+    scope = await resolve(session, user.id)
+    scope.require_any()
 
     conditions: list[sa.ColumnElement[bool]] = []
     if entity_id is not None:
@@ -295,9 +297,15 @@ async def audit_log(
     if before_sequence is not None:
         conditions.append(AuditEvent.sequence < before_sequence)
 
+    # The library filter comes from the scope, not from this function. An
+    # audit event's `after` blob is document content by another name, and this
+    # endpoint leaked every household member's history until the leak suite
+    # said so.
+    reachable = scope.audit().subquery()
     rows = (
         await session.execute(
             sa.select(AuditEvent, AppUser.email, Rule.name.label("rule_name"))
+            .join(reachable, reachable.c.id == AuditEvent.id)
             .outerjoin(AppUser, AppUser.id == AuditEvent.actor_id)
             .outerjoin(Rule, Rule.id == AuditEvent.rule_id)
             .where(sa.and_(*conditions) if conditions else sa.true())
@@ -355,6 +363,13 @@ async def browse_tree(
     library_ids = await _visible(session, user)
     entries = await archive_export.collect(session, library_ids)
     archive_export.plan_layout(entries)
+    library_names = dict(
+        (
+            await session.execute(
+                sa.select(Library.id, Library.name).where(Library.id.in_(library_ids))
+            )
+        ).all()
+    )
 
     prefix = path.strip("/")
     depth = len(prefix.split("/")) if prefix else 0
@@ -403,6 +418,8 @@ async def browse_tree(
                 review_state=document["review_state"],
                 ingest_source=document["ingest_source"],
                 byte_size=document["byte_size"],
+                library_id=uuid.UUID(document["library_id"]),
+                library_name=library_names.get(uuid.UUID(document["library_id"])),
             )
         )
 

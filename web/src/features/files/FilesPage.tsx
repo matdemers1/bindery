@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
-import { api, type FileTreeNode } from "../../api";
+import { ApiError, api, type FileTreeNode, type LibraryDetail, type MovePlan } from "../../api";
 
 /**
  * The folder tree, in the app.
@@ -31,6 +31,7 @@ const INGEST_LABELS: Record<string, string> = {
 export default function FilesPage() {
   const [params, setParams] = useSearchParams();
   const [tree, setTree] = useState<FileTreeNode[]>([]);
+  const [libraries, setLibraries] = useState<LibraryDetail[]>([]);
   const [loading, setLoading] = useState(true);
 
   const path = params.get("path") ?? "";
@@ -38,8 +39,12 @@ export default function FilesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await api.fileTree(path);
+      const [result, held] = await Promise.all([
+        api.fileTree(path),
+        api.householdLibraries(),
+      ]);
       setTree(result.nodes);
+      setLibraries(held);
     } finally {
       setLoading(false);
     }
@@ -97,7 +102,12 @@ export default function FilesPage() {
             node.kind === "folder" ? (
               <FolderRow key={node.path} node={node} onOpen={() => go(node.path)} />
             ) : (
-              <DocumentRow key={node.path + node.document_id} node={node} />
+              <DocumentRow
+                key={node.path + node.document_id}
+                node={node}
+                libraries={libraries}
+                onMoved={() => void load()}
+              />
             ),
           )}
         </ul>
@@ -152,7 +162,15 @@ function FolderRow({ node, onOpen }: { node: FileTreeNode; onOpen: () => void })
   );
 }
 
-function DocumentRow({ node }: { node: FileTreeNode }) {
+function DocumentRow({
+  node,
+  libraries,
+  onMoved,
+}: {
+  node: FileTreeNode;
+  libraries: LibraryDetail[];
+  onMoved: () => void;
+}) {
   const bundle = node.kind === "bundle";
   const target =
     node.document_id && node.page_start
@@ -206,7 +224,19 @@ function DocumentRow({ node }: { node: FileTreeNode }) {
             needs review
           </Link>
         )}
+        {libraries.length > 1 && node.library_name && (
+          <span title="Which library this is in">in {node.library_name}</span>
+        )}
       </div>
+
+      {libraries.length > 1 && node.source_file_id && node.library_id && (
+        <MoveControl
+          sourceFileId={node.source_file_id}
+          currentLibraryId={node.library_id}
+          libraries={libraries}
+          onMoved={onMoved}
+        />
+      )}
 
       {node.tags.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
@@ -221,5 +251,136 @@ function DocumentRow({ node }: { node: FileTreeNode }) {
         </div>
       )}
     </li>
+  );
+}
+
+
+/**
+ * Moving a file to another library.
+ *
+ * Always previewed, never one click. Cross-library search is impossible by
+ * design, so this makes a set of documents vanish from one person's view and
+ * appear in another's — and tags and correspondents belong to a library, so
+ * some of them will not survive the trip. The preview says which, by name,
+ * before anything happens.
+ *
+ * Only libraries you can write to are offered: moving into a library you only
+ * read would be a way to put documents somewhere you cannot be held to account
+ * for putting them.
+ */
+function MoveControl({
+  sourceFileId,
+  currentLibraryId,
+  libraries,
+  onMoved,
+}: {
+  sourceFileId: string;
+  currentLibraryId: string;
+  libraries: LibraryDetail[];
+  onMoved: () => void;
+}) {
+  const [target, setTarget] = useState("");
+  const [plan, setPlan] = useState<MovePlan | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const destinations = libraries.filter(
+    (library) => library.id !== currentLibraryId && library.your_role !== "reader",
+  );
+  if (destinations.length === 0) return null;
+
+  async function run(action: () => Promise<MovePlan>, done?: () => void) {
+    setBusy(true);
+    setError(null);
+    try {
+      setPlan(await action());
+      done?.();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={target}
+          onChange={(event) => {
+            setTarget(event.target.value);
+            setPlan(null);
+          }}
+          className="rounded border border-edge bg-ink px-1.5 py-1"
+        >
+          <option value="">Move to…</option>
+          {destinations.map((library) => (
+            <option key={library.id} value={library.id}>
+              {library.name}
+            </option>
+          ))}
+        </select>
+        {target && !plan && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void run(() => api.previewMove(sourceFileId, target))}
+            className="rounded border border-edge px-2 py-1 disabled:opacity-40"
+          >
+            {busy ? "Checking…" : "Preview"}
+          </button>
+        )}
+      </div>
+
+      {error && <p className="mt-1 text-red-300">{error}</p>}
+
+      {plan && (
+        <div className="mt-2 rounded border border-edge bg-ink p-2">
+          <p>
+            Moves {plan.document_count}{" "}
+            {plan.document_count === 1 ? "document" : "documents"}.
+          </p>
+          {plan.loses_metadata ? (
+            <p className="mt-1 text-amber-300">
+              These belong to the old library and will be cleared:{" "}
+              {[
+                ...plan.cleared_tags,
+                ...plan.cleared_correspondents,
+                ...plan.cleared_types,
+              ].join(", ")}
+              . The change is recorded in the audit log, so you can see what was lost.
+            </p>
+          ) : (
+            <p className="mt-1 text-muted">Nothing is lost in the move.</p>
+          )}
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  () => api.moveFile(sourceFileId, target),
+                  () => {
+                    setPlan(null);
+                    setTarget("");
+                    onMoved();
+                  },
+                )
+              }
+              className="rounded bg-accent px-2 py-1 font-medium text-ink disabled:opacity-40"
+            >
+              {busy ? "Moving…" : "Move"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlan(null)}
+              className="rounded border border-edge px-2 py-1"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

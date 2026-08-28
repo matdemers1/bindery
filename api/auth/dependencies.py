@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth.cookies import ACCESS_COOKIE
 from api.auth.tokens import TokenError, decode_access_token
 from api.db.models import AppUser
+from api.db.scope import Scope, resolve
 from api.db.session import get_session
 
 _UNAUTHENTICATED = HTTPException(
@@ -40,3 +41,17 @@ async def current_user(
     if user is None or not user.is_active:
         raise _UNAUTHENTICATED
     return user
+
+
+async def current_scope(
+    user: AppUser = Depends(current_user), session: AsyncSession = Depends(get_session)
+) -> Scope:
+    """The caller's permission boundary (REQ-101).
+
+    Injected instead of hand-rolling `visible_library_ids` in each route, so a
+    route cannot forget the filter: the only queries a `Scope` will build are
+    already constrained.
+    """
+    scope = await resolve(session, user.id)
+    scope.require_any()
+    return scope

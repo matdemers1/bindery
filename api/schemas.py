@@ -660,9 +660,60 @@ class FileTreeNodeOut(BaseModel):
     sensitivity: str | None = None
     review_state: str | None = None
     byte_size: int | None = None
+    # Which library this is in. Cross-library search is impossible, so a
+    # document in the wrong one is invisible rather than merely misfiled —
+    # browsing has to make the assignment visible (REQ-102).
+    library_id: uuid.UUID | None = None
+    library_name: str | None = None
     child_count: int = 0
 
 
 class FileTreeOut(BaseModel):
     root: str
     nodes: list[FileTreeNodeOut]
+
+
+# --------------------------------------------------------------------------
+# Phase 7 — household and libraries
+# --------------------------------------------------------------------------
+
+
+class MemberOut(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    display_name: str | None
+    role: str
+
+
+class LibraryDetailOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    kind: str
+    your_role: str
+    members: list[MemberOut]
+
+
+class LibraryCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    kind: str = "personal"
+
+
+class MembershipIn(BaseModel):
+    email: str
+    role: str
+
+
+class MoveRequestIn(BaseModel):
+    to_library_id: uuid.UUID
+
+
+class MovePlanOut(BaseModel):
+    source_file_id: uuid.UUID
+    from_library_id: uuid.UUID
+    to_library_id: uuid.UUID
+    document_count: int
+    documents: list[dict]
+    cleared_correspondents: list[str]
+    cleared_types: list[str]
+    cleared_tags: list[str]
+    loses_metadata: bool

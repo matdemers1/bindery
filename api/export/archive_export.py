@@ -165,6 +165,7 @@ async def collect(
                     # How it got in, and what state it is in — the two things
                     # you want when browsing rather than searching.
                     "ingest_source": str(row.ingest_source),
+                    "library_id": str(document.library_id),
                     "review_state": str(document.review_state),
                     "byte_size": row.byte_size,
                 },
