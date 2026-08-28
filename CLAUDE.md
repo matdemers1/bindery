@@ -49,14 +49,40 @@ Python 3.13 · FastAPI · SQLAlchemy 2.0 (async) · Alembic · PostgreSQL 16 (`p
 
 ## Dev Commands
 
+The compose file lives in `infra/`, so every raw invocation needs
+`--env-file .env` to pick up the repo-root env. The Makefile exists only to carry
+that flag — use it.
+
 ```bash
-docker compose -f infra/docker-compose.yml up -d          # start the stack
-docker compose -f infra/docker-compose.yml exec api alembic upgrade head   # migrate (explicit)
-docker compose -f infra/docker-compose.yml logs -f worker  # watch the pipeline
-pytest                                                     # full suite
-pytest tests/test_permissions.py                           # the leak suite — must always pass
-pytest tests/test_ocr_accuracy.py                          # golden corpus scoring
+make up            # start the stack (no tunnel); `make tunnel` adds ingress
+make migrate       # alembic upgrade head — explicit, never on boot
+make logs          # watch the pipeline
+make test          # full suite, against a throwaway bindery_test database
+make ps            # no row may show a host->container port mapping (REQ-104)
+make create-user email=you@example.com library=Household
 ```
+
+Tests run **inside the stack**, not on the host: there are no published ports, so
+the database is unreachable from outside. `make test` uses the `dev` target of
+`Dockerfile.api` and a separate `bindery_test` database.
+
+```bash
+make test                                    # everything
+docker compose --env-file .env -f infra/docker-compose.yml --profile test \
+  run --rm test python -m pytest tests/test_permissions.py   # the leak suite (Phase 7)
+```
+
+## Current State — Phase 0 complete except the tunnel
+
+Working: the five-service stack, baseline schema (migration `0001_baseline`), JWT
+auth with rotating refresh tokens, content-addressed blob storage, an upload
+endpoint, library-scoped list endpoints, and a minimal React shell.
+
+Not yet done: **T-0.5** (Cloudflare Tunnel + Access service token) needs the
+Cloudflare dashboard. Everything else in Phase 0 is verified.
+
+`worker/runner.py` is a placeholder that idles — the real queue consumer is
+Phase 1, T-1.1.
 
 ## Conventions
 
@@ -64,7 +90,12 @@ pytest tests/test_ocr_accuracy.py                          # golden corpus scori
 - **Audit logging on all mutations** — ecosystem standard, and here it is also the trust surface
 - **Prompt files are versioned** (`worker/ai/prompts/classify_v1.md`); the version is written to every classification row
 - **AI calls are never live in the default test run** — tests use recorded responses
-- Repository-layer permission scoping; no call site implements its own check
+- Repository-layer permission scoping in `api/db/repository.py`; no call site implements its own check
+- **Enum columns use `pg_enum()` from `api/db/base.py`**, which persists member
+  *values*. Plain `sa.Enum(SomeEnum)` writes member *names* and will not match
+  the lowercase types the migrations create.
+- `tests/test_no_destructive_paths.py` enforces REQ-090 by scanning `api/` and
+  `worker/`. If it fails, revoke or tombstone — do not loosen the pattern list.
 
 ## ⚠️ Private repository
 

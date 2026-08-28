@@ -1,0 +1,25 @@
+# Staging stack for migration rehearsal (REQ-115, mitigates R-10).
+#
+# Same images, same compose file, its own volume and its own data root, so a
+# migration can be run against a copy of production before it touches the real
+# archive. The project name is what isolates the volume.
+#
+#   cp .env .env.staging   # then point HOST_DATA_ROOT at a scratch directory
+#   docker compose -p bindery-staging --env-file ../.env.staging \
+#     -f docker-compose.yml -f docker-compose.staging.yml up -d
+#
+# Restore a production dump into it, run `alembic upgrade head`, and only then
+# run the same migration against production.
+
+services:
+  postgres:
+    volumes:
+      - pgdata-staging:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+
+  # Staging is never reachable from the internet.
+  cloudflared:
+    profiles: [never]
+
+volumes:
+  pgdata-staging:

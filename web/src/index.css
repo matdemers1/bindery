@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Dark-first: the archive is looked at in the evening, at a desk, in a room
+   with the lights off. Light mode is a Phase 8 concern. */
+@theme {
+  --color-ink: #0b0d12;
+  --color-surface: #141821;
+  --color-edge: #232a37;
+  --color-muted: #8b94a7;
+  --color-accent: #d8a657;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-ink);
+  color: #e6e9ef;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}

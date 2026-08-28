@@ -12,15 +12,19 @@ venv/
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
 
 # Env & secrets
 .env
-.env.local
+.env.*
+!.env.example
 *.pem
 infra/cloudflared/*.json
 
 # Data — never commit the archive
 /data/
+/.data/
+/.data-staging/
 *.sqlite
 
 # Golden corpus contains real personal documents.

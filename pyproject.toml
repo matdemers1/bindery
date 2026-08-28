@@ -1,8 +1,16 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "bindery"
 version = "0.1.0"
 description = "Self-hosted document archive with page-level retrieval inside bundled PDFs"
 requires-python = ">=3.13"
+
+# Base = what `api` needs. The OCR toolchain lives in the `worker` extra so the
+# api image does not carry it. infra/extract-deps.py reads these lists directly,
+# so this file is the single source of truth for both images.
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
@@ -14,24 +22,43 @@ dependencies = [
     "argon2-cffi",
     "pyjwt",
     "python-multipart",
-    "anthropic",
-    "ocrmypdf",
-    "pikepdf",
-    "pypdf",
     "pgvector",
-    "watchfiles",
-    "pillow",
 ]
 
 [project.optional-dependencies]
+worker = [
+    "ocrmypdf",
+    "pikepdf",
+    "pypdf",
+    "pillow",
+    "watchfiles",
+    "anthropic",
+]
 dev = ["pytest", "pytest-asyncio", "httpx", "ruff", "mypy"]
+
+[tool.setuptools.packages.find]
+include = ["api*", "worker*"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py313"
 
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+# B008 is FastAPI's dependency-injection idiom: Depends()/Form()/File() in a
+# default is the documented way to declare them.
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic's generated header sits above the imports by convention.
+"alembic/versions/*" = ["E402"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# One event loop for the whole run. The async engine is module-level, so its
+# connection pool would otherwise be bound to a loop that no longer exists.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 markers = ["live_api: hits the real Claude API; excluded from the default run"]
 addopts = "-m 'not live_api'"

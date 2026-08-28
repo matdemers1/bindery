@@ -1,8 +1,33 @@
-FROM python:3.13-slim
+# ---------------------------------------------------------------------------
+# base — dependencies only. Installed from pyproject.toml without installing the
+# project, so this layer is cached until dependencies actually change.
+# ---------------------------------------------------------------------------
+FROM python:3.13-slim AS base
 WORKDIR /app
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+COPY pyproject.toml infra/extract-deps.py ./
+RUN python extract-deps.py > /tmp/requirements.txt \
+ && pip install --no-cache-dir -r /tmp/requirements.txt \
+ && rm extract-deps.py
+
+# ---------------------------------------------------------------------------
+# runtime — the shipped api image
+# ---------------------------------------------------------------------------
+FROM base AS runtime
 COPY api/ ./api/
 COPY alembic/ ./alembic/
-COPY alembic.ini .
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+COPY alembic.ini ./
+# `python -m` puts /app first on sys.path. Do not switch to the bare `uvicorn`
+# console script: it would resolve `api` from site-packages instead.
+CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# ---------------------------------------------------------------------------
+# dev — same deps plus the test toolchain and the full tree. Used by the `test`
+# compose service; never deployed.
+# ---------------------------------------------------------------------------
+FROM base AS dev
+COPY pyproject.toml infra/extract-deps.py ./
+RUN python extract-deps.py dev > /tmp/dev-requirements.txt \
+ && pip install --no-cache-dir -r /tmp/dev-requirements.txt \
+ && rm extract-deps.py
+COPY . .
+CMD ["python", "-m", "pytest"]

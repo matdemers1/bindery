@@ -1,6 +1,6 @@
-FROM python:3.13-slim
+FROM python:3.13-slim AS base
 
-# OCR toolchain — see Architecture.md L5
+# OCR toolchain — see Architecture.md L5. OCRmyPDF shells out to all of these.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       tesseract-ocr tesseract-ocr-eng \
       ghostscript \
@@ -11,9 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
-COPY worker/ ./worker/
-COPY api/ ./api/
+COPY pyproject.toml infra/extract-deps.py ./
+RUN python extract-deps.py worker > /tmp/requirements.txt \
+ && pip install --no-cache-dir -r /tmp/requirements.txt \
+ && rm extract-deps.py
 
+FROM base AS runtime
+COPY api/ ./api/
+COPY worker/ ./worker/
 CMD ["python", "-m", "worker.runner"]

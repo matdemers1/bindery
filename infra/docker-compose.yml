@@ -1,5 +1,6 @@
 # Bindery — see D3 Cloud Vault/Bindery/Architecture.md
-# INVARIANT: no service publishes a host port. Ingress is Cloudflare Tunnel only (ADR-006).
+# INVARIANT (REQ-104): no service publishes a host port. Ingress is Cloudflare
+# Tunnel only (ADR-006). Do not add a `ports:` key to anything in this file.
 
 services:
   postgres:
@@ -10,30 +11,40 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
+      timeout: 5s
       retries: 5
 
   api:
     build:
       context: ..
       dockerfile: infra/Dockerfile.api
+      target: runtime
     env_file: ../.env
     volumes:
-      - ${DATA_ROOT}:/data
+      - ${HOST_DATA_ROOT}:/data
     depends_on:
       postgres:
         condition: service_healthy
-    # NOTE: migrations are NOT run here. Apply them explicitly.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/api/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    # NOTE (REQ-114): migrations are NOT run here. Apply them explicitly.
 
   worker:
     build:
       context: ..
       dockerfile: infra/Dockerfile.worker
+      target: runtime
     env_file: ../.env
     volumes:
-      - ${DATA_ROOT}:/data
+      - ${HOST_DATA_ROOT}:/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,13 +55,40 @@ services:
       dockerfile: infra/Dockerfile.web
     depends_on:
       - api
+    healthcheck:
+      # 127.0.0.1, not localhost: the image resolves localhost to ::1 first.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # Ingress. Held behind a profile so the stack runs without a tunnel token:
+  #   docker compose --profile tunnel up -d
   cloudflared:
+    profiles: [tunnel]
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
     depends_on:
       - web
       - api
+
+  # Test runner. Uses the dev image target and a separate database, so it never
+  # touches the archive. Also behind a profile — it is not part of the stack.
+  #   docker compose --profile test run --rm test
+  test:
+    profiles: [test]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+      target: dev
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}_test
+      DATA_ROOT: /tmp/bindery-test-data
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   pgdata:
