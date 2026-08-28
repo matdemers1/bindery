@@ -2,7 +2,7 @@ import { useLiveQuery } from "../../live/LiveProvider";
 import { Import as ImportIcon } from "lucide-react";
 
 import PageHeader from "../../components/PageHeader";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { ApiError, api, type ImportItem, type ImportSession, type Library } from "../../api";
@@ -19,6 +19,13 @@ import { ApiError, api, type ImportItem, type ImportSession, type Library } from
  * abandoned. Imported documents are flagged and kept out of that queue, and the
  * screen says so rather than leaving you to discover it.
  */
+/** How many items are still waiting, from whatever the session reports. */
+function remainingOf(session: ImportSession): number {
+  const progress = session.progress ?? {};
+  return (progress.pending ?? 0) + (progress.sampled ?? 0);
+}
+
+
 export default function ImportPage({ libraries }: { libraries: Library[] }) {
   const [sessions, setSessions] = useState<ImportSession[]>([]);
   const [active, setActive] = useState<ImportSession | null>(null);
@@ -26,6 +33,10 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
   const [path, setPath] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [runningAll, setRunningAll] = useState(false);
+  // A ref, not state: the loop reads it between slices and must see the change
+  // immediately rather than on the next render.
+  const stopRef = useRef(false);
 
   const load = useCallback(async () => {
     const all = await api.imports();
@@ -48,6 +59,45 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
   }, [activeId]);
 
   useLiveQuery(moving ? ["files", "jobs"] : [], refreshActive, { fallbackMs: 5000 });
+
+  /**
+   * Import everything, in slices.
+   *
+   * A loop rather than one enormous request: 526 files is minutes of OCR
+   * queueing, and a single call would hold a connection open long enough to be
+   * killed by a proxy and leave you guessing how far it got. Each slice is
+   * committed and idempotent, so stopping is always safe and resuming is just
+   * calling it again.
+   */
+  async function importEverything() {
+    setBusy(true);
+    setNotice(null);
+    stopRef.current = false;
+    setRunningAll(true);
+    try {
+      let current = active;
+      while (current && !stopRef.current) {
+        const before = remainingOf(current);
+        if (before === 0) break;
+        current = await api.runImport(current.id, 50);
+        setActive(current);
+        if (remainingOf(current) >= before) {
+          // No progress: something is refusing rather than finishing, and
+          // looping on it would spin forever.
+          setNotice("Stopped — that slice imported nothing. Check the failures.");
+          break;
+        }
+      }
+      if (current && remainingOf(current) === 0) setNotice("Everything imported.");
+      else if (stopRef.current) setNotice("Stopped. Nothing was lost — resume any time.");
+      await load();
+    } catch (error) {
+      setNotice(error instanceof ApiError ? error.message : "That didn't work.");
+    } finally {
+      setRunningAll(false);
+      setBusy(false);
+    }
+  }
 
   async function act(fn: () => Promise<ImportSession>, message?: string) {
     setBusy(true);
@@ -161,10 +211,21 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
                   cost.exceeds_alarm ? "border-red-500/40" : "border-edge"
                 }`}
               >
+                {/*
+                  Quote what this import will actually cost, which is the
+                  interactive price — that is the only mode wired up. It
+                  previously led with the batched figure, advertising a
+                  half-price option with no way to choose it.
+                */}
                 <p>
                   Classifying this would cost about{" "}
-                  <strong>${cost.batch_usd?.toFixed(2)}</strong> batched, or $
-                  {cost.interactive_usd?.toFixed(2)} one at a time.
+                  <strong>${cost.interactive_usd?.toFixed(2)}</strong>.
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  The Batch API would roughly halve that (about $
+                  {cost.batch_usd?.toFixed(2)}) in exchange for results arriving
+                  within a day instead of within minutes. It is not wired up yet,
+                  so this import will run at the price above.
                 </p>
                 {cost.exceeds_alarm ? (
                   <p className="mt-1 text-red-300">
@@ -211,12 +272,30 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
               >
                 Select a sample ({active.sample_size})
               </button>
+              {runningAll ? (
+                <button
+                  onClick={() => {
+                    stopRef.current = true;
+                  }}
+                  className="rounded-md border border-accent/60 px-3 py-1.5 text-sm text-accent"
+                >
+                  Stop after this slice
+                </button>
+              ) : (
+                <button
+                  onClick={() => void importEverything()}
+                  disabled={busy || remainingOf(active) === 0}
+                  className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
+                >
+                  Import all {remainingOf(active).toLocaleString()}
+                </button>
+              )}
               <button
-                onClick={() => act(() => api.runImport(active.id), "Imported a batch.")}
+                onClick={() => act(() => api.runImport(active.id), "Imported a slice.")}
                 disabled={busy}
-                className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
+                className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
               >
-                Import next 50
+                Just the next 50
               </button>
               <button
                 onClick={() => act(() => api.pauseImport(active.id), "Paused.")}
