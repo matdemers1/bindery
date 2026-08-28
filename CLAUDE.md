@@ -72,17 +72,35 @@ docker compose --env-file .env -f infra/docker-compose.yml --profile test \
   run --rm test python -m pytest tests/test_permissions.py   # the leak suite (Phase 7)
 ```
 
-## Current State — Phase 0 complete except the tunnel
+## Current State — Phase 1 built except the two hardware-bound tasks
 
-Working: the five-service stack, baseline schema (migration `0001_baseline`), JWT
-auth with rotating refresh tokens, content-addressed blob storage, an upload
-endpoint, library-scoped list endpoints, and a minimal React shell.
+**Phase 0** is complete except **T-0.5** (Cloudflare Tunnel + Access service
+token), which needs the dashboard.
 
-Not yet done: **T-0.5** (Cloudflare Tunnel + Access service token) needs the
-Cloudflare dashboard. Everything else in Phase 0 is verified.
+**Phase 1** — retrieval, no AI — is built and verified end to end: a 100-page
+bundle dropped into the watched folder OCRs, pages, and is searchable; ⌘K →
+`dd214` → Enter opens the viewer on page 47 with the term highlighted.
 
-`worker/runner.py` is a placeholder that idles — the real queue consumer is
-Phase 1, T-1.1.
+Open in Phase 1:
+- **T-1.12** — the golden-corpus OCR accuracy figure. The scorer and report are
+  built; the R-01 gate needs *real* documents in `tests/corpus/`. The test skips
+  loudly rather than passing on synthetic pages.
+- **T-1.13** — the Brother Scan-to-SMB spike. Needs the physical scanner.
+
+Not started: Phase 2 (documents as page ranges, known forms).
+
+## Layering rule
+
+`worker/` may import `api/`; **`api/` must never import `worker/`.** Anything
+both processes need — config, models, session, queue, blob store, ingest —
+lives in `api/`, because that is the only package both images carry. `worker/`
+holds the pipeline entrypoint, its stages, and the ingest adapters.
+
+## Pipeline shape today
+
+`watched folder | upload → normalize → page` — segment, embed, classify, rules,
+file and mirror are later phases and are deliberately absent from `STAGES`, so a
+job naming one dead-letters rather than silently succeeding.
 
 ## Conventions
 

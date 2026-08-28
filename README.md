@@ -8,7 +8,9 @@ A self-hosted document archive that OCRs and indexes everything at the **page** 
 
 ## Status
 
-**Phase 0 — Foundation.** The stack runs, the baseline schema is applied, auth works, and a file can be uploaded and listed. Nothing is processed yet: OCR, page-level indexing and search are Phase 1.
+**Phase 1 — Retrieval.** Drop a 100-page bundle into the watched folder; it is OCR'd, indexed page by page, and searchable. Press ⌘K, type `dd214`, hit Enter, and the viewer opens on page 47 with the term highlighted. **No AI is involved in any of that** — which is the point: Phase 1 solves the stated problem on its own.
+
+Still open in Phase 1: the golden-corpus OCR accuracy figure (needs real documents) and the Brother Scan-to-SMB spike (needs the scanner). Phase 0's Cloudflare Tunnel setup also remains.
 
 Full planning corpus lives in the Obsidian vault at `D3 Cloud Vault/Bindery/`.
 
@@ -49,7 +51,9 @@ it is twenty lines.
 | `make tunnel` | start the stack including Cloudflare Tunnel ingress |
 | `make ps` | the PORTS column must show no `host->container` mapping |
 | `make migrate` | `alembic upgrade head`, explicitly |
-| `make test` | full suite against a throwaway database |
+| `make test` | default suite against a throwaway database |
+| `make test-pipeline` | OCR and pipeline suites (needs the OCR toolchain) |
+| `make ocr-report` | golden-corpus word accuracy — the R-01 gate |
 | `make create-user email=… library=…` | there is no self-service registration |
 | `make psql` / `make logs` / `make shell` | the usual |
 

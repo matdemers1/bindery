@@ -51,6 +51,98 @@ export interface UploadResult {
   duplicate: boolean;
 }
 
+export interface PageHit {
+  page_number: number;
+  /** Contains <mark> tags from ts_headline. Rendered through a sanitizer. */
+  snippet: string;
+  rank: number;
+}
+
+export interface SearchResult {
+  source_file_id: string;
+  library_id: string;
+  original_filename: string | null;
+  page_count: number | null;
+  state: string;
+  received_at: string;
+  best_page: PageHit;
+  matching_pages: number;
+}
+
+export interface Facet {
+  value: string;
+  label: string;
+  count: number;
+}
+
+export interface SearchResponse {
+  query: string;
+  total: number;
+  results: SearchResult[];
+  facets: Record<string, Facet[]>;
+  suggestions: string[];
+}
+
+export interface PageSummary {
+  page_number: number;
+  render_path: string | null;
+  thumb_path: string | null;
+}
+
+export interface SourceFileDetail {
+  source_file: SourceFile;
+  pages: PageSummary[];
+}
+
+export interface Word {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  t: string;
+}
+
+export interface PageBoxes {
+  number: number;
+  width: number;
+  height: number;
+  lines: { words: Word[] }[];
+}
+
+export interface Job {
+  id: string;
+  source_file_id: string | null;
+  stage: string;
+  state: string;
+  attempts: number;
+  last_error: string | null;
+  scheduled_for: string;
+  updated_at: string;
+}
+
+export interface PipelineStatus {
+  counts: { stage: string; state: string; count: number }[];
+  attention: Job[];
+  in_flight: Job[];
+}
+
+export interface SearchParams {
+  q: string;
+  libraryIds?: string[];
+  states?: string[];
+  sourceFileId?: string;
+  limit?: number;
+}
+
+function searchQueryString({ q, libraryIds, states, sourceFileId, limit }: SearchParams) {
+  const params = new URLSearchParams({ q });
+  libraryIds?.forEach((id) => params.append("library_id", id));
+  states?.forEach((state) => params.append("state", state));
+  if (sourceFileId) params.set("source_file_id", sourceFileId);
+  if (limit) params.set("limit", String(limit));
+  return params.toString();
+}
+
 export const api = {
   me: () => request<User>("/auth/me"),
   login: (email: string, password: string) =>
@@ -60,12 +152,31 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+
   libraries: () => request<Library[]>("/libraries"),
   sourceFiles: () => request<SourceFile[]>("/source-files"),
+
+  search: (params: SearchParams, signal?: AbortSignal) =>
+    request<SearchResponse>(`/search?${searchQueryString(params)}`, { signal }),
+
+  file: (id: string) => request<SourceFileDetail>(`/files/${id}`),
+  pageBoxes: (id: string, page: number, signal?: AbortSignal) =>
+    request<PageBoxes>(`/files/${id}/pages/${page}/boxes`, { signal }),
+
+  pipeline: () => request<PipelineStatus>("/pipeline"),
+  retryJob: (id: string) => request<Job>(`/pipeline/jobs/${id}/retry`, { method: "POST" }),
+
   upload: (libraryId: string, file: File) => {
     const form = new FormData();
     form.append("library_id", libraryId);
     form.append("file", file);
     return request<UploadResult>("/upload", { method: "POST", body: form });
   },
+};
+
+/** Blob URLs. Authenticated and library-scoped server-side; no token in the URL. */
+export const fileUrl = {
+  render: (id: string, page: number) => `/api/files/${id}/pages/${page}/render`,
+  thumb: (id: string, page: number) => `/api/files/${id}/pages/${page}/thumb`,
+  pdf: (id: string) => `/api/files/${id}/pdf`,
 };
