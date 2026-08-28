@@ -21,9 +21,9 @@ import logging
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import segments
+from api import queue, segments
 from api.artifacts import derived_for
-from api.db.enums import ActorType, SourceFileState
+from api.db.enums import ActorType, JobStage, SourceFileState
 from api.db.models import AuditEvent, SourceFile
 from api.forms.registry import active_registry, match_documents
 from api.queue import ClaimedJob
@@ -131,6 +131,9 @@ async def run_segment(session: AsyncSession, job: ClaimedJob) -> None:
 
     source_file.state = SourceFileState.PROCESSED
     await session.flush()
+
+    # Documents exist now, so they can be embedded and classified.
+    await queue.enqueue(session, JobStage.EMBED, source_file_id=source_file.id)
 
     named = sum(1 for found in matches.values() if found)
     log.info(

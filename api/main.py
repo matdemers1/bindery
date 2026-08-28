@@ -6,7 +6,18 @@ Cloudflare Access service-token policy has one path to match (REQ-105).
 
 from fastapi import FastAPI
 
-from api.routers import auth, documents, files, health, pipeline, search, segments, upload
+from api.routers import (
+    auth,
+    documents,
+    files,
+    health,
+    pipeline,
+    review,
+    rules,
+    search,
+    segments,
+    upload,
+)
 
 app = FastAPI(
     title="Bindery",
@@ -24,3 +35,5 @@ app.include_router(search.router, prefix="/api")
 app.include_router(files.router, prefix="/api")
 app.include_router(segments.router, prefix="/api")
 app.include_router(pipeline.router, prefix="/api")
+app.include_router(review.router, prefix="/api")
+app.include_router(rules.router, prefix="/api")

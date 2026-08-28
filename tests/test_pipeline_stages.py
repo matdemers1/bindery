@@ -7,6 +7,7 @@ present. Marked slow because each case runs a genuine OCR pass.
 """
 
 import json
+import shutil
 import uuid
 
 import pytest
@@ -21,8 +22,6 @@ from api.storage.blobs import blob_path
 from tests.corpus.fixtures import CLEAN_SCAN, render_text_page
 from worker.stages.normalize import run_normalize
 from worker.stages.page import run_page
-
-import shutil
 
 # The api test image carries no OCR toolchain — these suites belong to the
 # `test-worker` service (`make test-pipeline`). Skipping rather than failing

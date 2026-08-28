@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -177,6 +178,86 @@ class SearchResponseOut(BaseModel):
     suggestions: list[str]
 
 
+class TagOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    # ai / rule / human — what makes an AI value visually distinct (REQ-064).
+    source: str
+
+
+class ClassificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    id: uuid.UUID
+    model: str
+    prompt_version: str
+    # Displayed, never decisive (REQ-065).
+    confidence: dict[str, float]
+    # The facts the gate actually read (REQ-057).
+    structural_signals: dict[str, Any]
+    gate_decision: str | None
+    gate_reasons: list[str]
+    usage: dict[str, Any]
+    created_at: datetime
+
+
+class FieldProvenanceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    field_name: str
+    # Absolute page in the source file, so the panel can link straight to it.
+    page_number: int | None
+    snippet: str | None
+    confidence: float | None
+
+
+class WhyPanelOut(BaseModel):
+    document: DocumentOut
+    classification: ClassificationOut | None
+    provenance: list[FieldProvenanceOut]
+    tags: list[TagOut]
+
+
+class ReviewQueueOut(BaseModel):
+    total: int
+    documents: list[DocumentOut]
+
+
+class RuleIn(BaseModel):
+    library_id: uuid.UUID
+    name: str = Field(min_length=1)
+    priority: int = 100
+    conditions: dict[str, Any]
+    actions: dict[str, Any]
+
+
+class RuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    library_id: uuid.UUID
+    name: str
+    enabled: bool
+    priority: int
+    conditions: dict[str, Any]
+    actions: dict[str, Any]
+    created_at: datetime
+
+
+class RuleMatchOut(BaseModel):
+    document_id: uuid.UUID
+    title: str | None
+    changes: dict[str, Any]
+
+
+class RuleDryRunOut(BaseModel):
+    rule_id: uuid.UUID
+    examined: int
+    matched: int
+    truncated: bool
+    matches: list[RuleMatchOut]
+
+
 class JobOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -210,9 +291,11 @@ class HealthOut(BaseModel):
 
 
 __all__ = [
+    "ClassificationOut",
     "DocumentDetailOut",
     "DocumentOut",
     "FacetOut",
+    "FieldProvenanceOut",
     "HealthOut",
     "JobOut",
     "KnownFormOut",
@@ -221,6 +304,11 @@ __all__ = [
     "PageHitOut",
     "PageOut",
     "PipelineStatusOut",
+    "ReviewQueueOut",
+    "RuleDryRunOut",
+    "RuleIn",
+    "RuleMatchOut",
+    "RuleOut",
     "SearchResponseOut",
     "SearchResultOut",
     "SegmentIn",
@@ -229,6 +317,8 @@ __all__ = [
     "SourceFileDetailOut",
     "SourceFileOut",
     "StageCount",
+    "TagOut",
     "UploadResult",
     "UserOut",
+    "WhyPanelOut",
 ]

@@ -2,11 +2,13 @@ import uuid
 from datetime import date, datetime
 
 import sqlalchemy as sa
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.db.base import Base, created_at, pg_enum, uuid_pk
 from api.db.enums import Redundancy, ReviewState, Sensitivity
+from api.embedding import EMBEDDING_DIMENSIONS
 
 
 class Document(Base):
@@ -16,8 +18,8 @@ class Document(Base):
     100-page bundle produces thirty rows over one file. Wrong boundaries are a
     metadata edit — the original bytes are never touched.
 
-    Correspondent, document type and embedding columns are added in Phases 3 and
-    5, when the tables they point at exist.
+    Correspondent and document-type columns arrived in Phase 3; asset links
+    arrive in Phase 5.
 
     **Segments are superseded, never deleted.** Re-segmenting a bundle would
     otherwise mean destroying document rows, which invariant 3 forbids and which
@@ -78,6 +80,17 @@ class Document(Base):
     known_form_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), sa.ForeignKey("known_form.id"), index=True
     )
+    # Soft, model-suggested. Reused by id, never by name (invariant 6).
+    document_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("document_type.id"), index=True
+    )
+    correspondent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("correspondent.id"), index=True
+    )
+
+    # Lexical embedding for neighbour retrieval, find-similar and Q&A. Not used
+    # for search — semantic search was deliberately declined (ADR-004).
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
 
     # Keeps a 5,000-document backlog import out of the daily review queue.
     is_backlog: Mapped[bool] = mapped_column(

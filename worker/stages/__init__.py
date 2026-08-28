@@ -13,8 +13,11 @@ error and the runner will dead-letter it rather than pretend it succeeded.
 from collections.abc import Awaitable, Callable
 
 from api.db.enums import JobStage
+from worker.stages.classify import run_classify
+from worker.stages.embed import run_embed
 from worker.stages.normalize import run_normalize
 from worker.stages.page import run_page
+from worker.stages.rules import run_rules
 from worker.stages.segment import run_segment
 
 # (session, job) -> None. Raising is how a stage reports failure.
@@ -24,6 +27,9 @@ STAGES: dict[JobStage, StageFn] = {
     JobStage.NORMALIZE: run_normalize,
     JobStage.PAGE: run_page,
     JobStage.SEGMENT: run_segment,
+    JobStage.EMBED: run_embed,
+    JobStage.CLASSIFY: run_classify,
+    JobStage.RULES: run_rules,
 }
 
 __all__ = ["STAGES", "StageFn"]

@@ -37,6 +37,10 @@ class DocumentTag(Base):
 
     `source` is what lets the why-panel distinguish "the model chose this" from
     "your rule forced this" from "you set this".
+
+    Links are **superseded, never deleted** — the same answer this project gives
+    everywhere else. Undoing a classification takes back the tags it applied
+    without erasing the fact that it applied them.
     """
 
     __tablename__ = "document_tag"
@@ -51,3 +55,17 @@ class DocumentTag(Base):
         pg_enum(TagSource, "tag_source"), nullable=False
     )
     created_at: Mapped[datetime] = created_at()
+    # Set when an undo took the link back. Live links are `removed_at IS NULL`.
+    removed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    removed_by_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("audit_event.id")
+    )
+
+
+def live_tag_links() -> sa.ColumnElement[bool]:
+    """The filter every read of a document's tags must apply.
+
+    A superseded link is history: it records that a classifier once applied this
+    tag and that an undo took it back.
+    """
+    return DocumentTag.removed_at.is_(None)
