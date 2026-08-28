@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import { ApiError, api, type LogEntry } from "../api";
+import { useLiveQuery } from "../live/LiveProvider";
 
 /**
  * The log, on screen.
@@ -78,14 +79,13 @@ export default function LogViewer({
     [sourceFileId, level, q],
   );
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // `live` is now about whether to accept pushes rather than how fast to ask.
+  useLiveQuery(live ? ["logs", "jobs"] : [], load, { fallbackMs: 10_000 });
 
   useEffect(() => {
-    if (!live) return;
-    const timer = setInterval(() => void load(), 4000);
-    return () => clearInterval(timer);
+    if (live) return;
+    // Paused: load once so the pane is not blank, then leave it alone.
+    void load();
   }, [live, load]);
 
   return (

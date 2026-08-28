@@ -19,6 +19,7 @@ import TrustPage from "./features/trust/TrustPage";
 import SegmentationPage from "./features/segmentation/SegmentationPage";
 import ViewerPage from "./features/viewer/ViewerPage";
 import Shell from "./components/Shell";
+import { LiveProvider } from "./live/LiveProvider";
 import Login from "./pages/Login";
 
 type State = { status: "loading" } | { status: "out" } | { status: "in"; user: User };
@@ -68,7 +69,8 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Shell
+      <LiveProvider>
+        <Shell
         user={state.user}
         libraries={libraries}
         onOpenPalette={() => setPaletteOpen(true)}
@@ -117,8 +119,9 @@ export default function App() {
           <Route path="/pipeline" element={<PipelinePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </Shell>
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+        </Shell>
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      </LiveProvider>
     </BrowserRouter>
   );
 }

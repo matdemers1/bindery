@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import ingest
+from api import events, ingest
 from api.auth.dependencies import current_user
 from api.db import repository
 from api.db.enums import ActorType, IngestSource
@@ -52,6 +52,13 @@ async def upload(
         # Nothing was created, so this is a 200 rather than the route's 201.
         response.status_code = status.HTTP_200_OK
     else:
+        await events.publish(
+            session,
+            [events.Topic.FILES, events.Topic.JOBS],
+            library_id=library_id,
+            source_file_id=result.source_file.id,
+            state="received",
+        )
         await session.commit()
         await session.refresh(result.source_file)
 

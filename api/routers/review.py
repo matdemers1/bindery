@@ -11,6 +11,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import events
 from api import undo as undo_module
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -182,6 +183,11 @@ async def undo(
     except undo_module.UndoError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
+    await events.publish(
+        session,
+        [events.Topic.REVIEW, events.Topic.DOCUMENTS],
+        library_id=document.library_id,
+    )
     await session.commit()
     await session.refresh(restored)
     return DocumentOut.model_validate(restored)
@@ -213,6 +219,13 @@ async def accept(
         actor_id=user.id,
         before={"review_state": before},
         after={"review_state": ReviewState.FILED.value},
+    )
+    # The badge in the sidebar has to stop claiming this document the moment it
+    # is accepted, not on whatever timer that component happens to be on.
+    await events.publish(
+        session,
+        [events.Topic.REVIEW, events.Topic.DOCUMENTS],
+        library_id=document.library_id,
     )
     await session.commit()
     await session.refresh(document)

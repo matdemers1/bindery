@@ -18,8 +18,9 @@ import uuid
 
 import sqlalchemy as sa
 
-from api import eventlog, health_panel, notify, queue, settings_store
+from api import eventlog, events, health_panel, notify, queue, settings_store
 from api.config import get_settings
+from api.db.enums import JobStage
 from api.db.models import Document, SourceFile
 from api.db.session import SessionFactory, engine
 from worker.ingest.watched_folder import watch_inbox
@@ -70,6 +71,30 @@ async def _library_of(job: queue.ClaimedJob) -> uuid.UUID | None:
     return None
 
 
+
+async def _announce(session, job: queue.ClaimedJob, library_id, state: str) -> None:
+    """Tell whoever is watching that this job moved.
+
+    Emitted from the same transaction that records the outcome, so it is
+    delivered on commit and discarded on rollback — a screen can never be told
+    about a state change that did not happen.
+    """
+    topics = [events.Topic.JOBS, events.Topic.LOGS]
+    if job.source_file_id:
+        topics.append(events.Topic.FILES)
+    if job.stage in (JobStage.CLASSIFY, JobStage.RULES, JobStage.SEGMENT):
+        # These are the stages that put things in front of a person.
+        topics += [events.Topic.REVIEW, events.Topic.DOCUMENTS]
+    await events.publish(
+        session,
+        topics,
+        library_id=library_id,
+        source_file_id=job.source_file_id,
+        stage=job.stage.value,
+        state=state,
+    )
+
+
 async def _run_one(job: queue.ClaimedJob) -> None:
     """Execute a claimed job in its own session, then record the outcome.
 
@@ -79,12 +104,13 @@ async def _run_one(job: queue.ClaimedJob) -> None:
     # Bound once, here, so every line any stage writes — including lines from
     # code that has never heard of the event log — is attributable to this job,
     # this file and this library.
+    library_id = await _library_of(job)
     with eventlog.bind(
         job_id=job.id,
         stage=job.stage.value,
         source_file_id=job.source_file_id,
         document_id=job.document_id,
-        library_id=await _library_of(job),
+        library_id=library_id,
         attempt=job.attempts,
     ):
         try:
@@ -98,6 +124,7 @@ async def _run_one(job: queue.ClaimedJob) -> None:
         except Exception as exc:  # every failure is recorded; none escape this loop
             async with SessionFactory() as session:
                 state = await queue.fail(session, job.id, job.attempts, repr(exc))
+                await _announce(session, job, library_id, state.value)
                 await session.commit()
 
             # One line per failure, at the level the *outcome* deserves. Logging
@@ -119,6 +146,7 @@ async def _run_one(job: queue.ClaimedJob) -> None:
 
         async with SessionFactory() as session:
             await queue.succeed(session, job.id)
+            await _announce(session, job, library_id, "succeeded")
             await session.commit()
         log.info("%s finished", job.stage.value)
 

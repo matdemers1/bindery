@@ -11,7 +11,7 @@ your API key into the DOM has leaked it to every browser extension you run.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import models, settings_store
+from api import events, models, settings_store
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -114,6 +114,7 @@ async def update_settings(
             actor_id=user.id,
             after={"changed": changed},
         )
+        await events.publish(session, events.Topic.SETTINGS)
     await session.commit()
     return await read_settings(user=user, session=session)
 

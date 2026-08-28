@@ -23,7 +23,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import queue
+from api import events, queue
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -322,6 +322,12 @@ async def rescan(
         actor_type=ActorType.HUMAN,
         actor_id=user.id,
         after={"queued": queued},
+    )
+    await events.publish(
+        session,
+        [events.Topic.FILES, events.Topic.JOBS],
+        library_id=source_file.library_id,
+        source_file_id=source_file.id,
     )
     await session.commit()
     return RescanResultOut(

@@ -1,14 +1,11 @@
 import { Activity } from "lucide-react";
 
 import PageHeader from "../../components/PageHeader";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { api, type PipelineStatus } from "../../api";
+import { useLiveQuery } from "../../live/LiveProvider";
 import PendingReviewPanel from "../../components/PendingReview";
-
-// "Nothing fails silently" is an invariant, so this screen is the place a failed
-// document is guaranteed to surface — and the place it can be retried.
-const POLL_MS = 5000;
 
 export default function PipelinePage() {
   const [status, setStatus] = useState<PipelineStatus | null>(null);
@@ -16,11 +13,7 @@ export default function PipelinePage() {
 
   const load = useCallback(() => api.pipeline().then(setStatus).catch(() => {}), []);
 
-  useEffect(() => {
-    void load();
-    const timer = setInterval(load, POLL_MS);
-    return () => clearInterval(timer);
-  }, [load]);
+  useLiveQuery(["jobs", "files", "review"], load);
 
   async function retry(jobId: string) {
     setBusy(jobId);

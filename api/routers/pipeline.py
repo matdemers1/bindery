@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import queue, reclassify
+from api import events, queue, reclassify
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -181,6 +181,7 @@ async def rerun_review(
         actor_id=user.id,
         after={"queued": queued, "requested": len(set(document_ids))},
     )
+    await events.publish(session, [events.Topic.JOBS, events.Topic.REVIEW])
     await session.commit()
     return ReclassifyResultOut(queued=queued, requested=len(set(document_ids)))
 

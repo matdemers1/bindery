@@ -337,6 +337,33 @@ Not pruned. A few hundred bytes per job is tens of megabytes over the archive's
 life, and a scheduled delete would be the one thing here that removes rows on
 its own.
 
+## Real-time updates
+
+`api/events.py` + `api/routers/live.py` + `web/src/live/LiveProvider.tsx`.
+**Do not add a polling timer to a screen.** Every screen used to own one, which
+was wrong in both directions: the server was asked constantly while nothing
+happened, and a screen still showed stale data for a whole interval after
+something did — which is why the review badge kept claiming work already
+accepted. One page had a dependency-array feedback loop and reached *sixty
+requests a second*.
+
+- **Transport is Postgres `LISTEN`/`NOTIFY`.** The worker is a separate
+  container, so notification has to cross a process boundary, and the database
+  is the only thing both already talk to. No Redis to run, back up or lose.
+- **`pg_notify` inside a transaction fires on commit and is discarded on
+  rollback**, so it is impossible to announce a change that did not happen.
+  Always publish in the same session as the mutation.
+- **Payloads are hints, not state** — a topic and a library. Clients refetch
+  what they display, so the server stays the single definition of every
+  screen's data. Pushing state would mean a second definition that can disagree.
+- **`useLiveQuery(topics, load)`** is the only sanctioned pattern on the client.
+  It refetches on mount, on a hint, and — only while pushes are unavailable — on
+  a slow fallback timer.
+- **nginx needs the upgrade dance** (`proxy_http_version 1.1`, `Upgrade`,
+  `Connection`). Without it the handshake gets a plain 200 and the socket never
+  forms — and because the dev server proxies WebSockets natively, that failure
+  appears *only* in the deployed stack.
+
 ## Deployment
 
 `docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) runs lint and the

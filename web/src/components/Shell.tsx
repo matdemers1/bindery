@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { api, type Library, type User } from "../api";
+import { useLiveQuery } from "../live/LiveProvider";
 import { Wordmark } from "./brand/Logo";
 
 /**
@@ -117,11 +118,10 @@ export default function Shell({
     if (health.status === "fulfilled") setUnhealthy(!health.value.healthy);
   }, []);
 
-  useEffect(() => {
-    void refreshBadges();
-    const timer = setInterval(() => void refreshBadges(), 60_000);
-    return () => clearInterval(timer);
-  }, [refreshBadges]);
+  // The counts move the moment something changes rather than up to a minute
+  // later. This is the bug that made the sidebar keep claiming work you had
+  // already dealt with.
+  useLiveQuery(["review", "jobs", "documents"], refreshBadges, { fallbackMs: 60_000 });
 
   async function upload(files: FileList | null) {
     const target = libraries[0];

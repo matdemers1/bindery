@@ -10,7 +10,8 @@ import logging
 
 from fastapi import FastAPI
 
-from api import eventlog
+from api import eventlog, events
+from api.config import get_settings
 from api.db.session import SessionFactory
 from api.routers import (
     auth,
@@ -21,6 +22,7 @@ from api.routers import (
     household,
     imports,
     library,
+    live,
     logs,
     pipeline,
     review,
@@ -51,12 +53,19 @@ async def lifespan(_app: FastAPI):
     drain = asyncio.create_task(
         eventlog.drain_forever(stopping, SessionFactory), name="log-drain"
     )
+    # One LISTEN connection for the whole process, fanned out to every open
+    # socket. The database should not care how many browser tabs there are.
+    listener = asyncio.create_task(
+        events.broadcaster.run(events.listen_dsn(get_settings().database_url), stopping),
+        name="change-listener",
+    )
     try:
         yield
     finally:
         stopping.set()
-        with contextlib.suppress(asyncio.CancelledError, TimeoutError):
-            await asyncio.wait_for(drain, timeout=5)
+        for task in (drain, listener):
+            with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                await asyncio.wait_for(task, timeout=5)
 
 
 app = FastAPI(
@@ -81,6 +90,7 @@ app.include_router(files.router, prefix="/api")
 app.include_router(segments.router, prefix="/api")
 app.include_router(pipeline.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
+app.include_router(live.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
 app.include_router(rules.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")

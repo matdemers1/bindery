@@ -3,6 +3,8 @@ import { ShieldCheck } from "lucide-react";
 import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
+
+import { useLiveQuery } from "../../live/LiveProvider";
 import {
   AlertTriangle,
   Clock,
@@ -497,12 +499,7 @@ function HealthPanelView() {
     }
   }, []);
 
-  useEffect(() => {
-    void load();
-    // Slow on purpose. This is a status page, not a dashboard to watch.
-    const timer = setInterval(() => void load(), 60_000);
-    return () => clearInterval(timer);
-  }, [load]);
+  useLiveQuery(["jobs", "files", "documents"], load, { fallbackMs: 60_000 });
 
   if (error) {
     return (

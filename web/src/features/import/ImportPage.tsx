@@ -1,3 +1,4 @@
+import { useLiveQuery } from "../../live/LiveProvider";
 import { Import as ImportIcon } from "lucide-react";
 
 import PageHeader from "../../components/PageHeader";
@@ -36,14 +37,17 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
     void load();
   }, [load]);
 
-  // Poll while an import is moving, so progress is visible without refreshing.
-  useEffect(() => {
-    if (!active || !["importing", "sampling"].includes(active.state)) return;
-    const timer = setInterval(async () => {
-      setActive(await api.importSession(active.id));
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [active]);
+  // Refreshed when files actually move rather than on a timer. The timer
+  // version depended on `active`, and replacing `active` with a fresh object
+  // every tick tore the interval down and rebuilt it on every response.
+  const activeId = active?.id;
+  const moving = Boolean(active && ["importing", "sampling"].includes(active.state));
+  const refreshActive = useCallback(async () => {
+    if (!activeId) return;
+    setActive(await api.importSession(activeId));
+  }, [activeId]);
+
+  useLiveQuery(moving ? ["files", "jobs"] : [], refreshActive, { fallbackMs: 5000 });
 
   async function act(fn: () => Promise<ImportSession>, message?: string) {
     setBusy(true);

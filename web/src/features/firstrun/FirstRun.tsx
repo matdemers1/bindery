@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { ApiError, api, type Library, type PipelineStatus } from "../../api";
+import { useLiveQuery } from "../../live/LiveProvider";
 
 /**
  * First run (T-8.6, REQ-119).
@@ -61,12 +62,7 @@ export default function FirstRun({
     }
   }, []);
 
-  useEffect(() => {
-    if (!started) return;
-    void poll();
-    const timer = setInterval(() => void poll(), 2000);
-    return () => clearInterval(timer);
-  }, [started, poll]);
+  useLiveQuery(started ? ["jobs", "files"] : [], poll);
 
   async function upload(files: FileList | null) {
     const target = libraries[0];
