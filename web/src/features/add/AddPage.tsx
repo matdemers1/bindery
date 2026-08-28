@@ -62,12 +62,23 @@ export default function AddPage({
   function add(files: FileList | null) {
     if (!files?.length) return;
     setError(null);
+
+    // Copied out of the FileList *now*, before anything else runs.
+    //
+    // A FileList is a live view of its input element, and the change handler
+    // resets `input.value` so that picking the same file twice still fires. If
+    // the list is only read inside the state updater — which React runs later —
+    // that reset has already emptied it, and the picker silently stages
+    // nothing. Drag-and-drop was unaffected because `dataTransfer.files`
+    // belongs to the event rather than to an element someone clears.
+    const picked = Array.from(files);
+
     setStaged((current) => {
       // Same name and size twice is the double-drop, not two documents. The
       // archive would dedupe it by content anyway; catching it here means the
       // list shows what will actually happen.
       const seen = new Set(current.map((s) => `${s.file.name}:${s.file.size}`));
-      const additions = Array.from(files)
+      const additions = picked
         .filter((file) => !seen.has(`${file.name}:${file.size}`))
         .map((file) => ({ id: `${file.name}:${file.size}:${file.lastModified}`, file }));
       return [...current, ...additions].slice(0, MAX_STAGED);
