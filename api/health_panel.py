@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import models
 from api.db.enums import JobState, SourceFileState
 from api.db.models import Classification, Job, SourceFile
 
@@ -39,14 +40,9 @@ STALE_LOCK = timedelta(minutes=30)
 # even though nothing has failed.
 STALL_AFTER = timedelta(minutes=15)
 
-# Published per-million-token prices. Approximate by construction — the point is
-# to notice a runaway loop, not to reconcile an invoice.
-PRICE_PER_MTOK = {
-    "input": 5.0,
-    "output": 25.0,
-    "cache_write": 6.25,
-    "cache_read": 0.5,
-}
+# Prices live in api/models.py, per model, because the estimate is meaningless
+# otherwise: Haiku and Opus differ by roughly 5x, so one hardcoded rate turns a
+# runaway-loop tripwire into a random number.
 
 
 @dataclass
@@ -104,21 +100,22 @@ class HealthPanel:
         }
 
 
-def estimate_cost(usage: dict) -> float:
-    """Dollars from one classification's token usage.
+def estimate_cost(usage: dict, model: str | None = None) -> float:
+    """Dollars from one classification's token usage, at that model's rates.
 
     Cache reads are an order of magnitude cheaper than fresh input, so counting
     them as input would make a healthy cache look like a spending problem.
     """
     if not usage:
         return 0.0
+    prices = models.pricing(model)
     tokens = {
         "input": usage.get("input_tokens", 0),
         "output": usage.get("output_tokens", 0),
         "cache_write": usage.get("cache_creation_input_tokens", 0),
         "cache_read": usage.get("cache_read_input_tokens", 0),
     }
-    return sum(count / 1_000_000 * PRICE_PER_MTOK[kind] for kind, count in tokens.items())
+    return sum(count / 1_000_000 * prices.price(kind) for kind, count in tokens.items())
 
 
 async def collect(
@@ -206,15 +203,19 @@ async def collect(
 
     spend_rows = (
         await session.execute(
-            sa.select(Classification.created_at, Classification.usage).where(
+            sa.select(
+                Classification.created_at, Classification.usage, Classification.model
+            ).where(
                 Classification.created_at >= now - timedelta(days=30)
             )
         )
     ).all()
     by_day: dict[str, float] = {}
     total_spend = 0.0
-    for created_at, usage in spend_rows:
-        cost = estimate_cost(usage or {})
+    for created_at, usage, model in spend_rows:
+        # Costed at the rate of whatever model actually ran, not whatever is
+        # configured now — switching to Haiku does not make last month cheaper.
+        cost = estimate_cost(usage or {}, model)
         total_spend += cost
         day = created_at.date().isoformat()
         by_day[day] = by_day.get(day, 0.0) + cost

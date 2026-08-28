@@ -233,3 +233,69 @@ async def test_testing_without_a_key_explains_rather_than_errors(client, signed_
 async def test_only_known_settings_can_be_written(session) -> None:
     with pytest.raises(ValueError, match="not a writable setting"):
         await settings_store.set_(session, "database_url", "postgres://evil", actor_id=None)
+
+
+# --------------------------------------------------------------------------
+# Choosing a model (Opus / Sonnet / Haiku)
+# --------------------------------------------------------------------------
+
+
+async def test_the_available_models_are_offered_with_their_cost(client, signed_in) -> None:
+    await signed_in()
+    body = (await client.get("/api/settings")).json()
+
+    ids = [choice["id"] for choice in body["available_models"]]
+    assert ids == ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]
+    # Price is the reason anyone opens this list, so it travels with the list.
+    assert all(choice["input_per_mtok"] > 0 for choice in body["available_models"])
+    assert all(choice["blurb"] for choice in body["available_models"])
+
+
+async def test_choosing_a_cheaper_model_sticks(client, session, signed_in) -> None:
+    await signed_in()
+    response = await client.put("/api/settings", json={"model": "claude-haiku-4-5-20251001"})
+    assert response.status_code == 200, response.text
+    assert response.json()["model"] == "claude-haiku-4-5-20251001"
+
+    from api import settings_store
+
+    assert await settings_store.get(session, settings_store.BINDERY_MODEL) == (
+        "claude-haiku-4-5-20251001"
+    )
+
+
+async def test_a_model_outside_the_set_is_refused_at_the_form(client, signed_in) -> None:
+    """Not accepted and discovered later.
+
+    An unusable model id fails every classification, at the worker, hours
+    later — a queue full of dead letters whose cause is a typo on a settings
+    page nobody is looking at any more.
+    """
+    await signed_in()
+    response = await client.put("/api/settings", json={"model": "claude-opus-4"})
+    assert response.status_code == 422
+    assert "not one of the available models" in response.text
+
+
+def test_spend_is_costed_at_the_model_that_actually_ran() -> None:
+    """Switching to Haiku does not make last month cheaper."""
+    from api.health_panel import estimate_cost
+
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
+    opus = estimate_cost(usage, "claude-opus-5")
+    sonnet = estimate_cost(usage, "claude-sonnet-5")
+    haiku = estimate_cost(usage, "claude-haiku-4-5-20251001")
+
+    assert opus > sonnet > haiku
+    assert haiku == pytest.approx(6.0)
+
+
+def test_an_unknown_model_is_costed_pessimistically() -> None:
+    """A classification written before the set changed should read as alarming
+    rather than reassuring — the tripwire exists to be tripped."""
+    from api.health_panel import estimate_cost
+
+    usage = {"input_tokens": 1_000_000}
+    assert estimate_cost(usage, "some-retired-model") == estimate_cost(
+        usage, "claude-opus-5"
+    )

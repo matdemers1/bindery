@@ -123,5 +123,11 @@ async def run_page(session: AsyncSession, job: ClaimedJob) -> None:
         .where(SourceFile.id == source_file.id)
         .values(page_count=len(pages), state=SourceFileState.SEGMENTING.value)
     )
-    await queue.enqueue(session, JobStage.SEGMENT, source_file_id=source_file.id)
+    # `requeue_stage`, not `enqueue`: enqueue is idempotent and deliberately
+    # refuses to disturb an existing job, which is right for the first run and
+    # wrong for a replay. On a rescan the downstream job already exists and
+    # already succeeded, so `enqueue` is a no-op and the replay stops dead here
+    # — the file gets re-OCR'd and nothing downstream ever sees the new text.
+    # On a first run there is no existing job, so the two behave identically.
+    await queue.requeue_stage(session, JobStage.SEGMENT, source_file_id=source_file.id)
     log.info("paged %s into %s rows", source_file.original_filename, len(pages))

@@ -285,7 +285,16 @@ export interface Tree {
   groups: { label: string; count: number }[];
 }
 
+export interface ModelChoice {
+  id: string;
+  name: string;
+  blurb: string;
+  input_per_mtok: number;
+  output_per_mtok: number;
+}
+
 export interface Settings {
+  available_models: ModelChoice[];
   anthropic_key_configured: boolean;
   anthropic_key_hint: string | null;
   model: string;

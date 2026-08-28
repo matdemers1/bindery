@@ -59,7 +59,9 @@ async def run_embed(session: AsyncSession, job: ClaimedJob) -> None:
         # Both keys: the document is what gets classified, but carrying the
         # file as well is what lets every "show me this library's jobs" query
         # reach it by the obvious route.
-        await queue.enqueue(
+        # See the note on the other cascade points: a replay has to reset the
+        # next stage, and on a first run this is identical to `enqueue`.
+        await queue.requeue_stage(
             session,
             JobStage.CLASSIFY,
             document_id=document.id,

@@ -234,5 +234,11 @@ async def run_normalize(session: AsyncSession, job: ClaimedJob) -> None:
     source_file.state = SourceFileState.PAGING
     await session.flush()
 
-    await queue.enqueue(session, JobStage.PAGE, source_file_id=source_file.id)
+    # `requeue_stage`, not `enqueue`: enqueue is idempotent and deliberately
+    # refuses to disturb an existing job, which is right for the first run and
+    # wrong for a replay. On a rescan the downstream job already exists and
+    # already succeeded, so `enqueue` is a no-op and the replay stops dead here
+    # — the file gets re-OCR'd and nothing downstream ever sees the new text.
+    # On a first run there is no existing job, so the two behave identically.
+    await queue.requeue_stage(session, JobStage.PAGE, source_file_id=source_file.id)
     log.info("normalized %s (%s pages)", source_file.original_filename, page_count)

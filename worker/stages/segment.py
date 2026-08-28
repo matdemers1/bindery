@@ -216,7 +216,13 @@ async def run_segment(session: AsyncSession, job: ClaimedJob) -> None:
     await session.flush()
 
     # Documents exist now, so they can be embedded and classified.
-    await queue.enqueue(session, JobStage.EMBED, source_file_id=source_file.id)
+    # `requeue_stage`, not `enqueue`: enqueue is idempotent and deliberately
+    # refuses to disturb an existing job, which is right for the first run and
+    # wrong for a replay. On a rescan the downstream job already exists and
+    # already succeeded, so `enqueue` is a no-op and the replay stops dead here
+    # — the file gets re-OCR'd and nothing downstream ever sees the new text.
+    # On a first run there is no existing job, so the two behave identically.
+    await queue.requeue_stage(session, JobStage.EMBED, source_file_id=source_file.id)
 
     named = sum(1 for found in matches.values() if found)
     log.info(

@@ -11,14 +11,19 @@ your API key into the DOM has leaked it to every browser extension you run.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import settings_store
+from api import models, settings_store
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
 from api.db.enums import ActorType
 from api.db.models import AppUser
 from api.db.session import get_session
-from api.schemas import SettingsOut, SettingsTestOut, SettingsUpdateIn
+from api.schemas import (
+    ModelChoiceOut,
+    SettingsOut,
+    SettingsTestOut,
+    SettingsUpdateIn,
+)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -37,6 +42,13 @@ async def read_settings(
     key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
     webhook = await settings_store.get(session, settings_store.NOTIFY_WEBHOOK_URL)
     return SettingsOut(
+        available_models=[
+            ModelChoiceOut(
+                id=choice.id, name=choice.name, blurb=choice.blurb,
+                input_per_mtok=choice.input, output_per_mtok=choice.output,
+            )
+            for choice in models.MODELS
+        ],
         anthropic_key_configured=bool(key),
         anthropic_key_hint=settings_store.mask(key),
         model=await settings_store.get(session, settings_store.BINDERY_MODEL) or "claude-opus-5",
@@ -64,8 +76,17 @@ async def update_settings(
         )
         changed.append("anthropic_api_key")
     if payload.model is not None:
+        chosen = payload.model.strip()
+        if not models.is_valid(chosen):
+            # Refused here rather than accepted and discovered by the worker.
+            # An unusable model id fails every classification, hours later, as a
+            # queue full of dead letters with no obvious cause.
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"{chosen!r} is not one of the available models",
+            )
         await settings_store.set_(
-            session, settings_store.BINDERY_MODEL, payload.model.strip(), actor_id=user.id
+            session, settings_store.BINDERY_MODEL, chosen, actor_id=user.id
         )
         changed.append("model")
     if payload.prompt_version is not None:

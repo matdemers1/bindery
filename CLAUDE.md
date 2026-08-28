@@ -278,6 +278,33 @@ classification row" — a document filed by a rule or by hand has no
 classification and is finished, and offering to run AI over it is offering to
 overwrite a person's work.
 
+## OCR, rescan and replay
+
+- **A page ocrmypdf declines to touch produces silence, not a failure.** Vector
+  content rather than an image makes it skip the page "to avoid losing detail"
+  and **exit 0** — the file arrives `processed`, unsearchable, with nothing to
+  retry. `normalize` checks the word count it already extracts and re-runs with
+  `--force-ocr` when it is zero. Safe because there was nothing to lose: a
+  digital-native PDF has a text layer, so a non-zero count, so REQ-017 holds.
+- **Stage cascades use `requeue_stage`, never `enqueue`.** `enqueue` is
+  idempotent and refuses to disturb an existing job — right for a first run,
+  fatal for a replay. With `enqueue`, a rescan re-OCR'd a real file, recovered
+  262 words, and stopped dead because paging had already succeeded once. On a
+  first run the two are identical.
+- **`GET /api/files/{id}/text` is the raw extraction**, verbatim. A search
+  finding nothing is ambiguous until you can see whether the word was ever read
+  correctly — which matters most on handwriting, where it is least likely.
+
+## Choosing a model
+
+`api/models.py` is the closed set (Opus 5 / Sonnet 5 / Haiku 4.5). Two reasons
+it is closed: a typo'd id fails *every* classification at the worker, hours
+later, as dead letters with no obvious cause; and the spend figure is
+meaningless without knowing which model produced the tokens — they differ by
+about 5x. Each classification is costed at the rates of the model that actually
+ran, so switching to Haiku does not make last month cheaper, and an unrecognised
+model is costed at the top rate so the tripwire errs towards alarming.
+
 ## Deployment
 
 `docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) runs lint and the

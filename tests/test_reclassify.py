@@ -396,3 +396,68 @@ async def test_you_cannot_rescan_a_file_you_cannot_see(
 
     response = await client.post(f"/api/source-files/{stranger.id}/rescan")
     assert response.status_code == 404, "403 would confirm the file exists"
+
+
+async def test_a_rescan_actually_reaches_the_stages_after_ocr(
+    session, client, unclassified
+) -> None:
+    """A replay has to replay the whole chain.
+
+    The cascade used `enqueue`, which is idempotent and refuses to disturb an
+    existing job — correct for a first run, fatal for a replay. On a real
+    rescan the file was re-OCR'd, recovered 262 words, and then stopped: paging
+    had already succeeded once, so it never ran again and the new text was
+    never indexed. The file sat in `paging` with zero characters.
+    """
+    from api import queue
+    from api.db.enums import JobState as State
+
+    _library, docs = unclassified
+    source_file_id = docs["never"].source_file_id
+
+    # Every downstream stage already ran once, exactly as after a first ingest.
+    for stage in (JobStage.PAGE, JobStage.SEGMENT, JobStage.EMBED):
+        await queue.enqueue(session, stage, source_file_id=source_file_id)
+    await session.execute(
+        sa.update(Job)
+        .where(Job.source_file_id == source_file_id, Job.stage != JobStage.NORMALIZE)
+        .values(state=State.SUCCEEDED.value, attempts=1)
+    )
+    await session.commit()
+
+    # What the worker does at the end of a re-run of normalize.
+    assert await queue.requeue_stage(
+        session, JobStage.PAGE, source_file_id=source_file_id
+    ), "requeueing a succeeded stage must reset it, not no-op"
+    await session.commit()
+
+    page_job = (
+        await session.execute(
+            sa.select(Job).where(
+                Job.source_file_id == source_file_id, Job.stage == JobStage.PAGE
+            )
+        )
+    ).scalar_one()
+    assert page_job.state == JobState.QUEUED
+    assert page_job.attempts == 0
+
+
+async def test_enqueue_still_refuses_to_disturb_work_in_the_normal_flow(
+    session, unclassified
+) -> None:
+    """The idempotency that makes `enqueue` right for a first run is intact.
+
+    Two ingests of the same file must not produce two pipelines; only a
+    deliberate replay resets anything.
+    """
+    from api import queue
+
+    _library, docs = unclassified
+    source_file_id = docs["never"].source_file_id
+
+    first = await queue.enqueue(session, JobStage.PAGE, source_file_id=source_file_id)
+    second = await queue.enqueue(session, JobStage.PAGE, source_file_id=source_file_id)
+    await session.commit()
+
+    assert first is not None
+    assert second is None, "enqueue is still a no-op when the job exists"

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     ocr_deskew: bool = True
     ocr_clean: bool = True
 
+    # Overridable in Settings; the closed set lives in api/models.py.
     bindery_model: str = "claude-opus-5"
     bindery_prompt_version: str = "v1"
     anthropic_api_key: str = ""

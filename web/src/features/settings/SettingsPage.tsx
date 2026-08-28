@@ -148,20 +148,7 @@ export default function SettingsPage() {
         </button>
       </section>
 
-      <section className="mt-6 rounded-lg border border-edge bg-surface p-5">
-        <h2 className="text-base font-medium">Model</h2>
-        <dl className="mt-3 grid grid-cols-[10rem_1fr] gap-y-2 text-sm">
-          <dt className="text-muted">Model</dt>
-          <dd className="font-mono">{settings.model}</dd>
-          <dt className="text-muted">Prompt version</dt>
-          <dd className="font-mono">{settings.prompt_version}</dd>
-        </dl>
-        <p className="mt-3 text-xs text-muted">
-          Every classification records the model and prompt version that produced it,
-          so changing either leaves earlier documents traceable to what actually
-          classified them.
-        </p>
-      </section>
+      <ModelPicker settings={settings} onSaved={load} />
 
       {/* Directly under the key field: finishing that form is exactly the
           moment someone wants to be asked about the documents that arrived
@@ -173,6 +160,91 @@ export default function SettingsPage() {
       <NotificationSettings settings={settings} onSaved={load} />
       <ApiTokens />
     </div>
+  );
+}
+
+/**
+ * Which model does the classifying.
+ *
+ * A real trade-off rather than a better/worse ladder, so each option carries
+ * the sentence someone needs to decide — and the price, since cost is the
+ * reason anyone opens this list at all.
+ *
+ * Changing it is safe and not retroactive: every classification records the
+ * model that produced it, so earlier documents stay traceable to what actually
+ * classified them and the spend figure keeps costing them at their own rates.
+ */
+function ModelPicker({ settings, onSaved }: { settings: Settings; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function choose(id: string) {
+    if (id === settings.model) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      await api.updateSettings({ model: id });
+      setNotice("Saved. It applies to the next document classified, not to past ones.");
+      onSaved();
+    } catch (error) {
+      setNotice(error instanceof ApiError ? error.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="mt-6 rounded-lg border border-edge bg-surface p-5">
+      <h2 className="text-base font-medium">Model</h2>
+      <p className="mt-1 max-w-2xl text-sm text-muted">
+        Used for classification and for answering questions on the Ask screen.
+      </p>
+
+      <fieldset className="mt-4 space-y-2" disabled={busy}>
+        <legend className="sr-only">Choose a model</legend>
+        {settings.available_models.map((choice) => {
+          const selected = choice.id === settings.model;
+          return (
+            <label
+              key={choice.id}
+              className={`flex cursor-pointer gap-3 rounded border p-3 ${
+                selected ? "border-accent bg-ink" : "border-edge hover:border-accent/50"
+              }`}
+            >
+              <input
+                type="radio"
+                name="model"
+                value={choice.id}
+                checked={selected}
+                onChange={() => void choose(choice.id)}
+                className="mt-1"
+              />
+              <span className="min-w-0">
+                <span className="flex flex-wrap items-baseline gap-2">
+                  <span className="text-sm font-medium">{choice.name}</span>
+                  <span className="font-mono text-xs text-muted">
+                    ${choice.input_per_mtok}/M in · ${choice.output_per_mtok}/M out
+                  </span>
+                </span>
+                <span className="mt-0.5 block text-sm text-muted">{choice.blurb}</span>
+              </span>
+            </label>
+          );
+        })}
+      </fieldset>
+
+      {notice && <p className="mt-3 text-sm text-muted">{notice}</p>}
+
+      <dl className="mt-4 grid grid-cols-[10rem_1fr] gap-y-1 text-xs">
+        <dt className="text-muted">Prompt version</dt>
+        <dd className="font-mono text-muted">{settings.prompt_version}</dd>
+      </dl>
+      <p className="mt-2 text-xs text-muted">
+        Every classification records the model and prompt version that produced it, so
+        changing either leaves earlier documents traceable to what actually classified
+        them — and the spend figure on Trust keeps costing them at their own rates.
+      </p>
+    </section>
   );
 }
 

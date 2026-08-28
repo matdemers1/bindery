@@ -489,9 +489,20 @@ class DuplicatePairOut(BaseModel):
     similarity: float
 
 
+class ModelChoiceOut(BaseModel):
+    id: str
+    name: str
+    blurb: str
+    input_per_mtok: float
+    output_per_mtok: float
+
+
 class SettingsOut(BaseModel):
     """What the client is allowed to know. Never the key itself."""
 
+    # The closed set the picker offers. Sent with the settings so the UI never
+    # has to carry its own copy of the model list and drift out of step.
+    available_models: list[ModelChoiceOut] = []
     anthropic_key_configured: bool
     # Last four characters, so you can tell which key is loaded without seeing it.
     anthropic_key_hint: str | None
