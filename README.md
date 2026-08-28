@@ -65,6 +65,15 @@ it is twenty lines.
 | `make create-user email=… library=…` | there is no self-service registration |
 | `make psql` / `make logs` / `make shell` | the usual |
 
+## Deploying to the ZimaOS host
+
+`docs/zimaos-deploy.md` is the runbook. In short: CI publishes images to GHCR on
+push to `main`, the Zima pulls them, and `infra/zimaos/bindery.zimaos.yaml` is
+pasted into ZimaOS → Apps → Custom Install.
+
+Deploy stays a deliberate manual pull-and-restart — nothing auto-updates the
+thing holding your passport.
+
 ## Layout
 
 ```

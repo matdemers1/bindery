@@ -168,6 +168,21 @@ decision currently happens at the end of `rules`.
 - `tests/test_no_destructive_paths.py` enforces REQ-090 by scanning `api/` and
   `worker/`. If it fails, revoke or tombstone — do not loosen the pattern list.
 
+## Deployment
+
+`docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) runs lint and the
+default suite, then publishes `ghcr.io/matdemers1/bindery/{api,worker,web}` tagged
+`:main`, `:latest` and `:sha-<commit>`. The ZimaOS host pulls `:main`; rolling
+back means pinning a `:sha-` tag.
+
+Every Dockerfile names its shipped stage **`runtime`**. The api and worker
+Dockerfiles also have a `dev` stage carrying pytest and the whole source tree —
+CI must keep passing `target: runtime`, or the deployed images ship the test
+harness.
+
+`infra/zimaos/bindery.zimaos.yaml` is the CasaOS custom-app manifest. It must
+never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
+
 ## ⚠️ Private repository
 
 `tests/corpus/` holds real personal documents (DD-214, VA medical records, financial statements) as the golden corpus. **This repository must never be made public.**
