@@ -225,3 +225,124 @@ async def test_replaying_both_stages_reaches_an_identical_end_state(
     assert first == second
     # And no duplicate rows: the upsert is keyed on (source_file_id, page_number).
     assert len(second) == 1
+
+
+
+# --------------------------------------------------------------------------
+# The escalation, end to end (T-1.4)
+# --------------------------------------------------------------------------
+
+
+async def test_a_page_that_yields_nothing_is_retried_with_force_ocr(
+    session, monkeypatch, tmp_path
+) -> None:
+    """The behaviour, not the flags: nothing extracted means try again, forced.
+
+    Driven by stubbing extraction rather than by synthesising a PDF ocrmypdf
+    refuses — the refusal depends on internals of its page analysis, so a
+    fixture built to trigger it today would quietly stop triggering it later and
+    the test would keep passing while testing nothing.
+    """
+    from worker.stages import normalize
+
+    library = Library(name="Escalation", kind=LibraryKind.PERSONAL)
+    session.add(library)
+    await session.flush()
+
+    payload = render_text_page(
+        "Authorization to Contact", tmp_path / "vector-scan.png"
+    ).read_bytes()
+    source_file = SourceFile(
+        library_id=library.id,
+        sha256=uuid.uuid4().hex * 2,
+        byte_size=len(payload),
+        original_filename="vector-scan.pdf",
+        ingest_source=IngestSource.WEB_UPLOAD,
+        state=SourceFileState.RECEIVED,
+    )
+    session.add(source_file)
+    await session.flush()
+
+    blob = blob_path(source_file.sha256)
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(payload)
+
+    forced_runs: list[bool] = []
+
+    async def fake_run_ocr(source, output, sidecar, *, image, force=False):
+        forced_runs.append(force)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(payload)
+
+    # Empty on the first extraction, real on the second — exactly the shape of
+    # a page ocrmypdf declined to touch and then was made to.
+    extractions = iter([
+        {"pages": [{"lines": []}]},
+        {"pages": [{"lines": [{"words": [{"t": "Authorization"}, {"t": "to"}]}]}]},
+    ])
+
+    async def fake_extract(_pdf):
+        return next(extractions)
+
+    monkeypatch.setattr(normalize, "_run_ocr", fake_run_ocr)
+    monkeypatch.setattr(normalize, "extract_word_boxes", fake_extract)
+
+    await normalize.run_normalize(
+        session, ClaimedJob(
+            id=uuid.uuid4(), stage=JobStage.NORMALIZE, source_file_id=source_file.id,
+            document_id=None, prompt_version=None, attempts=0,
+        )
+    )
+
+    assert forced_runs == [False, True], (
+        "the first pass preserves a digital-native text layer; the second only "
+        "happens because the first produced nothing"
+    )
+    boxes = json.loads(derived_for(source_file.sha256).word_boxes.read_text())
+    assert normalize._word_count(boxes) == 2, "the recovered text is what gets stored"
+
+
+async def test_a_page_that_yields_text_is_never_forced(
+    session, monkeypatch, tmp_path
+) -> None:
+    """REQ-017 in one assertion: a digital-native PDF is not re-rasterized."""
+    from worker.stages import normalize
+
+    library = Library(name="No escalation", kind=LibraryKind.PERSONAL)
+    session.add(library)
+    await session.flush()
+
+    payload = render_text_page(
+        "Already searchable", tmp_path / "digital.png"
+    ).read_bytes()
+    source_file = SourceFile(
+        library_id=library.id, sha256=uuid.uuid4().hex * 2, byte_size=len(payload),
+        original_filename="digital.pdf", ingest_source=IngestSource.WEB_UPLOAD,
+        state=SourceFileState.RECEIVED,
+    )
+    session.add(source_file)
+    await session.flush()
+    blob = blob_path(source_file.sha256)
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(payload)
+
+    forced_runs: list[bool] = []
+
+    async def fake_run_ocr(source, output, sidecar, *, image, force=False):
+        forced_runs.append(force)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(payload)
+
+    async def fake_extract(_pdf):
+        return {"pages": [{"lines": [{"words": [{"t": "Already"}]}]}]}
+
+    monkeypatch.setattr(normalize, "_run_ocr", fake_run_ocr)
+    monkeypatch.setattr(normalize, "extract_word_boxes", fake_extract)
+
+    await normalize.run_normalize(
+        session, ClaimedJob(
+            id=uuid.uuid4(), stage=JobStage.NORMALIZE, source_file_id=source_file.id,
+            document_id=None, prompt_version=None, attempts=0,
+        )
+    )
+    assert forced_runs == [False], "one pass only; nothing was lost to recover"

@@ -20,12 +20,14 @@ import uuid
 from collections import defaultdict
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import queue
+from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
-from api.db.enums import ReviewState
+from api.db.enums import ActorType, JobStage, ReviewState
 from api.db.models import (
     AppUser,
     Correspondent,
@@ -42,6 +44,7 @@ from api.schemas import (
     ArchiveEntryOut,
     ArchiveOut,
     ArchiveStatsOut,
+    RescanResultOut,
     TagOut,
     TreeGroupOut,
     TreeOut,
@@ -280,4 +283,54 @@ async def tree(
     return TreeOut(
         group_by=group_by,
         groups=[TreeGroupOut(label=row.label, count=row.count) for row in rows],
+    )
+
+
+@router.post("/source-files/{source_file_id}/rescan", response_model=RescanResultOut)
+async def rescan(
+    source_file_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> RescanResultOut:
+    """Read this file again from the original, from scratch.
+
+    Requeues `normalize`, which re-runs OCR and cascades through paging,
+    segmentation, embedding and classification — so it is the honest meaning of
+    "rescan" rather than a partial repair.
+
+    It is safe to press at any time. The original is never touched; everything
+    this rebuilds is derived. And it is the answer to the one situation the
+    pipeline could not previously get itself out of: a page ocrmypdf declined to
+    OCR, which produces a document that is fully processed and completely
+    unsearchable, with no failure anywhere to retry.
+    """
+    library_ids = await repository.writable_library_ids(session, user.id)
+    source_file = await session.get(SourceFile, source_file_id)
+    # 404 rather than 403 for a file in a library the caller cannot write:
+    # a 403 confirms it exists.
+    if source_file is None or source_file.library_id not in library_ids:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+
+    queued = await queue.requeue_stage(
+        session, JobStage.NORMALIZE, source_file_id=source_file.id
+    )
+    await record(
+        session,
+        entity_type="source_file",
+        entity_id=source_file.id,
+        action="rescan_requested",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+        after={"queued": queued},
+    )
+    await session.commit()
+    return RescanResultOut(
+        source_file_id=source_file.id,
+        queued=queued,
+        detail=(
+            "Reading it again from the original. Text, pages and filing will be "
+            "rebuilt; the original file is untouched."
+            if queued
+            else "A rescan is already running for this file."
+        ),
     )

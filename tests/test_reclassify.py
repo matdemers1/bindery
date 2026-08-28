@@ -315,3 +315,84 @@ async def test_a_document_needing_human_review_is_not_waiting_for_ai(
 
     result = await reclassify.pending(session, [library.id])
     assert docs["never"].id not in result.all_ids()
+
+
+# --------------------------------------------------------------------------
+# Rescan — reading the file again from the original
+# --------------------------------------------------------------------------
+
+
+async def test_rescan_requeues_the_whole_pipeline_from_ocr(
+    session, client, unclassified
+) -> None:
+    """"Rescan" has to mean rescan.
+
+    Requeueing `normalize` re-runs OCR and cascades through paging,
+    segmentation, embedding and classification. Requeueing anything later would
+    be a partial repair wearing the word.
+    """
+    _library, docs = unclassified
+    source_file_id = docs["never"].source_file_id
+
+    response = await client.post(f"/api/source-files/{source_file_id}/rescan")
+    assert response.status_code == 200, response.text
+    assert response.json()["queued"] is True
+
+    job = (
+        await session.execute(
+            sa.select(Job).where(
+                Job.source_file_id == source_file_id, Job.stage == JobStage.NORMALIZE
+            )
+        )
+    ).scalar_one()
+    assert job.state == JobState.QUEUED
+    assert job.attempts == 0
+
+
+async def test_rescan_is_audited(session, client, unclassified) -> None:
+    from api.db.models import AuditEvent
+
+    _library, docs = unclassified
+    source_file_id = docs["never"].source_file_id
+    await client.post(f"/api/source-files/{source_file_id}/rescan")
+
+    event = (
+        await session.execute(
+            sa.select(AuditEvent).where(
+                AuditEvent.entity_id == source_file_id,
+                AuditEvent.action == "rescan_requested",
+            )
+        )
+    ).scalar_one()
+    assert event.after["queued"] is True
+
+
+async def test_rescan_leaves_the_original_alone(session, client, unclassified) -> None:
+    """Everything a rescan rebuilds is derived; the bytes are never touched."""
+    _library, docs = unclassified
+    source_file_id = docs["never"].source_file_id
+    before = (await session.get(SourceFile, source_file_id)).sha256
+
+    await client.post(f"/api/source-files/{source_file_id}/rescan")
+    await session.commit()
+
+    after = (await session.get(SourceFile, source_file_id)).sha256
+    assert after == before
+
+
+async def test_you_cannot_rescan_a_file_you_cannot_see(
+    session, client, unclassified, user_factory
+) -> None:
+    from api.db.enums import IngestSource, SourceFileState
+
+    _user, elsewhere = await user_factory()
+    stranger = SourceFile(
+        library_id=elsewhere.id, sha256=uuid.uuid4().hex * 2, byte_size=10,
+        original_filename="theirs.pdf", ingest_source=IngestSource.WEB_UPLOAD,
+        page_count=1, state=SourceFileState.PROCESSED,
+    )
+    session.add(stranger)
+    await session.commit()
+
+    response = await client.post(f"/api/source-files/{stranger.id}/rescan")
+    assert response.status_code == 404, "403 would confirm the file exists"

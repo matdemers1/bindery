@@ -21,6 +21,7 @@ from api.db.models import (
     Document,
     DocumentTag,
     FieldProvenance,
+    Page,
     Tag,
     live_tag_links,
 )
@@ -28,6 +29,7 @@ from api.db.session import get_session
 from api.schemas import (
     ClassificationOut,
     DocumentOut,
+    ExtractionOut,
     FieldProvenanceOut,
     ReviewQueueOut,
     TagOut,
@@ -124,7 +126,28 @@ async def why(
         )
     ).all()
 
+    # Counted rather than inferred: "the model said (no text on this page)" is
+    # the model's account of what it saw, and this is the archive's.
+    extraction = (
+        await session.execute(
+            sa.select(
+                sa.func.coalesce(sa.func.sum(sa.func.length(Page.text)), 0),
+                sa.func.count(),
+                sa.func.count().filter(
+                    sa.func.coalesce(sa.func.length(sa.func.btrim(Page.text)), 0) == 0
+                ),
+            ).where(
+                Page.source_file_id == document.source_file_id,
+                Page.page_number.between(document.page_start, document.page_end),
+            )
+        )
+    ).one()
+
     return WhyPanelOut(
+        source_file_id=document.source_file_id,
+        extraction=ExtractionOut(
+            characters=extraction[0], pages=extraction[1], empty_pages=extraction[2]
+        ),
         document=DocumentOut.model_validate(document),
         classification=(
             ClassificationOut.model_validate(classification) if classification else None

@@ -213,11 +213,31 @@ class FieldProvenanceOut(BaseModel):
     confidence: float | None
 
 
+class ExtractionOut(BaseModel):
+    """How much text this document's pages actually carry.
+
+    Zero is not a detail — it means nothing about this document is findable, and
+    every field the model produced was guesswork over an empty page. The screen
+    needs to be able to say so and offer a way out.
+    """
+
+    characters: int
+    pages: int
+    empty_pages: int
+
+    @property
+    def has_text(self) -> bool:
+        return self.characters > 0
+
+
 class WhyPanelOut(BaseModel):
     document: DocumentOut
     classification: ClassificationOut | None
     provenance: list[FieldProvenanceOut]
     tags: list[TagOut]
+    extraction: ExtractionOut
+    # So the screen can offer a rescan without a second round trip.
+    source_file_id: uuid.UUID
 
 
 class ReviewQueueOut(BaseModel):
@@ -836,3 +856,25 @@ class ReclassifyIn(BaseModel):
 class ReclassifyResultOut(BaseModel):
     queued: int
     requested: int
+
+
+class RescanResultOut(BaseModel):
+    source_file_id: uuid.UUID
+    queued: bool
+    detail: str
+
+
+class OcrPageTextOut(BaseModel):
+    page_number: int
+    # Verbatim, including the line breaks OCR produced: the layout is part of
+    # what you are checking when you compare it against the page.
+    text: str
+    characters: int
+
+
+class OcrTextOut(BaseModel):
+    source_file_id: uuid.UUID
+    original_filename: str | None
+    pages: list[OcrPageTextOut]
+    characters: int
+    empty_pages: int

@@ -191,11 +191,33 @@ export interface FieldProvenanceRecord {
   confidence: number | null;
 }
 
+export interface Extraction {
+  characters: number;
+  pages: number;
+  empty_pages: number;
+}
+
+export interface OcrPageText {
+  page_number: number;
+  text: string;
+  characters: number;
+}
+
+export interface OcrText {
+  source_file_id: string;
+  original_filename: string | null;
+  pages: OcrPageText[];
+  characters: number;
+  empty_pages: number;
+}
+
 export interface WhyPanel {
   document: Document;
   classification: ClassificationRecord | null;
   provenance: FieldProvenanceRecord[];
   tags: TagRef[];
+  extraction: Extraction;
+  source_file_id: string;
 }
 
 export interface ReviewQueue {
@@ -578,6 +600,15 @@ export const api = {
 
   review: () => request<ReviewQueue>("/review"),
   why: (documentId: string) => request<WhyPanel>(`/documents/${documentId}/why`),
+
+  /** Exactly what OCR read, page by page, verbatim. */
+  ocrText: (sourceFileId: string) => request<OcrText>(`/files/${sourceFileId}/text`),
+  /** Read the file again from the original. Everything rebuilt is derived. */
+  rescan: (sourceFileId: string) =>
+    request<{ source_file_id: string; queued: boolean; detail: string }>(
+      `/source-files/${sourceFileId}/rescan`,
+      { method: "POST" },
+    ),
   undo: (documentId: string) =>
     request<Document>(`/documents/${documentId}/undo`, { method: "POST" }),
   accept: (documentId: string) =>

@@ -17,7 +17,13 @@ from api.auth.dependencies import current_user
 from api.db import repository
 from api.db.models import AppUser
 from api.db.session import get_session
-from api.schemas import PageOut, SourceFileDetailOut, SourceFileOut
+from api.schemas import (
+    OcrPageTextOut,
+    OcrTextOut,
+    PageOut,
+    SourceFileDetailOut,
+    SourceFileOut,
+)
 from api.storage.blobs import blob_path
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -131,4 +137,43 @@ async def file_pdf(
         media_type="application/pdf",
         filename=source_file.original_filename or f"{source_file.sha256[:12]}.pdf",
         headers={"Cache-Control": IMMUTABLE},
+    )
+
+
+@router.get("/{source_file_id}/text", response_model=OcrTextOut)
+async def ocr_text(
+    source_file_id: uuid.UUID,
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> OcrTextOut:
+    """Exactly what OCR read, page by page, verbatim.
+
+    Not a summary and not cleaned up. The point is to be able to compare what
+    the machine read against what is actually on the page — which matters most
+    where OCR is least reliable: handwriting, carbon copies, faint fax paper. A
+    search that finds nothing is ambiguous until you can see whether the word
+    you searched for was ever read correctly in the first place.
+
+    It also makes a zero-character page legible as the specific failure it is,
+    rather than as a document that mysteriously will not turn up.
+    """
+    source_file = await repository.get_source_file(session, user.id, source_file_id)
+    if source_file is None:
+        raise _NOT_FOUND
+
+    pages = await repository.list_pages(session, user.id, source_file_id)
+    entries = [
+        OcrPageTextOut(
+            page_number=page.page_number,
+            text=page.text or "",
+            characters=len((page.text or "").strip()),
+        )
+        for page in pages
+    ]
+    return OcrTextOut(
+        source_file_id=source_file.id,
+        original_filename=source_file.original_filename,
+        pages=entries,
+        characters=sum(entry.characters for entry in entries),
+        empty_pages=sum(1 for entry in entries if entry.characters == 0),
     )

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
-import { api, type WhyPanel as WhyPanelData } from "../../api";
+import { ApiError, api, type WhyPanel as WhyPanelData } from "../../api";
+import OcrTextPanel from "../../components/OcrText";
 
 /**
  * Why every AI-written field says what it says (REQ-063).
@@ -25,12 +26,23 @@ export default function WhyPanel({
 }) {
   const [data, setData] = useState<WhyPanelData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rescan, setRescan] = useState<string | null>(null);
 
   useEffect(() => {
     setData(null);
     setError(null);
+    setRescan(null);
     api.why(documentId).then(setData).catch(() => setError("Could not load provenance."));
   }, [documentId]);
+
+  async function requestRescan(sourceFileId: string) {
+    setRescan("Queueing…");
+    try {
+      setRescan((await api.rescan(sourceFileId)).detail);
+    } catch (caught) {
+      setRescan(caught instanceof ApiError ? caught.message : "Could not start a rescan.");
+    }
+  }
 
   if (error) return <p className="p-4 text-sm text-muted">{error}</p>;
   if (!data) return <p className="p-4 text-sm text-muted">Loading…</p>;
@@ -48,6 +60,33 @@ export default function WhyPanel({
           </button>
         )}
       </header>
+
+      {/*
+        Above the provenance on purpose. When nothing was extracted, every
+        field below is the model's guess over an empty page — reading them
+        first and discovering that afterwards is the wrong order.
+      */}
+      {data.extraction.characters === 0 && (
+        <div className="border-b border-edge bg-amber-950/20 p-4">
+          <p className="text-sm font-medium text-amber-300">
+            No text was read from this document.
+          </p>
+          <p className="mt-1 text-sm text-muted">
+            Nothing below is based on anything the machine could actually read, and
+            none of this document is searchable. The original is stored and intact —
+            reading it again is safe and rebuilds only what was derived.
+          </p>
+          <button
+            type="button"
+            onClick={() => void requestRescan(data.source_file_id)}
+            disabled={rescan !== null}
+            className="mt-2 rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-50"
+          >
+            {rescan ? "Rescanning…" : "Rescan with forced OCR"}
+          </button>
+          {rescan && <p className="mt-2 text-sm text-muted">{rescan}</p>}
+        </div>
+      )}
 
       {!classification ? (
         <p className="p-4 text-sm text-muted">
@@ -138,6 +177,16 @@ export default function WhyPanel({
           </footer>
         </div>
       )}
+
+      {/* Always available, not only when something went wrong: checking what
+          OCR read is how you find out whether a search that returned nothing
+          was the archive's answer or the scanner's. */}
+      <div className="border-t border-edge p-4">
+        <OcrTextPanel
+          sourceFileId={data.source_file_id}
+          onRescan={() => void requestRescan(data.source_file_id)}
+        />
+      </div>
     </aside>
   );
 }

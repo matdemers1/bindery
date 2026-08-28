@@ -44,6 +44,20 @@ ALREADY_HAS_TEXT = 6
 PDFA_CONVERSION_FAILED = 10
 
 
+
+def _word_count(boxes: dict) -> int:
+    """How much text the normalized PDF actually yielded.
+
+    Zero is the signal that OCR achieved nothing — whether it ran and found an
+    empty page, or declined to run at all.
+    """
+    return sum(
+        len(line["words"])
+        for page in boxes.get("pages", [])
+        for line in page.get("lines", [])
+    )
+
+
 def _looks_like_image(source_file: SourceFile) -> bool:
     if source_file.mime_type and source_file.mime_type.startswith("image/"):
         return True
@@ -51,14 +65,22 @@ def _looks_like_image(source_file: SourceFile) -> bool:
     return Path(name).suffix.lower() in IMAGE_SUFFIXES
 
 
-def _ocr_argv(source: Path, output: Path, sidecar: Path, *, pdfa: bool, image: bool) -> list[str]:
+def _ocr_argv(
+    source: Path, output: Path, sidecar: Path, *, pdfa: bool, image: bool, force: bool = False
+) -> list[str]:
     settings = get_settings()
     argv = [
         "ocrmypdf",
         "--language", settings.ocr_languages,
         # Pages that already carry a text layer are passed through untouched:
         # re-rasterizing a digital-native PDF destroys quality (REQ-017).
-        "--skip-text",
+        #
+        # `--force-ocr` is the escalation for the case that rule cannot see:
+        # a page whose content is vector paths rather than an image. ocrmypdf
+        # refuses those by default — "no images - skipping all processing on
+        # this page to avoid losing detail" — and exits 0, so a scan comes out
+        # the far end with no text and nothing reported. See `_run_ocr`.
+        "--force-ocr" if force else "--skip-text",
         "--sidecar", str(sidecar),
         "--output-type", "pdfa" if pdfa else "pdf",
         "--jobs", "1",  # parallelism is the queue's job, not ocrmypdf's
@@ -78,10 +100,12 @@ def _ocr_argv(source: Path, output: Path, sidecar: Path, *, pdfa: bool, image: b
     return argv
 
 
-async def _run_ocr(source: Path, output: Path, sidecar: Path, *, image: bool) -> None:
+async def _run_ocr(
+    source: Path, output: Path, sidecar: Path, *, image: bool, force: bool = False
+) -> None:
     try:
         code, _, _ = await subprocess_util.run(
-            _ocr_argv(source, output, sidecar, pdfa=True, image=image),
+            _ocr_argv(source, output, sidecar, pdfa=True, image=image, force=force),
             timeout=OCR_TIMEOUT_SECONDS,
             ok_codes=(0, ALREADY_HAS_TEXT),
         )
@@ -92,7 +116,7 @@ async def _run_ocr(source: Path, output: Path, sidecar: Path, *, image: bool) ->
         # negotiable. Fall back rather than fail the document.
         log.warning("PDF/A conversion failed for %s; falling back to plain PDF", source.name)
         code, _, _ = await subprocess_util.run(
-            _ocr_argv(source, output, sidecar, pdfa=False, image=image),
+            _ocr_argv(source, output, sidecar, pdfa=False, image=image, force=force),
             timeout=OCR_TIMEOUT_SECONDS,
             ok_codes=(0, ALREADY_HAS_TEXT),
         )
@@ -168,6 +192,38 @@ async def run_normalize(session: AsyncSession, job: ClaimedJob) -> None:
     # happens now, in the same pass, because regenerating it later would mean
     # re-running OCR (exactly what replayable stages exist to avoid).
     boxes = await extract_word_boxes(paths.normalized_pdf)
+
+    if _word_count(boxes) == 0:
+        # Nothing at all came out. The likeliest cause is a page ocrmypdf
+        # declined to touch: content drawn as vector paths rather than as an
+        # image makes it skip the page "to avoid losing detail" — and it exits
+        # 0, so the file arrives fully processed and completely unsearchable.
+        # That is the worst possible outcome for an archive, and it happened to
+        # a real scanned form.
+        #
+        # Escalating is safe precisely because there was nothing to lose: a
+        # digital-native PDF has a text layer, which means a non-zero word
+        # count, which means this branch is not taken. Only a page that gave up
+        # nothing gets rasterized — and the *original* is untouched either way,
+        # since this rewrites the derived artifact.
+        log.warning(
+            "%s produced no text; retrying with --force-ocr",
+            source_file.original_filename,
+        )
+        async with _ocr_input(source_file, original) as ocr_source:
+            await _run_ocr(
+                ocr_source,
+                paths.normalized_pdf,
+                paths.ocr_text,
+                image=_looks_like_image(source_file),
+                force=True,
+            )
+        boxes = await extract_word_boxes(paths.normalized_pdf)
+        log.info(
+            "%s recovered %s words with --force-ocr",
+            source_file.original_filename, _word_count(boxes),
+        )
+
     paths.word_boxes.write_text(json.dumps(boxes, separators=(",", ":")))
 
     page_count = len(boxes["pages"])
