@@ -29,6 +29,11 @@ class Tag(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), sa.ForeignKey("app_user.id")
     )
+    # Set when this tag was merged away. See Correspondent.merged_into_id.
+    merged_into_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("tag.id")
+    )
+    merged_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at()
 
 

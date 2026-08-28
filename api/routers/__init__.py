@@ -1,6 +1,7 @@
 from api.routers import (
     auth,
     documents,
+    entities,
     files,
     health,
     imports,
@@ -15,6 +16,18 @@ from api.routers import (
 )
 
 __all__ = [
-    "auth", "documents", "files", "health", "imports", "library", "pipeline", "review", "rules",
-    "search", "segments", "settings", "upload",
+    "auth",
+    "documents",
+    "entities",
+    "files",
+    "health",
+    "imports",
+    "library",
+    "pipeline",
+    "review",
+    "rules",
+    "search",
+    "segments",
+    "settings",
+    "upload",
 ]

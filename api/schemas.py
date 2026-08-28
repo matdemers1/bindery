@@ -376,6 +376,96 @@ class BulkResultOut(BaseModel):
     changes: list[dict[str, Any]]
 
 
+class CorrespondentOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    kind: str | None
+    # Every spelling that resolves here. Aliases are what keep merge rare.
+    aliases: list[str]
+    document_count: int
+
+
+class MergeIn(BaseModel):
+    source_id: uuid.UUID
+    target_id: uuid.UUID
+
+
+class MergePreviewOut(BaseModel):
+    from_name: str
+    into_name: str
+    document_count: int
+    alias_count: int
+    documents: list[dict[str, Any]]
+    # Present only after a commit; this is what undo takes.
+    operation_id: uuid.UUID | None = None
+
+
+class AssetIn(BaseModel):
+    library_id: uuid.UUID
+    kind: str
+    name: str = Field(min_length=1)
+    # VIN, plate, address, policy number.
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class AssetOut(BaseModel):
+    id: uuid.UUID
+    library_id: uuid.UUID
+    kind: str
+    name: str
+    attributes: dict[str, Any]
+    document_count: int
+
+
+class AssetTimelineOut(BaseModel):
+    asset: AssetOut
+    entries: list[dict[str, Any]]
+
+
+class SavedSearchIn(BaseModel):
+    library_id: uuid.UUID
+    name: str = Field(min_length=1)
+    query: dict[str, Any] = Field(default_factory=dict)
+    is_packet: bool = False
+
+
+class SavedSearchOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    library_id: uuid.UUID
+    name: str
+    query: dict[str, Any]
+    is_shelf: bool
+    is_packet: bool
+    created_at: datetime
+
+
+class TaxonomyHealthOut(BaseModel):
+    total_tags: int
+    used_once: int
+    unused: int
+    orphan_ratio: float
+    # R-08's tripwire: >15% of tags used exactly once means the existing_ids
+    # contract is not holding.
+    exceeds_alarm: bool
+    near_duplicate_tags: list[dict[str, Any]]
+    near_duplicate_correspondents: list[dict[str, Any]]
+
+
+class SimilarOut(BaseModel):
+    results: list[dict[str, Any]]
+
+
+class DuplicatePairOut(BaseModel):
+    id: uuid.UUID
+    document_a_id: uuid.UUID
+    document_b_id: uuid.UUID
+    a_title: str | None
+    b_title: str | None
+    similarity: float
+
+
 class SettingsOut(BaseModel):
     """What the client is allowed to know. Never the key itself."""
 
@@ -411,11 +501,16 @@ __all__ = [
     "ArchiveEntryOut",
     "ArchiveOut",
     "ArchiveStatsOut",
+    "AssetIn",
+    "AssetOut",
+    "AssetTimelineOut",
     "BulkEditIn",
     "BulkResultOut",
     "ClassificationOut",
+    "CorrespondentOut",
     "DocumentDetailOut",
     "DocumentOut",
+    "DuplicatePairOut",
     "FacetOut",
     "FieldProvenanceOut",
     "HealthOut",
@@ -426,6 +521,8 @@ __all__ = [
     "KnownFormOut",
     "LibraryOut",
     "LoginRequest",
+    "MergeIn",
+    "MergePreviewOut",
     "PageHitOut",
     "PageOut",
     "PipelineStatusOut",
@@ -434,6 +531,8 @@ __all__ = [
     "RuleIn",
     "RuleMatchOut",
     "RuleOut",
+    "SavedSearchIn",
+    "SavedSearchOut",
     "SearchResponseOut",
     "SearchResultOut",
     "SegmentIn",
@@ -442,10 +541,12 @@ __all__ = [
     "SettingsOut",
     "SettingsTestOut",
     "SettingsUpdateIn",
+    "SimilarOut",
     "SourceFileDetailOut",
     "SourceFileOut",
     "StageCount",
     "TagOut",
+    "TaxonomyHealthOut",
     "TreeGroupOut",
     "TreeOut",
     "UploadResult",

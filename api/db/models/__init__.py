@@ -3,6 +3,13 @@
 from api.db.models.audit_event import AuditEvent
 from api.db.models.classification import Classification, FieldProvenance
 from api.db.models.document import Document
+from api.db.models.entities import (
+    Asset,
+    CorrespondentAlias,
+    DocumentAsset,
+    DuplicatePair,
+    SavedSearch,
+)
 from api.db.models.importing import (
     BatchRequest,
     BatchSubmission,
@@ -22,14 +29,18 @@ from api.db.models.user import AppUser, RefreshToken
 
 __all__ = [
     "AppUser",
+    "Asset",
     "AuditEvent",
     "BatchRequest",
     "BatchSubmission",
     "Classification",
     "Correspondent",
+    "CorrespondentAlias",
     "Document",
+    "DocumentAsset",
     "DocumentTag",
     "DocumentType",
+    "DuplicatePair",
     "FieldProvenance",
     "ImportItem",
     "ImportSession",
@@ -40,6 +51,7 @@ __all__ = [
     "Page",
     "RefreshToken",
     "Rule",
+    "SavedSearch",
     "Setting",
     "SourceFile",
     "Tag",

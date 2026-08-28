@@ -51,6 +51,12 @@ class Correspondent(Base):
     slug: Mapped[str] = mapped_column(sa.Text, nullable=False)
     kind: Mapped[str | None] = mapped_column(sa.Text)
     notes: Mapped[str | None] = mapped_column(sa.Text)
+    # Set when this record was merged away. Tombstoned rather than deleted, so
+    # undo is a flag flip and historical references still resolve.
+    merged_into_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("correspondent.id")
+    )
+    merged_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at()
 
 

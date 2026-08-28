@@ -125,9 +125,21 @@ async def resolve(
         else:
             resolution.rejected_ids.append(f"correspondent:{result.correspondent.existing_id}")
     elif result.correspondent.new_name:
-        created, is_new = await _get_or_create(
-            session, Correspondent, result.correspondent.new_name, document.library_id
+        # Alias resolution first: "Honda Fin Svcs" must land on the existing
+        # American Honda Finance rather than creating a near-duplicate.
+        from api.entities import resolve_correspondent
+
+        matched = await resolve_correspondent(
+            session, result.correspondent.new_name, document.library_id
         )
+        if matched is not None:
+            resolution.correspondent_id = matched.id
+            resolution.correspondent_was_existing = True
+            created, is_new = matched, False
+        else:
+            created, is_new = await _get_or_create(
+                session, Correspondent, result.correspondent.new_name, document.library_id
+            )
         resolution.correspondent_id = created.id
         resolution.correspondent_was_existing = not is_new
         if is_new:

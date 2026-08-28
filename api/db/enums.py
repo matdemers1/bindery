@@ -112,3 +112,14 @@ class ImportItemState(StrEnum):
     DUPLICATE = "duplicate"
     SKIPPED = "skipped"
     FAILED = "failed"
+
+
+class AssetKind(StrEnum):
+    """What a document can be *about*."""
+
+    VEHICLE = "vehicle"
+    PROPERTY = "property"
+    POLICY = "policy"
+    ACCOUNT = "account"
+    PERSON = "person"
+    OTHER = "other"

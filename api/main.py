@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from api.routers import (
     auth,
     documents,
+    entities,
     files,
     health,
     imports,
@@ -36,6 +37,7 @@ app.include_router(upload.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
 app.include_router(library.router, prefix="/api")
 app.include_router(imports.router, prefix="/api")
+app.include_router(entities.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(files.router, prefix="/api")
 app.include_router(segments.router, prefix="/api")
