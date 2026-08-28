@@ -17,8 +17,10 @@ whole reason the stages are separated this way.
 import asyncio
 import json
 import logging
+import shutil
 import tempfile
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,7 +93,14 @@ def _looks_like_image(source_file: SourceFile) -> bool:
 
 
 def _ocr_argv(
-    source: Path, output: Path, sidecar: Path, *, pdfa: bool, image: bool, force: bool = False
+    source: Path,
+    output: Path,
+    sidecar: Path,
+    *,
+    pdfa: bool,
+    image: bool,
+    force: bool = False,
+    scanned: bool = True,
 ) -> list[str]:
     settings = get_settings()
     argv = [
@@ -111,12 +120,20 @@ def _ocr_argv(
         "--jobs", "1",  # parallelism is the queue's job, not ocrmypdf's
         "--quiet",
     ]
-    if settings.ocr_deskew:
-        argv.append("--deskew")
-    if settings.ocr_clean:
-        # `--clean` cleans the image fed to Tesseract but leaves the page image
-        # in the output alone, so the original resolution survives (REQ-012).
-        argv.append("--clean")
+    # Deskew and clean correct for a *scanner*: a page fed in crooked, speckle
+    # from a platen. They are meaningless on a digitally generated PDF — and far
+    # from free, because both force ocrmypdf to rasterize every page even when
+    # `--skip-text` would otherwise pass it straight through. A 1,127-page deck
+    # converted from PowerPoint pinned a core for forty minutes doing exactly
+    # that, to a file that already had a perfect text layer.
+    if scanned:
+        if settings.ocr_deskew:
+            argv.append("--deskew")
+        if settings.ocr_clean:
+            # `--clean` cleans the image fed to Tesseract but leaves the page
+            # image in the output alone, so the original resolution survives
+            # (REQ-012).
+            argv.append("--clean")
     if image:
         # A scanner JPEG usually has no DPI metadata; without this ocrmypdf
         # cannot size the page.
@@ -126,11 +143,20 @@ def _ocr_argv(
 
 
 async def _run_ocr(
-    source: Path, output: Path, sidecar: Path, *, image: bool, force: bool = False
+    source: Path,
+    output: Path,
+    sidecar: Path,
+    *,
+    image: bool,
+    force: bool = False,
+    scanned: bool = True,
 ) -> None:
     try:
         code, _, _ = await subprocess_util.run(
-            _ocr_argv(source, output, sidecar, pdfa=True, image=image, force=force),
+            _ocr_argv(
+                source, output, sidecar,
+                pdfa=True, image=image, force=force, scanned=scanned,
+            ),
             timeout=OCR_TIMEOUT_SECONDS,
             ok_codes=(0, ALREADY_HAS_TEXT),
         )
@@ -146,7 +172,10 @@ async def _run_ocr(
             source.name, str(exc)[:200],
         )
         code, _, _ = await subprocess_util.run(
-            _ocr_argv(source, output, sidecar, pdfa=False, image=image, force=force),
+            _ocr_argv(
+                source, output, sidecar,
+                pdfa=False, image=image, force=force, scanned=scanned,
+            ),
             timeout=OCR_TIMEOUT_SECONDS,
             ok_codes=(0, ALREADY_HAS_TEXT),
         )
@@ -161,6 +190,17 @@ def _is_heif(source_file: SourceFile, original: Path) -> bool:
     if (source_file.mime_type or "") in {"image/heic", "image/heif"}:
         return True
     return Path(source_file.original_filename or "").suffix.lower() in HEIF_SUFFIXES
+
+
+@dataclass(frozen=True)
+class OcrInput:
+    """What to feed the OCR stage, and whether it needs OCR at all."""
+
+    path: Path
+    # True when the text in this PDF was generated rather than photographed —
+    # a converted office document. Its text layer is already exact, so running
+    # recognition over it can only be slower and worse.
+    digital_native: bool
 
 
 @asynccontextmanager
@@ -183,15 +223,18 @@ async def _ocr_input(source_file: SourceFile, original: Path):
     """
     if convert.is_convertible(source_file.original_filename, source_file.mime_type):
         with tempfile.TemporaryDirectory(dir=get_settings().temp_root) as scratch:
-            yield await convert.to_pdf(
+            converted = await convert.to_pdf(
                 original,
                 Path(scratch),
                 original_name=source_file.original_filename,
             )
+            # Digital-native by construction: LibreOffice just laid this text
+            # out, so it is already perfect and there is nothing to recognize.
+            yield OcrInput(converted, digital_native=True)
         return
 
     if not _is_heif(source_file, original):
-        yield original
+        yield OcrInput(original, digital_native=False)
         return
 
     import pillow_heif
@@ -206,7 +249,43 @@ async def _ocr_input(source_file: SourceFile, original: Path):
                 image.convert("RGB").save(converted, "JPEG", quality=95)
 
         await asyncio.to_thread(_convert)
-        yield converted
+        yield OcrInput(converted, digital_native=False)
+
+
+
+
+# Enough text that the pages plainly came from a computer rather than a camera.
+# A scan with a stray character or two of junk OCR should not qualify.
+DIGITAL_TEXT_THRESHOLD = 200
+
+
+async def _already_has_text(pdf: Path) -> bool:
+    """Whether this PDF arrived with a usable text layer.
+
+    Cheap — one `pdftotext` — and it decides whether the scanner corrections
+    are worth their cost. Failing this check is not an error: an unreadable or
+    non-PDF input simply gets treated as a scan, which is what it probably is.
+    """
+    try:
+        _, stdout, _ = await subprocess_util.run(
+            ["pdftotext", str(pdf), "-"], timeout=120
+        )
+    except Exception:
+        return False
+    return len(b"".join(stdout.split())) >= DIGITAL_TEXT_THRESHOLD
+
+
+async def _write_sidecar(pdf: Path, sidecar: Path) -> None:
+    """The plain-text artifact ocrmypdf would have written (REQ-014).
+
+    Produced here directly when OCR is skipped, so a converted document still
+    has every artifact a scanned one does and nothing downstream has to know
+    which path it took.
+    """
+    _, stdout, _ = await subprocess_util.run(
+        ["pdftotext", "-layout", str(pdf), "-"], timeout=300
+    )
+    sidecar.write_bytes(stdout)
 
 
 async def run_normalize(session: AsyncSession, job: ClaimedJob) -> None:
@@ -228,12 +307,32 @@ async def run_normalize(session: AsyncSession, job: ClaimedJob) -> None:
 
     get_settings().temp_root.mkdir(parents=True, exist_ok=True)
     async with _ocr_input(source_file, original) as ocr_source:
-        await _run_ocr(
-            ocr_source,
-            paths.normalized_pdf,
-            paths.ocr_text,
-            image=_looks_like_image(source_file),
-        )
+        if ocr_source.digital_native:
+            # No OCR. LibreOffice just laid this text out, so recognition could
+            # only be slower and less accurate than the text that is already
+            # there — and rasterizing it would replace crisp vector glyphs with
+            # a photograph of themselves.
+            await asyncio.to_thread(
+                shutil.copyfile, ocr_source.path, paths.normalized_pdf
+            )
+            await _write_sidecar(paths.normalized_pdf, paths.ocr_text)
+            log.info(
+                "%s converted to PDF with its own text layer; skipping OCR",
+                source_file.original_filename,
+            )
+        else:
+            # A PDF that already carries text is digital-native too, even
+            # though nothing here converted it — someone exported it from
+            # their bank, or printed it to file. `--skip-text` will pass those
+            # pages through untouched, so deskewing and cleaning them buys
+            # nothing and costs a full rasterization of every page.
+            await _run_ocr(
+                ocr_source.path,
+                paths.normalized_pdf,
+                paths.ocr_text,
+                image=_looks_like_image(source_file),
+                scanned=not await _already_has_text(ocr_source.path),
+            )
 
     # Word boxes come from the normalized PDF's text layer, so the same
     # extraction works for OCR'd scans and digital-native PDFs alike — and it
@@ -260,11 +359,14 @@ async def run_normalize(session: AsyncSession, job: ClaimedJob) -> None:
         )
         async with _ocr_input(source_file, original) as ocr_source:
             await _run_ocr(
-                ocr_source,
+                ocr_source.path,
                 paths.normalized_pdf,
                 paths.ocr_text,
                 image=_looks_like_image(source_file),
                 force=True,
+                # A converted document that yielded nothing is a deck of
+                # pictures, not a crooked scan.
+                scanned=not ocr_source.digital_native,
             )
         boxes = await extract_word_boxes(paths.normalized_pdf)
         log.info(

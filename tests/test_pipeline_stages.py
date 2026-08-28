@@ -269,7 +269,7 @@ async def test_a_page_that_yields_nothing_is_retried_with_force_ocr(
 
     forced_runs: list[bool] = []
 
-    async def fake_run_ocr(source, output, sidecar, *, image, force=False):
+    async def fake_run_ocr(source, output, sidecar, *, image, force=False, scanned=True):
         forced_runs.append(force)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(payload)
@@ -328,7 +328,7 @@ async def test_a_page_that_yields_text_is_never_forced(
 
     forced_runs: list[bool] = []
 
-    async def fake_run_ocr(source, output, sidecar, *, image, force=False):
+    async def fake_run_ocr(source, output, sidecar, *, image, force=False, scanned=True):
         forced_runs.append(force)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(payload)
@@ -454,3 +454,76 @@ def _office_fixture(kind: str, path) -> bytes:
         with Image.open(rendered) as image:
             image.convert("RGB").save(path, kind.upper())
     return path.read_bytes()
+
+
+async def test_a_converted_document_is_not_put_through_ocr(session, tmp_path) -> None:
+    """The incident this prevents.
+
+    LibreOffice had just laid the text out; recognising it again can only be
+    slower and less accurate. Worse, `--deskew` and `--clean` force ocrmypdf to
+    rasterize every page even under `--skip-text`, so a 1,127-page deck
+    converted from PowerPoint pinned a CPU for forty minutes producing a
+    photograph of text that was already perfect — with 499 files queued behind
+    it and only three worker slots.
+    """
+    from worker.stages import normalize
+
+    payload = _office_fixture("docx", tmp_path / "memo.docx")
+    library = Library(name="No OCR", kind=LibraryKind.PERSONAL)
+    session.add(library)
+    await session.flush()
+    source_file = SourceFile(
+        library_id=library.id, sha256=uuid.uuid4().hex * 2, byte_size=len(payload),
+        original_filename="memo.docx", ingest_source=IngestSource.WEB_UPLOAD,
+        state=SourceFileState.RECEIVED,
+    )
+    session.add(source_file)
+    await session.flush()
+    blob = blob_path(source_file.sha256)
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(payload)
+
+    ran_ocr = False
+
+    async def fail_if_called(*args, **kwargs):
+        nonlocal ran_ocr
+        ran_ocr = True
+
+    original_run_ocr = normalize._run_ocr
+    normalize._run_ocr = fail_if_called
+    try:
+        await normalize.run_normalize(
+            session,
+            ClaimedJob(
+                id=uuid.uuid4(), stage=JobStage.NORMALIZE, source_file_id=source_file.id,
+                document_id=None, prompt_version=None, attempts=0,
+            ),
+        )
+    finally:
+        normalize._run_ocr = original_run_ocr
+
+    assert not ran_ocr, "a converted document must not be sent through OCR"
+
+    # And it is still fully searchable, with every artifact a scan would have.
+    boxes = json.loads(derived_for(source_file.sha256).word_boxes.read_text())
+    assert normalize._word_count(boxes) > 0
+    assert derived_for(source_file.sha256).ocr_text.read_text().strip()
+
+
+def test_deskew_and_clean_are_scanner_corrections_only() -> None:
+    """They rasterize every page, which is the whole cost of the incident.
+
+    On a scan they earn it. On a generated PDF there is no skew to correct and
+    no speckle to clean — only crisp vector glyphs to replace with a picture.
+    """
+    from pathlib import Path as P
+
+    from worker.stages.normalize import _ocr_argv
+
+    scanned = _ocr_argv(P("i"), P("o"), P("s"), pdfa=True, image=False, scanned=True)
+    generated = _ocr_argv(P("i"), P("o"), P("s"), pdfa=True, image=False, scanned=False)
+
+    assert "--deskew" in scanned and "--clean" in scanned
+    assert "--deskew" not in generated and "--clean" not in generated
+    # Nothing else changes: this is one decision, not a different operation.
+    assert [a for a in scanned if a not in {"--deskew", "--clean"}] == generated

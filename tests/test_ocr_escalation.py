@@ -260,3 +260,15 @@ def test_things_that_are_not_documents_stay_out() -> None:
         ".exe", ".ipa", ".wav", ".mp4",
     ):
         assert suffix not in SUPPORTED, f"{suffix} is not archive material"
+
+
+def test_the_digital_text_threshold_ignores_stray_ocr_junk() -> None:
+    """A scan with a few junk characters is still a scan.
+
+    The threshold decides whether the scanner corrections run, so setting it at
+    zero would disable deskew and clean for every faintly-misread page — the
+    exact pages that need them most.
+    """
+    from worker.stages.normalize import DIGITAL_TEXT_THRESHOLD
+
+    assert DIGITAL_TEXT_THRESHOLD >= 100
