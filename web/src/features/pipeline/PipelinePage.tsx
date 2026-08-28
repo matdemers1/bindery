@@ -1,3 +1,6 @@
+import { Activity } from "lucide-react";
+
+import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 
 import { api, type PipelineStatus } from "../../api";
@@ -38,10 +41,9 @@ export default function PipelinePage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <h1 className="text-xl font-semibold tracking-tight">Pipeline</h1>
-      <p className="mt-1 mb-6 text-sm text-muted">
+      <PageHeader icon={Activity} title="Pipeline">
         Every job in the archive, and every one that needs a human.
-      </p>
+      </PageHeader>
 
       {/* Above the job list on purpose. "Nothing in flight" is true and was
           also, until now, the only thing this screen said while documents sat

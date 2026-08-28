@@ -1,3 +1,6 @@
+import { Tags } from "lucide-react";
+
+import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
@@ -32,11 +35,10 @@ export default function OrganisePage({ libraries }: { libraries: { id: string }[
 
   return (
     <div className="mx-auto max-w-5xl">
-      <h1 className="text-xl font-semibold tracking-tight">Organise</h1>
-      <p className="mt-1 mb-5 text-sm text-muted">
-        The vocabulary the archive files things under. Near-duplicates here are
-        what make documents unfindable under the name you'd actually reach for.
-      </p>
+      <PageHeader icon={Tags} title="Organise">
+        The vocabulary the archive files things under. Near-duplicates here are what
+        make documents unfindable under the name you&apos;d actually reach for.
+      </PageHeader>
 
       <div className="mb-5 flex gap-1">
         {TABS.map((option) => (

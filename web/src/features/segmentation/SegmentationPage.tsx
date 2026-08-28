@@ -1,7 +1,8 @@
+import PageImage from "../../components/PageThumb";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 
-import { ApiError, api, type SegmentList, type SourceFileDetail, fileUrl } from "../../api";
+import { ApiError, api, type SegmentList, type SourceFileDetail } from "../../api";
 
 /**
  * The manual segmentation editor (REQ-036).
@@ -232,11 +233,10 @@ export default function SegmentationPage() {
 function PageThumb({ fileId, page }: { fileId: string; page: number }) {
   return (
     <figure className="w-20">
-      <img
-        src={fileUrl.thumb(fileId, page)}
-        alt={`Page ${page}`}
-        loading="lazy"
-        className="block w-full rounded border border-edge"
+      <PageImage
+        sourceFileId={fileId}
+        page={page}
+        className="block aspect-[3/4] w-full rounded border border-edge object-cover object-top"
       />
       <figcaption className="pt-0.5 text-center font-mono text-[10px] text-muted">
         {page}

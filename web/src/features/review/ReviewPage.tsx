@@ -1,7 +1,9 @@
+import PageThumb from "../../components/PageThumb";
+import { ClipboardCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
-import { ApiError, api, type Document, fileUrl } from "../../api";
+import { ApiError, api, type Document } from "../../api";
 import WhyPanel from "../why/WhyPanel";
 
 /**
@@ -104,7 +106,10 @@ export default function ReviewPage() {
     <div className="mx-auto max-w-7xl">
       <header className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h1 className="text-lg font-medium">Review</h1>
+          <h1 className="flex items-center gap-2.5 text-xl font-semibold tracking-tight">
+            <ClipboardCheck size={19} className="text-accent" />
+            Review
+          </h1>
           <p className="text-sm text-muted">
             {index + 1} of {documents.length}
             {total > documents.length && ` (${total} waiting)`} · these are the documents
@@ -154,10 +159,10 @@ export default function ReviewPage() {
           <ul className="flex gap-2 overflow-x-auto rounded-lg border border-edge bg-surface p-3">
             {pages.map((page) => (
               <li key={page}>
-                <img
-                  src={fileUrl.thumb(current.source_file_id, page)}
-                  alt={`Page ${page}`}
-                  className="h-64 rounded border border-edge"
+                <PageThumb
+                  sourceFileId={current.source_file_id}
+                  page={page}
+                  className="h-64 w-48 rounded border border-edge object-contain"
                 />
               </li>
             ))}

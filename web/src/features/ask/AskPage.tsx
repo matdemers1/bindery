@@ -1,85 +1,162 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import {
+  ArrowUp,
+  BookOpen,
+  FileText,
+  PanelRightClose,
+  Quote,
+  ShieldCheck,
+  Sparkles,
+  X,
+} from "lucide-react";
 
-import { ApiError, api, type AskAnswer } from "../../api";
+import { ApiError, api, type AskAnswer, type Document, type Library } from "../../api";
+import { Logo } from "../../components/brand/Logo";
+import FirstRun from "../firstrun/FirstRun";
 
 /**
- * Ask — questions answered from the archive, cited to a page (REQ-116).
+ * Ask — the landing screen.
  *
- * The design constraint here is unusual: **the feature is allowed to refuse.**
- * An uncited answer never reaches this screen, because a confident summary of
- * someone's medical or financial records with no source is worse than no
- * feature at all — a plausible wrong answer gets acted on.
+ * This is the front door because it is the only screen that answers the
+ * question people actually arrive with. "When did I last get the brakes done"
+ * is the thought; "search for *brakes*, scan results, open a PDF, find the
+ * line" is the chore that used to stand between the thought and the answer.
  *
- * So there are three outcomes, and all three are legitimate:
+ * The design constraint is unusual and worth stating plainly: **the feature is
+ * allowed to refuse.** An uncited answer never reaches this screen, because a
+ * confident summary of someone's medical or financial records with no source is
+ * worse than no feature at all — a plausible wrong answer gets acted on. So
+ * there are three legitimate outcomes: an answer with its sources, no answer
+ * plus the pages that mention it, or nothing matched.
  *
- *   1. An answer, with the pages it came from, each one a link.
- *   2. No answer, plus the pages that mention it — which is what the search box
- *      would have given you, and is still useful.
- *   3. Nothing matched.
- *
- * The second case is not an error state and is deliberately not styled as one.
+ * Sources live in a panel that slides in from the right rather than a list
+ * underneath. Underneath, they were a footnote — read after the answer had
+ * already been believed. Beside it, the answer and the evidence for it are on
+ * screen together, and checking costs one click instead of a scroll.
  */
 const EXAMPLES = [
-  "when did I last get the brakes done?",
-  "what is my policy number?",
-  "how much was the roof?",
+  "When did I last get the brakes done?",
+  "What is my policy number?",
+  "How much was the roof?",
+  "When does my passport expire?",
 ];
 
-export default function AskPage() {
+export default function AskPage({
+  libraries,
+  onUploaded,
+}: {
+  libraries: Library[];
+  onUploaded: () => void;
+}) {
+  // An empty archive makes Ask pointless, and this is the landing screen — so
+  // the first-run walkthrough lives here now rather than behind Search.
+  const [empty, setEmpty] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // Source files rather than documents: a file that arrived but has not
+    // finished processing still means the archive is not empty, and showing
+    // "nothing in here yet" while the pipeline runs would be a lie.
+    api
+      .sourceFiles()
+      .then((files) => setEmpty(files.length === 0))
+      .catch(() => setEmpty(false));
+  }, []);
+
   const [question, setQuestion] = useState("");
+  const [asked, setAsked] = useState<string | null>(null);
   const [result, setResult] = useState<AskAnswer | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  async function submit(asked: string) {
-    if (asked.trim().length < 3) return;
+  async function submit(value: string) {
+    const text = value.trim();
+    if (text.length < 3) return;
+    setAsked(text);
     setLoading(true);
     setError(null);
     setResult(null);
+    setSourcesOpen(false);
     try {
-      setResult(await api.ask(asked.trim()));
+      setResult(await api.ask(text));
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : String(caught));
+      setError(caught);
     } finally {
       setLoading(false);
     }
   }
 
+  // Escape closes the panel before it does anything else on the page.
+  useEffect(() => {
+    if (!sourcesOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setSourcesOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sourcesOpen]);
+
+  const sources = result?.citations.length
+    ? result.citations
+    : (result?.consulted ?? []).map((page) => ({ ...page, quote: "" }));
+
+  if (empty === true) {
+    return (
+      <div className="mx-auto max-w-3xl">
+        <FirstRun libraries={libraries} onUploaded={onUploaded} />
+      </div>
+    );
+  }
+
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <header className="space-y-1">
-        <h1 className="text-lg font-semibold">Ask</h1>
-        <p className="text-sm text-muted">
-          Questions answered from your own documents, with the page each answer came
-          from. If nothing in the archive supports an answer, you get the pages
-          instead of a guess.
-        </p>
-      </header>
+    <div className="flex gap-6">
+      <div className="mx-auto min-w-0 max-w-3xl flex-1">
+        {!asked && <Hero />}
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit(question);
-        }}
-      >
-        <label htmlFor="ask-question" className="sr-only">
-          Your question
-        </label>
-        <input
-          id="ask-question"
-          autoFocus
-          value={question}
-          onChange={(event) => setQuestion(event.target.value)}
-          placeholder="Ask about anything in the archive…"
-          className="w-full rounded-lg border border-edge bg-surface px-4 py-3 text-lg outline-none focus:border-accent"
-        />
-      </form>
+        <form
+          className="relative"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit(question);
+          }}
+        >
+          <label htmlFor="ask-question" className="sr-only">
+            Your question
+          </label>
+          <textarea
+            id="ask-question"
+            ref={inputRef}
+            autoFocus
+            rows={1}
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            onKeyDown={(event) => {
+              // Enter asks; Shift+Enter is a newline. A question long enough to
+              // need two lines is rare, and pressing Enter is the reflex.
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void submit(question);
+              }
+            }}
+            placeholder="Ask anything about your documents…"
+            className="w-full resize-none rounded-2xl border border-edge bg-surface py-4 pl-5 pr-14 text-[15px] outline-none transition-colors focus:border-accent"
+          />
+          <button
+            type="submit"
+            disabled={question.trim().length < 3 || loading}
+            aria-label="Ask"
+            className="absolute bottom-3 right-3 rounded-xl bg-accent p-2 text-ink transition-opacity disabled:opacity-30"
+          >
+            <ArrowUp size={16} strokeWidth={2.5} />
+          </button>
+        </form>
 
-      {!result && !loading && !error && (
-        <div className="text-sm text-muted">
-          <p>For example:</p>
-          <ul className="mt-2 space-y-1">
+        {!asked && <VitalRecords />}
+
+        {!asked && (
+          <ul className="mt-4 flex flex-wrap gap-2">
             {EXAMPLES.map((example) => (
               <li key={example}>
                 <button
@@ -88,99 +165,281 @@ export default function AskPage() {
                     setQuestion(example);
                     void submit(example);
                   }}
-                  className="underline underline-offset-2 hover:text-neutral-100"
+                  className="rounded-full border border-edge px-3 py-1.5 text-sm text-muted transition-colors hover:border-accent/60 hover:text-neutral-100"
                 >
                   {example}
                 </button>
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        )}
 
-      {loading && (
-        <div className="space-y-3" aria-live="polite">
-          <p className="text-sm text-muted">Reading the pages that mention it…</p>
-          <div className="h-24 animate-pulse rounded-lg border border-edge bg-surface" />
-        </div>
-      )}
+        {asked && (
+          <section className="mt-8" aria-live="polite">
+            <p className="mb-4 flex items-start gap-2.5 text-[15px] text-neutral-200">
+              <Quote size={15} className="mt-1.5 shrink-0 text-muted" />
+              <span className="font-medium">{asked}</span>
+            </p>
 
-      {error && (
-        <p role="alert" className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
-          {error}
-        </p>
-      )}
+            {loading && <Thinking />}
 
-      {result && <Answer result={result} />}
+            {error != null && (
+              <p
+                role="alert"
+                className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-sm text-red-300"
+              >
+                {error instanceof ApiError ? error.message : String(error)}
+              </p>
+            )}
+
+            {result && (
+              <Answer
+                result={result}
+                sourceCount={sources.length}
+                onOpenSources={() => setSourcesOpen(true)}
+              />
+            )}
+          </section>
+        )}
+      </div>
+
+      {result && sources.length > 0 && (
+        <SourcesPanel
+          open={sourcesOpen}
+          cited={result.citations.length > 0}
+          sources={sources}
+          onClose={() => setSourcesOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
-function Answer({ result }: { result: AskAnswer }) {
-  if (result.answer) {
-    return (
-      <section className="space-y-4" aria-live="polite">
-        <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{result.answer}</p>
-        <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
-            From these pages
-          </h2>
-          <ul className="mt-2 space-y-2">
-            {result.citations.map((citation, index) => (
-              <li
-                key={`${citation.document_id}-${citation.page_number}-${index}`}
-                className="rounded-lg border border-edge bg-surface p-3"
-              >
-                <Link
-                  to={`/document/${citation.document_id}/page/${citation.page_number}`}
-                  className="font-medium underline-offset-2 hover:underline"
-                >
-                  {citation.title}
-                </Link>
-                <span className="ml-2 text-xs text-muted">page {citation.page_number}</span>
-                {citation.quote && (
-                  <blockquote className="mt-1 border-l-2 border-edge pl-2 text-sm text-muted">
-                    {citation.quote}
-                  </blockquote>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-        {result.model && (
-          <p className="text-xs text-muted">
-            Written by {result.model} from the pages above, and nothing else.
-          </p>
-        )}
-      </section>
-    );
-  }
+function Hero() {
+  return (
+    <div className="mb-8 text-center">
+      <Logo size={56} variant="mascot" className="mx-auto text-neutral-300" />
+      <h1 className="mt-4 text-2xl font-semibold tracking-tight">
+        What do you need to find?
+      </h1>
+      <p className="mx-auto mt-2 max-w-md text-sm text-muted">
+        Answers come from your own documents, and every one shows the page it came
+        from. If nothing in the archive supports an answer, you get the pages
+        instead of a guess.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Vital records, pinned to the landing screen (REQ-091).
+ *
+ * The day you need a DD-214 or a death certificate is not a day you want to be
+ * composing a question, so these sit above the prompt: one click, zero recall.
+ * Silent when the tier is empty — a box explaining a feature you are not using
+ * is worse than nothing on an otherwise calm screen.
+ */
+function VitalRecords() {
+  const [documents, setDocuments] = useState<Document[]>([]);
+
+  useEffect(() => {
+    api
+      .vital()
+      .then(setDocuments)
+      .catch(() => {});
+  }, []);
+
+  if (documents.length === 0) return null;
 
   return (
-    <section className="space-y-3" aria-live="polite">
-      <p className="rounded-md border border-edge bg-surface p-3 text-sm">
-        {result.unavailable_reason}
-      </p>
-      {result.consulted.length > 0 && (
-        <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
-            Pages that mention it
-          </h2>
-          <ul className="mt-2 space-y-1">
-            {result.consulted.map((page, index) => (
-              <li key={`${page.document_id}-${page.page_number}-${index}`}>
-                <Link
-                  to={`/document/${page.document_id}/page/${page.page_number}`}
-                  className="text-sm underline underline-offset-2 hover:text-neutral-100"
-                >
-                  {page.title}
-                  <span className="ml-2 text-xs text-muted">page {page.page_number}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+    <section className="mt-6">
+      <h2 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+        <ShieldCheck size={12} className="text-accent" />
+        Vital records
+      </h2>
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {documents.map((document) => (
+          <li key={document.id}>
+            <Link
+              to={`/document/${document.id}/page/${document.page_start}`}
+              className="flex items-center gap-2 rounded-lg border border-edge bg-surface px-3 py-2 text-sm transition-colors hover:border-accent/60"
+            >
+              <FileText size={14} className="text-muted" />
+              <span className="font-medium">{document.title ?? "Untitled"}</span>
+              {document.document_date && (
+                <span className="text-xs text-muted">{document.document_date}</span>
+              )}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Thinking() {
+  return (
+    <div className="flex items-center gap-2.5 text-sm text-muted">
+      <Sparkles size={15} className="animate-pulse text-accent" />
+      Reading the pages that mention it…
+    </div>
+  );
+}
+
+function Answer({
+  result,
+  sourceCount,
+  onOpenSources,
+}: {
+  result: AskAnswer;
+  sourceCount: number;
+  onOpenSources: () => void;
+}) {
+  const answered = Boolean(result.answer);
+
+  return (
+    <div className="space-y-4">
+      {answered ? (
+        <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{result.answer}</p>
+      ) : (
+        <div className="rounded-xl border border-edge bg-surface p-4">
+          <p className="text-sm">{result.unavailable_reason}</p>
         </div>
       )}
-    </section>
+
+      {sourceCount > 0 && (
+        <button
+          type="button"
+          onClick={onOpenSources}
+          className="inline-flex items-center gap-2 rounded-full border border-edge px-3.5 py-1.5 text-sm text-muted transition-colors hover:border-accent/60 hover:text-neutral-100"
+        >
+          <BookOpen size={15} />
+          {answered
+            ? `${sourceCount} source${sourceCount === 1 ? "" : "s"}`
+            : `${sourceCount} page${sourceCount === 1 ? "" : "s"} mention it`}
+        </button>
+      )}
+
+      {answered && result.model && (
+        <p className="text-xs text-muted">
+          Written by {result.model} from those pages, and nothing else.
+        </p>
+      )}
+    </div>
+  );
+}
+
+type Source = {
+  document_id: string;
+  source_file_id: string;
+  title: string;
+  page_number: number;
+  quote: string;
+};
+
+/**
+ * The evidence, beside the answer.
+ *
+ * A drawer rather than a modal: a modal would make checking a source an
+ * interruption, and the whole argument for this panel is that checking should
+ * be cheap enough to actually do.
+ */
+function SourcesPanel({
+  open,
+  cited,
+  sources,
+  onClose,
+}: {
+  open: boolean;
+  cited: boolean;
+  sources: Source[];
+  onClose: () => void;
+}) {
+  return (
+    <aside
+      aria-hidden={!open}
+      className={`sticky top-8 hidden h-[calc(100vh-6rem)] shrink-0 overflow-hidden transition-[width,opacity] duration-200 lg:block ${
+        open ? "w-96 opacity-100" : "w-0 opacity-0"
+      }`}
+    >
+      <div className="flex h-full w-96 flex-col rounded-xl border border-edge bg-surface">
+        <header className="flex items-center justify-between border-b border-edge px-4 py-3">
+          <h2 className="flex items-center gap-2 text-sm font-medium">
+            <BookOpen size={15} className="text-accent" />
+            {cited ? "Where this came from" : "Pages that mention it"}
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Close sources"
+            className="rounded p-1 text-muted hover:text-neutral-100"
+          >
+            <PanelRightClose size={16} />
+          </button>
+        </header>
+
+        <ol className="flex-1 divide-y divide-edge overflow-y-auto">
+          {sources.map((source, index) => (
+            <li key={`${source.document_id}-${source.page_number}-${index}`} className="p-4">
+              <Link
+                to={`/document/${source.document_id}/page/${source.page_number}`}
+                className="flex items-start gap-2 text-sm font-medium underline-offset-2 hover:underline"
+              >
+                <FileText size={15} className="mt-0.5 shrink-0 text-muted" />
+                <span className="min-w-0">{source.title}</span>
+              </Link>
+              <p className="ml-[1.4rem] mt-0.5 text-xs text-muted">
+                page {source.page_number}
+              </p>
+              {source.quote && (
+                <blockquote className="ml-[1.4rem] mt-2 border-l-2 border-accent/50 pl-2.5 text-sm text-muted">
+                  {source.quote}
+                </blockquote>
+              )}
+            </li>
+          ))}
+        </ol>
+      </div>
+    </aside>
+  );
+}
+
+/** Narrow screens get the same list as a sheet rather than a side panel. */
+export function SourcesSheet({
+  open,
+  sources,
+  onClose,
+}: {
+  open: boolean;
+  sources: Source[];
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-40 flex items-end bg-ink/70 lg:hidden" onClick={onClose}>
+      <div
+        className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl border-t border-edge bg-surface p-4"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-medium">Sources</h2>
+          <button onClick={onClose} aria-label="Close sources">
+            <X size={16} />
+          </button>
+        </div>
+        <ol className="divide-y divide-edge">
+          {sources.map((source, index) => (
+            <li key={index} className="py-3">
+              <Link
+                to={`/document/${source.document_id}/page/${source.page_number}`}
+                className="text-sm font-medium underline-offset-2 hover:underline"
+              >
+                {source.title}
+              </Link>
+              <p className="text-xs text-muted">page {source.page_number}</p>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
   );
 }

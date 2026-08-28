@@ -1,3 +1,6 @@
+import { Import as ImportIcon } from "lucide-react";
+
+import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 
@@ -63,12 +66,11 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <h1 className="text-xl font-semibold tracking-tight">Import a backlog</h1>
-      <p className="mt-1 mb-6 text-sm text-muted">
+      <PageHeader icon={ImportIcon} title="Import a backlog">
         Point this at a directory the <span className="font-mono text-xs">worker</span>{" "}
-        container can see. Nothing is read into the archive until you've reviewed
+        container can see. Nothing is read into the archive until you&apos;ve reviewed
         what it found.
-      </p>
+      </PageHeader>
 
       <form
         onSubmit={(event) => {

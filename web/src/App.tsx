@@ -78,9 +78,16 @@ export default function App() {
         }}
       >
         <Routes>
+          {/* Ask is the front door: it is the only screen that answers the
+              question people actually arrive with. Search keeps its own URL
+              because "find the thing I know I have" is a different job. */}
           <Route
             path="/"
-            element={<SearchPage libraries={libraries} onUploaded={refresh} />}
+            element={<AskPage libraries={libraries} onUploaded={refresh} />}
+          />
+          <Route
+            path="/search"
+            element={<SearchPage libraries={libraries} />}
           />
           {/* Documents are the normal path: search returns page ranges, not files. */}
           <Route
@@ -94,7 +101,7 @@ export default function App() {
           <Route path="/file/:fileId" element={<Navigate to="page/1" replace />} />
           <Route path="/archive" element={<ArchivePage />} />
           <Route path="/files" element={<FilesPage />} />
-          <Route path="/ask" element={<AskPage />} />
+          <Route path="/ask" element={<Navigate to="/" replace />} />
           <Route path="/trust" element={<TrustPage />} />
           <Route path="/libraries" element={<LibrariesPage />} />
           <Route path="/import" element={<ImportPage libraries={libraries} />} />

@@ -1,3 +1,6 @@
+import { Workflow } from "lucide-react";
+
+import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api, type Library, type RuleDryRun, type RuleRecord } from "../../api";
@@ -56,11 +59,10 @@ export default function RulesPage({ libraries }: { libraries: Library[] }) {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <h1 className="text-xl font-semibold tracking-tight">Rules</h1>
-      <p className="mt-1 mb-6 text-sm text-muted">
+      <PageHeader icon={Workflow} title="Rules">
         Deterministic overrides. A rule you wrote outranks the classifier, and its
-        effects are recorded as yours rather than the model's.
-      </p>
+        effects are recorded as yours rather than the model&apos;s.
+      </PageHeader>
 
       {notice && <p className="mb-4 text-sm text-accent">{notice}</p>}
 

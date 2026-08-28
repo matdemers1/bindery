@@ -1,3 +1,6 @@
+import { Settings as SettingsIcon } from "lucide-react";
+
+import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 
 import PendingReviewPanel from "../../components/PendingReview";
@@ -47,8 +50,9 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-      <p className="mt-1 mb-6 text-sm text-muted">Configuration you can change without a restart.</p>
+      <PageHeader icon={SettingsIcon} title="Settings">
+        Configuration you can change without a restart.
+      </PageHeader>
 
       <section className="rounded-lg border border-edge bg-surface p-5">
         <h2 className="text-base font-medium">Classification</h2>

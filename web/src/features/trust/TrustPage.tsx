@@ -1,5 +1,15 @@
+import { ShieldCheck } from "lucide-react";
+
+import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
+import {
+  AlertTriangle,
+  Clock,
+  Loader,
+  type LucideIcon,
+  XCircle,
+} from "lucide-react";
 
 import {
   ApiError,
@@ -31,13 +41,10 @@ export default function TrustPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <header className="space-y-1">
-        <h1 className="text-lg font-semibold">Trust</h1>
-        <p className="text-sm text-muted">
-          Could you get your documents back? These are the ways to find out rather
-          than assume.
-        </p>
-      </header>
+      <PageHeader icon={ShieldCheck} title="Trust">
+        Could you get your documents back? These are the ways to find out rather than
+        assume.
+      </PageHeader>
 
       <nav className="flex gap-1 border-b border-edge">
         {(
@@ -545,10 +552,13 @@ function HealthPanelView() {
       )}
 
       <div className="grid gap-3 sm:grid-cols-4">
-        <Stat label="Waiting" value={queued} />
-        <Stat label="Running" value={panel.running} />
-        <Stat label="Failed today" value={panel.failed_24h} />
-        <Stat label="Gave up" value={panel.dead_letter} />
+        <Stat label="Waiting" value={queued} icon={Clock} />
+        <Stat label="Running" value={panel.running} icon={Loader} />
+        {/* Colour only when the number means something. A zero here is the
+            good outcome and should look like every other calm number; it is
+            the non-zero one that has to catch your eye. */}
+        <Stat label="Failed today" value={panel.failed_24h} icon={AlertTriangle} tone="warn" />
+        <Stat label="Gave up" value={panel.dead_letter} icon={XCircle} tone="bad" />
       </div>
 
       <Card
@@ -613,11 +623,44 @@ function HealthPanelView() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({
+  label,
+  value,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: number;
+  icon: LucideIcon;
+  tone?: "warn" | "bad";
+}) {
+  const loud = value > 0 && tone;
   return (
-    <div className="rounded-md border border-edge bg-surface p-3">
-      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-1 text-xl font-semibold">{value}</p>
+    <div
+      className={`rounded-lg border p-3 ${
+        loud === "bad"
+          ? "border-red-900/70 bg-red-950/25"
+          : loud === "warn"
+            ? "border-amber-900/70 bg-amber-950/20"
+            : "border-edge bg-surface"
+      }`}
+    >
+      <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted">
+        <Icon
+          size={12}
+          className={
+            loud === "bad" ? "text-red-400" : loud === "warn" ? "text-amber-400" : ""
+          }
+        />
+        {label}
+      </p>
+      <p
+        className={`mt-1 text-2xl font-semibold ${
+          loud === "bad" ? "text-red-300" : loud === "warn" ? "text-amber-300" : ""
+        }`}
+      >
+        {value}
+      </p>
     </div>
   );
 }

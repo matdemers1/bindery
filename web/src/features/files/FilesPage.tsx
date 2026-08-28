@@ -1,3 +1,6 @@
+import { FileText, Folder, FolderTree, Layers, ShieldCheck } from "lucide-react";
+
+import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
@@ -64,13 +67,10 @@ export default function FilesPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <header className="space-y-1">
-        <h1 className="text-lg font-semibold">Files</h1>
-        <p className="text-sm text-muted">
-          The archive as a folder tree — the same one the mirror writes to disk and the
-          export ships. Every row says how the file arrived and what it is tagged with.
-        </p>
-      </header>
+      <PageHeader icon={FolderTree} title="Files">
+        The archive as a folder tree — the same one the mirror writes to disk and the
+        export ships. Every row says how the file arrived and what it is tagged with.
+      </PageHeader>
 
       <nav className="flex flex-wrap items-center gap-1 text-sm">
         <Crumb onClick={() => go("")} active={segments.length === 0}>
@@ -148,9 +148,11 @@ function FolderRow({ node, onOpen }: { node: FileTreeNode; onOpen: () => void })
         onClick={onOpen}
         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface"
       >
-        <span aria-hidden className="text-muted">
-          {node.name === "_bundles" ? "🗃" : "📁"}
-        </span>
+        {node.name === "_bundles" ? (
+          <Layers size={16} className="shrink-0 text-accent" aria-hidden />
+        ) : (
+          <Folder size={16} className="shrink-0 text-accent" aria-hidden />
+        )}
         <span className="flex-1 font-medium">
           {node.name === "_bundles" ? "Multi-document scans" : node.name}
         </span>
@@ -180,14 +182,17 @@ function DocumentRow({
   return (
     <li className="px-4 py-3 hover:bg-surface">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span aria-hidden className="text-muted">
-          {bundle ? "🗃" : "📄"}
-        </span>
+        {bundle ? (
+          <Layers size={15} className="shrink-0 text-muted" aria-hidden />
+        ) : (
+          <FileText size={15} className="shrink-0 text-muted" aria-hidden />
+        )}
         <Link to={target} className="font-medium underline-offset-2 hover:underline">
           {node.title ?? node.original_filename ?? node.name}
         </Link>
         {node.sensitivity === "vital" && (
-          <span className="rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] font-medium text-amber-300">
+          <span className="flex items-center gap-1 rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] font-medium text-amber-300">
+            <ShieldCheck size={11} aria-hidden />
             vital
           </span>
         )}

@@ -1,20 +1,14 @@
+import { Search as SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
-import { api, type Document, type Library, type SearchResponse, fileUrl } from "../../api";
+import { api, type Library, type SearchResponse, fileUrl } from "../../api";
 import Snippet from "../../components/Snippet";
-import FirstRun from "../firstrun/FirstRun";
 import { ErrorState } from "../../components/States";
 
 // Every piece of search state lives in the URL (REQ-028), so a result is a link
 // you can send someone, and the back button behaves.
-export default function SearchPage({
-  libraries,
-  onUploaded,
-}: {
-  libraries: Library[];
-  onUploaded: () => void;
-}) {
+export default function SearchPage({ libraries }: { libraries: Library[] }) {
   const [params, setParams] = useSearchParams();
   const query = params.get("q") ?? "";
   const libraryFilter = params.getAll("library");
@@ -78,23 +72,35 @@ export default function SearchPage({
 
   return (
     <div className="mx-auto max-w-5xl">
+      {/* Visually hidden: the search box is self-evidently a search box, and a
+          heading above it would be furniture. A screen reader still needs to be
+          told which page this is. */}
+      <h1 className="sr-only">Search</h1>
+
       <form
         onSubmit={(event) => {
           event.preventDefault();
           update((next) => (draft.trim() ? next.set("q", draft) : next.delete("q")));
         }}
       >
-        <input
-          autoFocus
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Search every page in the archive…"
-          className="w-full rounded-lg border border-edge bg-surface px-4 py-3 text-lg outline-none focus:border-accent"
-        />
+        <div className="relative">
+          <SearchIcon
+            size={18}
+            aria-hidden
+            className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"
+          />
+          <input
+            autoFocus
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Search every page in the archive…"
+            className="w-full rounded-xl border border-edge bg-surface py-3 pl-12 pr-4 text-lg outline-none transition-colors focus:border-accent"
+          />
+        </div>
       </form>
 
       {!query.trim() ? (
-        <EmptyPrompt libraries={libraries} onUploaded={onUploaded} />
+        <EmptyPrompt />
       ) : error ? (
         <div className="mt-8">
           <ErrorState error={error} onRetry={() => update((next) => next.set("q", query))} />
@@ -115,81 +121,18 @@ export default function SearchPage({
   );
 }
 
-function EmptyPrompt({ libraries, onUploaded }: { libraries: Library[]; onUploaded: () => void }) {
-  const [empty, setEmpty] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    // Source files rather than documents: a file that arrived but has not
-    // finished processing still means the archive is no longer empty, and
-    // showing "nothing in here yet" while the pipeline runs would be a lie.
-    api
-      .sourceFiles()
-      .then((files) => setEmpty(files.length === 0))
-      .catch(() => setEmpty(false));
-  }, []);
-
-  // The first-run panel only exists for an archive with nothing in it, and it
-  // never comes back — so it must not flash on screen while we find out.
-  if (empty === true) {
-    return <FirstRun libraries={libraries} onUploaded={onUploaded} />;
-  }
-
+function EmptyPrompt() {
   return (
-    <div className="mt-12">
-      <VitalRecords />
-      <div className="mt-12 text-center text-muted">
-        <p className="text-lg">Search finds the page, not just the file.</p>
-        <p className="mt-2 text-sm">
-          Press <Kbd>⌘</Kbd> <Kbd>K</Kbd> from anywhere to jump straight to a page.
-        </p>
-      </div>
+    <div className="mt-16 text-center text-muted">
+      <p className="text-lg">Search finds the page, not just the file.</p>
+      <p className="mt-2 text-sm">
+        Press <Kbd>⌘</Kbd> <Kbd>K</Kbd> from anywhere to jump straight to a page, or{" "}
+        <Link to="/" className="underline underline-offset-2">
+          ask a question
+        </Link>{" "}
+        instead.
+      </p>
     </div>
-  );
-}
-
-/**
- * Vital records, pinned to the home screen (REQ-091).
- *
- * The day you need a DD-214 or a death certificate is not a day you want to be
- * composing a query. These sit under the empty search box so they are the first
- * thing on the screen, reachable in one click and zero recall.
- *
- * Silent when the tier is empty: an explanatory box about a feature you are not
- * using is worse than nothing on an otherwise calm home screen.
- */
-function VitalRecords() {
-  const [documents, setDocuments] = useState<Document[]>([]);
-
-  useEffect(() => {
-    api
-      .vital()
-      .then(setDocuments)
-      .catch(() => {});
-  }, []);
-
-  if (documents.length === 0) return null;
-
-  return (
-    <section>
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
-        Vital records
-      </h2>
-      <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-        {documents.map((document) => (
-          <li key={document.id}>
-            <Link
-              to={`/document/${document.id}/page/${document.page_start}`}
-              className="block rounded-lg border border-edge bg-surface px-4 py-3 hover:border-accent"
-            >
-              <span className="font-medium">{document.title ?? "Untitled"}</span>
-              {document.document_date && (
-                <span className="ml-2 text-xs text-muted">{document.document_date}</span>
-              )}
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }
 

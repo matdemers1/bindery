@@ -1,3 +1,6 @@
+import { Users } from "lucide-react";
+
+import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api, type LibraryDetail } from "../../api";
@@ -51,15 +54,12 @@ export default function LibrariesPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
-      <header className="space-y-1">
-        <h1 className="text-lg font-semibold">Libraries</h1>
-        <p className="max-w-3xl text-sm text-muted">
-          A library is the boundary: someone either has a membership in one and sees
-          everything in it, or has no membership and sees nothing in it. There is no
-          per-document sharing, because nobody can hold a per-document sharing model
-          in their head and still be sure of the answer.
-        </p>
-      </header>
+      <PageHeader icon={Users} title="Libraries">
+        A library is the boundary: someone either has a membership in one and sees
+        everything in it, or has no membership and sees nothing in it. There is no
+        per-document sharing, because nobody can hold a per-document sharing model in
+        their head and still be sure of the answer.
+      </PageHeader>
 
       {error && (
         <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">

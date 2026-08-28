@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { ApiError, api } from "../api";
+import { Logo } from "../components/brand/Logo";
 
 export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
   const [email, setEmail] = useState("");
@@ -32,7 +33,10 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
         onSubmit={submit}
         className="w-full max-w-sm rounded-xl border border-edge bg-surface p-8"
       >
-        <h1 className="text-2xl font-semibold tracking-tight">Bindery</h1>
+        {/* The mascot rather than the plain mark: this is the one screen
+            where nothing has happened yet and a little warmth costs nothing. */}
+        <Logo size={44} variant="mascot" className="text-neutral-300" />
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight">Bindery</h1>
         <p className="mt-1 mb-6 text-sm text-muted">
           There is no self-service registration. Accounts are created on the host.
         </p>

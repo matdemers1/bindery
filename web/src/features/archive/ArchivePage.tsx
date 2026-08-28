@@ -1,7 +1,9 @@
+import PageThumb from "../../components/PageThumb";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
+import { Library as LibraryIcon } from "lucide-react";
 
-import { ApiError, api, type Archive, type ArchiveEntry, type BulkResult, type Tree, fileUrl } from "../../api";
+import { ApiError, api, type Archive, type ArchiveEntry, type BulkResult, type Tree } from "../../api";
 import { SourceChip } from "../why/WhyPanel";
 
 /**
@@ -81,7 +83,10 @@ export default function ArchivePage() {
   return (
     <div className="mx-auto max-w-7xl">
       <header className="mb-5">
-        <h1 className="text-xl font-semibold tracking-tight">Archive</h1>
+        <h1 className="flex items-center gap-2.5 text-xl font-semibold tracking-tight">
+          <LibraryIcon size={19} className="text-accent" />
+          Archive
+        </h1>
         {stats && (
           <p className="mt-1 text-sm text-muted">
             {stats.documents} {stats.documents === 1 ? "document" : "documents"} across{" "}
@@ -289,10 +294,10 @@ function Row({
         className="mt-1 shrink-0 accent-amber-400"
       />
       <Link to={`/document/${entry.document_id}/page/1`} className="flex min-w-0 flex-1 gap-3">
-        <img
-          src={fileUrl.thumb(entry.source_file_id, entry.page_start)}
+        <PageThumb
+          sourceFileId={entry.source_file_id}
+          page={entry.page_start}
           alt=""
-          loading="lazy"
           className="h-20 w-14 shrink-0 rounded border border-edge object-cover object-top"
         />
         <div className="min-w-0 flex-1">
