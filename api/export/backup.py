@@ -27,7 +27,8 @@ import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+
+from sqlalchemy.engine import make_url
 
 from api.config import get_settings
 from api.export.integrity import IntegrityReport
@@ -54,23 +55,26 @@ def backup_root() -> Path:
 def connection_env() -> dict[str, str]:
     """libpq settings from the SQLAlchemy URL, via the environment.
 
-    Not a connection string on the command line, for two reasons. A password
-    containing `@` or `:` makes a URL ambiguous — the real one here parsed as a
-    port and produced *invalid integer value ... for connection option "port"*,
-    which reads like a config error and is actually a quoting bug. And argv is
-    world-readable through `ps`, so a password on the command line is a password
-    anyone with a shell can see.
+    Parsed with SQLAlchemy's own `make_url` rather than `urllib`, because that
+    is the parser that already produces a working connection. A generated
+    password routinely contains `/`, `@` or `:`; `urlsplit` reads the first `/`
+    as the start of the path and ends up reporting *Port could not be cast to
+    integer* — which looks like a misconfiguration and is a parsing bug. That
+    is not hypothetical: it is what the deployed password did.
+
+    Passed through the environment rather than on the command line, because
+    argv is world-readable via `ps`.
     """
-    parsed = urlsplit(get_settings().database_url.replace("+asyncpg", ""))
+    url = make_url(get_settings().database_url)
     env = {
-        "PGHOST": parsed.hostname or "localhost",
-        "PGPORT": str(parsed.port or 5432),
-        "PGDATABASE": (parsed.path or "/").lstrip("/"),
+        "PGHOST": url.host or "localhost",
+        "PGPORT": str(url.port or 5432),
+        "PGDATABASE": url.database or "",
     }
-    if parsed.username:
-        env["PGUSER"] = unquote(parsed.username)
-    if parsed.password:
-        env["PGPASSWORD"] = unquote(parsed.password)
+    if url.username:
+        env["PGUSER"] = url.username
+    if url.password:
+        env["PGPASSWORD"] = url.password
     return env
 
 

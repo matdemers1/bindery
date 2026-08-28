@@ -641,19 +641,26 @@ def test_a_missing_pg_dump_is_reported_as_a_deployment_problem(monkeypatch, tmp_
 
 
 def test_connection_settings_survive_an_awkward_password(monkeypatch) -> None:
-    """The real password on the deployed host broke a URL-on-the-command-line.
+    """The real deployed password broke two parsers before this one.
 
-    pg_dump reported *invalid integer value ... for connection option "port"* —
-    which reads like a misconfiguration and is actually the password being
-    parsed as `host:port`. Passing libpq settings through the environment makes
-    the question of what characters a password contains stop mattering.
+    It is base64-ish and contains `/`. Handed to pg_dump as a URL that produced
+    *invalid integer value ... for connection option "port"*; parsed with
+    `urlsplit` it produced *Port could not be cast to integer*, because
+    `urlsplit` reads the first `/` as the start of the path. Both read like
+    misconfiguration and both are parsing bugs.
+
+    `make_url` is used because it is the parser that already makes the
+    application's own connection work — whatever it accepts as a password, the
+    backup must accept too, or backups fail on exactly the hosts that are
+    running fine.
     """
     from api.config import get_settings
 
     get_settings.cache_clear()
     monkeypatch.setenv(
         "DATABASE_URL",
-        "postgresql+asyncpg://bindery:p%40ss%3Aw%2Frd@db.internal:6543/bindery",
+        # Unescaped on purpose: this is the shape that actually shipped.
+        "postgresql+asyncpg://bindery:aB3/xY9/qq/Zz@db.internal:6543/bindery",
     )
     try:
         env = backup.connection_env()
@@ -664,5 +671,12 @@ def test_connection_settings_survive_an_awkward_password(monkeypatch) -> None:
     assert env["PGPORT"] == "6543"
     assert env["PGDATABASE"] == "bindery"
     assert env["PGUSER"] == "bindery"
-    # Percent-decoded, so what libpq receives is the actual password.
-    assert env["PGPASSWORD"] == "p@ss:w/rd"
+    assert env["PGPASSWORD"] == "aB3/xY9/qq/Zz"
+
+    # The failure this replaces: urlsplit reads the first `/` as the path.
+    from urllib.parse import urlsplit
+
+    with pytest.raises(ValueError):
+        _ = urlsplit(
+            "postgresql://bindery:aB3/xY9/qq/Zz@db.internal:6543/bindery"
+        ).port
