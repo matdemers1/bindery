@@ -640,3 +640,60 @@ async def test_a_missing_render_is_skipped_not_fatal(session, document) -> None:
     _library, source_file, doc = document
     # Nothing has been rendered for this file in the test fixture.
     assert _page_images(source_file, doc) == []
+
+
+async def test_an_unreadable_page_does_not_learn_from_its_neighbours(
+    session, document, monkeypatch
+) -> None:
+    """A failed run must not set the vocabulary for its own retry.
+
+    An unreadable page's embedding describes an empty page, so its nearest
+    neighbours are every *other* page nothing could be read from — carrying the
+    tags a previous, failed pass invented for them. The deployed archive ended
+    up with "Blank or Unreadable Scan" as its single largest document type, 94
+    documents, and the vision pass returned titles like "Unknown - Blank or
+    Unreadable Scan - Aircraft Icon": the model had seen the aircraft and still
+    picked the junk type, because that is what it was offered.
+    """
+    from worker.classify import candidates as candidate_builder
+    from worker.stages import classify as classify_stage
+
+    _library, _source_file, doc = document
+    asked: list[bool] = []
+    real_build = candidate_builder.build
+
+    async def spy(session, document, library_ids, *, use_neighbours=True):
+        asked.append(use_neighbours)
+        return await real_build(
+            session, document, library_ids, use_neighbours=use_neighbours
+        )
+
+    monkeypatch.setattr(classify_stage.candidate_builder, "build", spy)
+
+    await _classify(session, doc)
+    assert asked == [True], "a readable document should still learn from neighbours"
+
+    asked.clear()
+    for page in (await session.execute(sa.select(Page).where(
+        Page.source_file_id == doc.source_file_id
+    ))).scalars():
+        page.text = ""
+    await session.commit()
+
+    await _classify(session, doc)
+    assert asked == [False]
+
+
+async def test_neighbours_are_skipped_when_asked(session, document) -> None:
+    """The flag actually reaches the query, rather than being decorative."""
+    from worker.classify import candidates as candidate_builder
+
+    _library, _source_file, doc = document
+
+    built = await candidate_builder.build(
+        session, doc, [doc.library_id], use_neighbours=False
+    )
+
+    assert built.used_neighbours is False
+    assert built.neighbour_ids == []
+    assert built.best_similarity is None

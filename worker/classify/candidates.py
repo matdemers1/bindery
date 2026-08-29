@@ -135,9 +135,29 @@ async def _full_taxonomy(
 
 
 async def build(
-    session: AsyncSession, document: Document, library_ids: list[uuid.UUID]
+    session: AsyncSession,
+    document: Document,
+    library_ids: list[uuid.UUID],
+    *,
+    use_neighbours: bool = True,
 ) -> CandidateSet:
-    neighbours = await _neighbours(session, document, library_ids)
+    """The taxonomy to offer this document, ranked by how likely it is to fit.
+
+    `use_neighbours=False` is for a document being classified from its images
+    because OCR found nothing to read. Its embedding describes an empty page,
+    so its nearest neighbours are every *other* page nothing could be read
+    from — and the tags they carry are the ones a previous, failed pass
+    invented for them. Reuse then pulls those straight back: the archive ended
+    up with "Blank or Unreadable Scan" as its single largest document type, 94
+    documents, and the vision pass was returning titles like "Unknown - Blank
+    or Unreadable Scan - Aircraft Icon" — the model had seen the aircraft and
+    still picked the junk type, because it was what it was offered.
+
+    A failed run must not get to set the vocabulary for its own retry.
+    """
+    neighbours = (
+        await _neighbours(session, document, library_ids) if use_neighbours else []
+    )
     neighbour_ids = [neighbour_id for neighbour_id, _ in neighbours]
     best_similarity = 1.0 - neighbours[0][1] if neighbours else None
 

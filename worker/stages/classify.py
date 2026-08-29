@@ -134,16 +134,19 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
         if document.known_form_id
         else None
     )
-    candidate_set = await candidate_builder.build(session, document, library_ids)
-
     pages = await _pages(session, document)
+    readable = _has_text(pages)
+
+    candidate_set = await candidate_builder.build(
+        session, document, library_ids, use_neighbours=readable
+    )
 
     # A document OCR could not read is not a document nothing can be said
     # about. It is usually a photograph, a patch, a diagram or a signature
     # page — things a person identifies at a glance and a text pipeline
     # cannot. The rendered pages go to the model only in that case, because
     # images cost far more than text and add nothing when the text is good.
-    page_images = _page_images(source_file, document) if not _has_text(pages) else []
+    page_images = [] if readable else _page_images(source_file, document)
 
     request = ClassificationRequest(
         document_id=str(document.id),
