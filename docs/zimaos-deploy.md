@@ -279,10 +279,23 @@ a blob by re-running the pipeline. Losing it costs CPU, not data.
 Push to `main`, wait for the build, then on the Zima:
 
 ```bash
-docker compose -f /var/lib/casaos/apps/bindery/docker-compose.yml pull
-docker compose -f /var/lib/casaos/apps/bindery/docker-compose.yml up -d
+cd /DATA/AppData/bindery
+export DOCKER_CONFIG=/DATA/.docker            # or the pull is anonymous, and 401s
+docker compose pull
+docker compose up -d
 docker exec bindery-api alembic upgrade head   # only if the release adds one
 ```
+
+Two things that will waste your time if you guess them:
+
+- **The stack lives in `/DATA/AppData/bindery`**, not under `/var/lib/casaos/apps/`
+  where every other CasaOS app is. `docker ps --format '{{.Label "com.docker.compose.project.config_files"}}'`
+  tells you where any running stack's compose file actually is.
+- **`DOCKER_CONFIG` must be set** for the pull. The registry credentials were
+  written to `/DATA/.docker/config.json` (see the quirks table above); without
+  the variable the client looks in `/root/.docker`, finds nothing, pulls
+  anonymously, and gets `unauthorized` from ghcr.io — the packages are private,
+  and they stay private.
 
 To roll back, change the `:main` tags to `:sha-<commit>` and `up -d` again.
 
