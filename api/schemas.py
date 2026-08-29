@@ -958,7 +958,11 @@ class PhotoOut(BaseModel):
     original_filename: str | None
     received_at: datetime
     document_date: date | None
-    # Whether anything has actually said what this picture is.
+    # How much text OCR got off the page. Zero is the common case for a
+    # photograph and is the whole reason this view and the vision pass exist.
+    text_chars: int
+    # Whether anything has actually *looked* at this picture. A title written
+    # from an empty page — "Unreadable Scan" — does not count.
     described: bool
 
 

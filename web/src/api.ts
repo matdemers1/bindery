@@ -1043,6 +1043,7 @@ export interface Photo {
   original_filename: string | null;
   received_at: string;
   document_date: string | null;
+  text_chars: number;
   described: boolean;
 }
 

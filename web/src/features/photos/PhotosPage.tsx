@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { Link } from "react-router";
-import { Images, Search, Sparkles } from "lucide-react";
+import { Eye, Images, Search, Sparkles } from "lucide-react";
 
 import { api, type Photo, fileUrl } from "../../api";
 import PageHeader from "../../components/PageHeader";
@@ -23,6 +23,8 @@ export default function PhotosPage() {
   const [q, setQ] = useState("");
   const [undescribed, setUndescribed] = useState(false);
   const [selected, setSelected] = useState<Photo | null>(null);
+  const [describing, setDescribing] = useState(false);
+  const [outcome, setOutcome] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const wall = await api.photos({ q: q || undefined, undescribed, limit: 200 });
@@ -31,6 +33,37 @@ export default function PhotosPage() {
   }, [q, undescribed]);
 
   useLiveQuery(["documents", "files"], load);
+
+  const unread = photos.filter((photo) => !photo.described);
+
+  /**
+   * Sending the unreadable ones back through classification.
+   *
+   * Nothing is overwritten here. The classify job is reset and the ordinary
+   * pipeline runs; the existing classification stays until a new one succeeds,
+   * so the worst case of pressing this is that nothing changes. What is
+   * different this time is that a document with almost no text now goes to the
+   * model as page images rather than as an empty string — so it can be
+   * described by being looked at.
+   */
+  async function describe() {
+    setDescribing(true);
+    setOutcome(null);
+    try {
+      const result = await api.reclassify({
+        document_ids: unread.map((photo) => photo.document_id),
+      });
+      setOutcome(
+        result.queued === 0
+          ? "Nothing was queued — these may already be waiting."
+          : `Queued ${result.queued} image${result.queued === 1 ? "" : "s"} to be looked at.`,
+      );
+    } catch (caught) {
+      setOutcome(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setDescribing(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
@@ -70,13 +103,30 @@ export default function PhotosPage() {
           <Sparkles size={14} />
           Nothing said about these
         </button>
+        {unread.length > 0 && (
+          <button
+            type="button"
+            onClick={() => void describe()}
+            disabled={describing}
+            className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
+          >
+            <Eye size={14} />
+            {describing ? "Queueing…" : `Look at ${unread.length}`}
+          </button>
+        )}
         <span className="text-xs text-muted">{total} images</span>
       </div>
+
+      {outcome && (
+        <p className="rounded-lg border border-edge bg-surface px-3 py-2 text-sm text-muted">
+          {outcome}
+        </p>
+      )}
 
       {photos.length === 0 ? (
         <p className="rounded-xl border border-edge bg-surface p-8 text-center text-sm text-muted">
           {undescribed
-            ? "Every image has something said about it."
+            ? "Every image had something readable on it."
             : "No images match that."}
         </p>
       ) : (
@@ -102,7 +152,11 @@ export default function PhotosPage() {
                     {photo.described ? (
                       photo.document_date ?? photo.received_at.slice(0, 10)
                     ) : (
-                      <span className="text-amber-400">nothing said about this yet</span>
+                      <span className="text-amber-400">
+                        {photo.text_chars === 0
+                          ? "nothing readable on this"
+                          : `only ${photo.text_chars} characters read`}
+                      </span>
                     )}
                   </span>
                 </span>

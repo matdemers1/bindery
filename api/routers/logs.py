@@ -15,7 +15,7 @@ from api import eventlog
 from api.auth.dependencies import current_user
 from api.db import repository
 from api.db.enums import JobState, SourceFileState
-from api.db.models import AppUser, Document, EventLog, Job, SourceFile
+from api.db.models import AppUser, Document, EventLog, Job, Page, SourceFile
 from api.db.session import get_session
 from api.schemas import (
     FileProgressOut,
@@ -194,13 +194,22 @@ async def pipeline_files(
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff",
                   ".heic", ".heif")
 
+# Below this many characters there was effectively nothing to read, and a
+# classification derived from the text is a classification derived from
+# nothing. It is the same threshold `worker.stages.classify` uses to decide a
+# document needs to be *looked* at, deliberately: the filter that finds these
+# pictures and the pass that fixes them must agree on what "unreadable" means.
+MIN_USABLE_TEXT = 40
+
 
 @router.get("/photos", response_model=PhotoWallOut)
 async def photos(
     session: AsyncSession = Depends(get_session),
     user: AppUser = Depends(current_user),
     q: str | None = Query(None, description="substring of the title or filename"),
-    undescribed: bool = Query(False, description="only ones nothing has said anything about"),
+    undescribed: bool = Query(
+        False, description="only ones nothing could be read from, and nothing has looked at"
+    ),
     limit: int = Query(120, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> PhotoWallOut:
@@ -215,6 +224,18 @@ async def photos(
     library_ids = await repository.visible_library_ids(session, user.id)
     if not library_ids:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "no visible libraries")
+
+    # The text of the page the document starts on. A photograph is one page, so
+    # for this view "the first page" and "the page" are the same thing.
+    text_chars = (
+        sa.select(sa.func.coalesce(sa.func.length(Page.text), 0))
+        .where(
+            Page.source_file_id == Document.source_file_id,
+            Page.page_number == Document.page_start,
+        )
+        .correlate(Document)
+        .scalar_subquery()
+    )
 
     conditions: list[sa.ColumnElement[bool]] = [
         Document.library_id.in_(library_ids),
@@ -232,10 +253,18 @@ async def photos(
             )
         )
     if undescribed:
-        # Nothing has said anything about these — no title from a model, no
-        # summary. They are the ones a description pass would actually help.
+        # The first version of this asked whether the title was NULL, and found
+        # nothing: classification had already run on all 182 images and written
+        # a title for every one of them. The titles were "Unreadable Scan",
+        # "Blank or Unreadable Scan", "Unidentified Correspondent - ERS" —
+        # summaries of an empty string, confidently phrased. A row being
+        # populated is not evidence that anything knows what the picture is.
+        #
+        # So ask the honest question instead: was there anything to read? These
+        # are the pictures a description pass would actually help, and they are
+        # exactly the ones the classify stage now sends as images.
         conditions.append(
-            sa.or_(Document.title.is_(None), Document.summary.is_(None))
+            sa.or_(text_chars < MIN_USABLE_TEXT, text_chars.is_(None))
         )
 
     total = await session.scalar(
@@ -247,7 +276,12 @@ async def photos(
 
     rows = (
         await session.execute(
-            sa.select(Document, SourceFile.original_filename, SourceFile.received_at)
+            sa.select(
+                Document,
+                SourceFile.original_filename,
+                SourceFile.received_at,
+                text_chars.label("text_chars"),
+            )
             .join(SourceFile, SourceFile.id == Document.source_file_id)
             .where(sa.and_(*conditions))
             .order_by(SourceFile.received_at.desc(), Document.page_start)
@@ -268,7 +302,12 @@ async def photos(
                 original_filename=row.original_filename,
                 received_at=row.received_at,
                 document_date=row[0].document_date,
-                described=bool(row[0].title and row[0].summary),
+                text_chars=int(row.text_chars or 0),
+                described=bool(
+                    row[0].title
+                    and row[0].summary
+                    and (row.text_chars or 0) >= MIN_USABLE_TEXT
+                ),
             )
             for row in rows
         ],
