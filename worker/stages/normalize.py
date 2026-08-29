@@ -210,6 +210,17 @@ def _remedy_for(error: subprocess_util.CommandError) -> tuple[str, dict, list[st
     """
     message = str(error)
 
+    if "XFA" in message or "LiveCycle" in message:
+        # Nothing to remedy. A dynamic XFA form carries no static content —
+        # every renderer outside Adobe sees a "please open this in Acrobat"
+        # placeholder — so neither skipping nor forcing OCR can reach the
+        # contents. Forcing was tried and produced the same refusal.
+        raise PermanentFailure(
+            "this is a dynamic XFA form built with Adobe LiveCycle; its contents "
+            "are only readable in Adobe Acrobat or Reader. Re-saving or printing "
+            "it to a normal PDF from Acrobat would make it importable."
+        )
+
     if "DigitalSignatureError" in message:
         # OCR would invalidate the signature — on the *copy*. The signed
         # original stays in the blob store, byte for byte, and is what an
@@ -221,17 +232,6 @@ def _remedy_for(error: subprocess_util.CommandError) -> tuple[str, dict, list[st
             {},
             ["--invalidate-digital-signatures"],
             "signed PDF: OCR-ing a copy, the signed original is untouched",
-        )
-
-    if "XFA" in message or "LiveCycle" in message:
-        # A dynamic XFA form has no static content to pass through, so
-        # rasterizing is the only way to read it. This *replaces* --skip-text
-        # rather than joining it: ocrmypdf refuses both together.
-        return (
-            "xfa",
-            {"force": True},
-            [],
-            "dynamic XFA form: rasterizing to read it",
         )
 
     if _is_pdfa_failure(error):
@@ -298,9 +298,10 @@ def _prepare_image(source_file: SourceFile, original: Path):
     if min(image.size) < MIN_IMAGE_PIXELS:
         width, height = image.size
         image.close()
-        raise ValueError(
+        raise PermanentFailure(
             f"{width}x{height} pixels is too small to be a document page "
-            f"(each side must be at least {MIN_IMAGE_PIXELS}px)"
+            f"(each side must be at least {MIN_IMAGE_PIXELS}px). This is "
+            f"usually a design or laser-cutting asset rather than a document."
         )
 
     has_alpha = image.mode in {"RGBA", "LA", "PA"} or (
@@ -397,6 +398,14 @@ async def _ocr_input(source_file: SourceFile, original: Path):
 # Below this, a PDF page cannot be constructed at all — and nothing this small
 # holds readable text anyway.
 MIN_IMAGE_PIXELS = 16
+
+
+class PermanentFailure(Exception):
+    """This input cannot be processed, and trying again will not change that.
+
+    Distinct from an ordinary failure so the queue can stop immediately rather
+    than spend five attempts and half an hour reaching the same conclusion.
+    """
 
 
 # Enough text that the pages plainly came from a computer rather than a camera.

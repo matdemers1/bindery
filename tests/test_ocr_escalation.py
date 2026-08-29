@@ -349,16 +349,25 @@ def test_the_refusals_that_have_a_safe_answer() -> None:
     _key, _overrides, flags, _why = signed
     assert "--invalidate-digital-signatures" in flags
 
-    # XFA must *replace* --skip-text rather than join it: ocrmypdf rejects both
-    # together with "Choose only one of --force-ocr, --skip-text, --redo-ocr",
-    # so appending the flag turned one failure into a different one.
-    xfa = _remedy_for(
-        CommandError(["ocrmypdf"], 2, "InputFileError: This PDF contains dynamic XFA forms")
-    )
-    assert xfa is not None
-    _key, overrides, flags, _why = xfa
-    assert overrides.get("force") is True
-    assert "--force-ocr" not in flags
+
+
+def test_an_xfa_form_is_a_permanent_failure_with_a_way_out() -> None:
+    """Forcing OCR was tried on the real file and produced the same refusal.
+
+    A dynamic XFA form carries no static content — every renderer outside Adobe
+    shows a "please open this in Acrobat" placeholder — so there is nothing for
+    OCR to read at any setting. The message therefore says what *would* work,
+    because a dead end with no exit is not a useful thing to tell someone.
+    """
+    import pytest as _pytest
+
+    from worker.stages.normalize import PermanentFailure, _remedy_for
+    from worker.subprocess_util import CommandError
+
+    with _pytest.raises(PermanentFailure, match="Acrobat"):
+        _remedy_for(
+            CommandError(["ocrmypdf"], 2, "InputFileError: This PDF contains dynamic XFA forms")
+        )
 
 
 def test_failures_with_no_safe_answer_are_still_failures() -> None:
@@ -393,7 +402,9 @@ def test_a_degenerate_image_is_refused_in_plain_language() -> None:
         source_file = SourceFile(
             library_id=None, sha256="x" * 64, byte_size=1, original_filename="laser.png"
         )
-        with _pytest.raises(ValueError, match="too small to be a document"):
+        from worker.stages.normalize import PermanentFailure
+
+        with _pytest.raises(PermanentFailure, match="too small to be a document"):
             _prepare_image(source_file, tiny)
 
 
@@ -435,3 +446,26 @@ def test_the_mutually_exclusive_ocr_modes_never_appear_together() -> None:
     for force in (True, False):
         argv = _ocr_argv(P("i"), P("o"), P("s"), pdfa=True, image=False, force=force)
         assert not ("--force-ocr" in argv and "--skip-text" in argv)
+
+
+def test_a_long_error_keeps_the_end_where_the_cause_is() -> None:
+    """Ghostscript prints a page of font-loading before the line that matters.
+
+    Trimming from the front kept the chatter and lost the diagnosis — a 5MB
+    military PDF failed with four thousand characters of "Loading font …" and
+    nothing that said why.
+    """
+    from worker.subprocess_util import summarize
+
+    noise = "\n".join(f"Loading font Helvetica-{i}" for i in range(400))
+    text = summarize(noise + "\nERROR: the actual cause was here")
+
+    assert "the actual cause was here" in text
+    assert "Loading font Helvetica-0" in text, "the start is still useful context"
+    assert "characters omitted" in text, "and the elision is stated, not silent"
+
+
+def test_a_short_error_is_left_alone() -> None:
+    from worker.subprocess_util import summarize
+
+    assert summarize("  InputFileError: not a PDF  ") == "InputFileError: not a PDF"

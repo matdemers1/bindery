@@ -5,6 +5,7 @@ killed worker's job comes back, and nothing is ever silently dropped.
 """
 
 import asyncio
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -100,7 +101,7 @@ async def test_a_job_is_claimed_exactly_once_under_concurrency(session) -> None:
 
 
 async def test_failure_backs_off_then_dead_letters(session) -> None:
-    source_file = await _source_file(session, "e" * 64)
+    source_file = await _source_file(session, uuid.uuid4().hex * 2)
     job_id = await queue.enqueue(session, JobStage.NORMALIZE, source_file_id=source_file.id)
     await session.commit()
 
@@ -126,7 +127,7 @@ async def test_failure_backs_off_then_dead_letters(session) -> None:
 
 async def test_a_dead_worker_s_job_is_reclaimed(session) -> None:
     """A killed container cannot release its own claim; the lease is the safety net."""
-    source_file = await _source_file(session, "f" * 64)
+    source_file = await _source_file(session, uuid.uuid4().hex * 2)
     await queue.enqueue(session, JobStage.NORMALIZE, source_file_id=source_file.id)
     await session.commit()
 
@@ -189,3 +190,44 @@ async def test_requeue_resets_a_dead_lettered_job(session) -> None:
     assert job.state is JobState.QUEUED
     assert job.attempts == 0
     assert job.last_error is None
+
+
+async def test_a_permanent_failure_gives_up_immediately(session) -> None:
+    """Some inputs cannot be retried into success.
+
+    A 10x5 pixel image will never hold a document and a dynamic XFA form will
+    never be readable outside Adobe. Spending five attempts over half an hour
+    to reach that conclusion holds a worker slot and buries the one useful
+    message under four identical ones.
+    """
+    source_file = await _source_file(session, uuid.uuid4().hex * 2)
+    job_id = await queue.enqueue(session, JobStage.NORMALIZE, source_file_id=source_file.id)
+    await session.commit()
+    claimed = await queue.claim(session, [JobStage.NORMALIZE], "worker-1")
+    assert claimed is not None
+
+    state = await queue.fail(
+        session, job_id, claimed.attempts, "too small to be a document page", permanent=True
+    )
+    await session.commit()
+
+    assert state is JobState.DEAD_LETTER
+    job = await session.get(Job, job_id)
+    assert job.state is JobState.DEAD_LETTER
+    assert job.attempts == 1, "it gave up on the first attempt, not the fifth"
+
+
+async def test_an_ordinary_failure_still_retries(session) -> None:
+    """The fast path must not swallow the failures that do recover — a network
+    blip on the way to the API is exactly what the retries are for."""
+    source_file = await _source_file(session, uuid.uuid4().hex * 2)
+    job_id = await queue.enqueue(session, JobStage.NORMALIZE, source_file_id=source_file.id)
+    await session.commit()
+    claimed = await queue.claim(session, [JobStage.NORMALIZE], "worker-1")
+
+    state = await queue.fail(session, job_id, claimed.attempts, "connection reset")
+    await session.commit()
+
+    assert state is JobState.FAILED
+    job = await session.get(Job, job_id)
+    assert job.state is JobState.QUEUED, "back on the queue for another go"

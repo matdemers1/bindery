@@ -6,12 +6,33 @@ import logging
 log = logging.getLogger("bindery.worker.exec")
 
 
+# Ghostscript and friends print a page of progress before the line that matters,
+# so a message trimmed from the front keeps the noise and loses the cause.
+HEAD_CHARS = 400
+TAIL_CHARS = 1600
+
+
+def summarize(stderr: str) -> str:
+    """Keep both ends of a long error, because the cause could be at either.
+
+    A tool that fails at startup says so immediately; a tool that fails on page
+    six says so after six pages of font-loading chatter. Keeping only the head
+    truncated a Ghostscript failure mid-log and left no way to tell what had
+    gone wrong.
+    """
+    text = stderr.strip()
+    if len(text) <= HEAD_CHARS + TAIL_CHARS:
+        return text
+    dropped = len(text) - HEAD_CHARS - TAIL_CHARS
+    return f"{text[:HEAD_CHARS]}\n… [{dropped} characters omitted] …\n{text[-TAIL_CHARS:]}"
+
+
 class CommandError(RuntimeError):
     def __init__(self, argv: list[str], returncode: int, stderr: str) -> None:
         self.argv = argv
         self.returncode = returncode
         self.stderr = stderr
-        super().__init__(f"{argv[0]} exited {returncode}: {stderr.strip()[:2000]}")
+        super().__init__(f"{argv[0]} exited {returncode}: {summarize(stderr)}")
 
 
 async def run(

@@ -89,7 +89,7 @@ async def test_an_unknown_stage_is_dead_lettered_not_silently_succeeded(
     """A job naming a stage this build does not implement must fail loudly."""
     recorded: dict[str, object] = {}
 
-    async def capture_fail(session_, job_id, attempts, error):
+    async def capture_fail(session_, job_id, attempts, error, *, permanent=False):
         recorded["error"] = error
         from api.db.enums import JobState
 

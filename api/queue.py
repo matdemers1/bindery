@@ -219,14 +219,24 @@ async def succeed(session: AsyncSession, job_id: uuid.UUID) -> None:
 
 
 async def fail(
-    session: AsyncSession, job_id: uuid.UUID, attempts: int, error: str
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    attempts: int,
+    error: str,
+    *,
+    permanent: bool = False,
 ) -> JobState:
     """Record a failure: back off and retry, or dead-letter.
 
     `dead_letter` is a visible terminal state a human is expected to look at —
     the queue never drops work on the floor (invariant 8).
     """
-    exhausted = attempts >= MAX_ATTEMPTS
+    # Some failures cannot be retried into success: a 10x5 pixel image will
+    # never contain a document, and a dynamic XFA form will never be readable
+    # by anything but Adobe. Retrying those five times over half an hour holds
+    # a worker slot to reach the same answer, and buries the real message under
+    # four identical ones.
+    exhausted = permanent or attempts >= MAX_ATTEMPTS
     state = JobState.DEAD_LETTER if exhausted else JobState.FAILED
     backoff = min(BASE_BACKOFF * (2 ** max(attempts - 1, 0)), MAX_BACKOFF)
 

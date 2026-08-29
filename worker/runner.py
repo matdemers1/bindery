@@ -26,6 +26,7 @@ from api.db.session import SessionFactory, engine
 from worker import convert
 from worker.ingest.watched_folder import watch_inbox
 from worker.stages import STAGES
+from worker.stages import normalize as normalize_stage
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -123,8 +124,11 @@ async def _run_one(job: queue.ClaimedJob) -> None:
                 await stage_fn(session, job)
                 await session.commit()
         except Exception as exc:  # every failure is recorded; none escape this loop
+            permanent = isinstance(exc, normalize_stage.PermanentFailure)
             async with SessionFactory() as session:
-                state = await queue.fail(session, job.id, job.attempts, repr(exc))
+                state = await queue.fail(
+                    session, job.id, job.attempts, repr(exc), permanent=permanent
+                )
                 await _announce(session, job, library_id, state.value)
                 await session.commit()
 
