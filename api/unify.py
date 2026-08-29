@@ -54,6 +54,14 @@ log = logging.getLogger("bindery.unify")
 # household archive has tens of correspondents, not thousands.
 MAX_NAMES = 400
 
+# The answer is a JSON object listing groups, and a taxonomy with hundreds of
+# near-duplicates produces a long one. The first run over 277 document types was
+# cut off at the 4,000-token default and arrived as invalid JSON — which the
+# parser correctly refused and unhelpfully described as "could not be read",
+# sending the diagnosis to the wrong place entirely. Output tokens are the cheap
+# half; there is no reason to be frugal here.
+MAX_ANSWER_TOKENS = 16000
+
 _SHARED_RULES = """
 Rules:
 - Group entries ONLY when you are confident they mean the same thing. Leave
@@ -254,12 +262,14 @@ async def propose(
         f"- {entry['name']}  ({entry['documents']} documents)" for entry in names[:MAX_NAMES]
     )
     try:
-        raw = await answerer.complete(kind.prompt + "\n\n" + listing)
+        raw = await answerer.complete(
+            kind.prompt + "\n\n" + listing, max_tokens=MAX_ANSWER_TOKENS
+        )
     except Exception as error:
-        log.error("could not propose unifications: %s", error)
+        log.error("could not propose %s unifications: %s", kind_key, error)
         return UnifyProposal(
             groups=[], considered=len(names), kind=kind_key,
-            unavailable_reason=f"Could not reach the model ({error}).",
+            unavailable_reason=f"The model could not answer: {error}",
         )
 
     return _parse(raw, names, getattr(answerer, "model", None), kind_key)
@@ -280,8 +290,15 @@ def _parse(
 
     try:
         payload = json.loads(text)
-    except ValueError:
-        log.warning("unification response was not JSON")
+    except ValueError as error:
+        # Log what actually came back. "Not JSON" on its own is unfalsifiable
+        # from the outside, and this runs against a live model whose output
+        # nobody can reproduce later.
+        log.warning(
+            "unification response was not JSON (%s); %s characters, "
+            "starting %r and ending %r",
+            error, len(text), text[:120], text[-120:],
+        )
         return UnifyProposal(
             groups=[], considered=len(names), model=model, kind=kind_key,
             unavailable_reason="The model's answer could not be read as a proposal.",

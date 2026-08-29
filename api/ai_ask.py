@@ -98,6 +98,14 @@ def build_blocks(request: AskRequest) -> list[dict]:
     ]
 
 
+class TruncatedAnswerError(RuntimeError):
+    """The model ran out of output budget mid-answer.
+
+    Distinct from a malformed answer, because the fix is different: raise the
+    budget or ask for less, rather than look at the parser.
+    """
+
+
 class ClaudeAnswerer:
     """Answers questions over supplied pages, with citations."""
 
@@ -115,8 +123,14 @@ class ClaudeAnswerer:
     async def complete(self, prompt: str, *, max_tokens: int = 4000) -> str:
         """A plain completion, for asking about the archive's own structure.
 
-        Used by the correspondent unification pass, which sends a list of
-        folder names and no document content at all.
+        Used by the unification pass, which sends a list of taxonomy names and
+        no document content at all.
+
+        A truncated answer is raised rather than returned. JSON cut off mid
+        string is *invalid* JSON, so the caller would otherwise report "the
+        answer could not be read" — which is true, and sends you looking at the
+        parser instead of at `max_tokens`. That is exactly what happened on the
+        first run over 277 document types.
         """
         if self._client is None:
             raise RuntimeError("no Anthropic API key configured")
@@ -125,9 +139,15 @@ class ClaudeAnswerer:
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        return "".join(
+        text = "".join(
             block.text for block in response.content if getattr(block, "type", None) == "text"
         )
+        if getattr(response, "stop_reason", None) == "max_tokens":
+            raise TruncatedAnswerError(
+                f"the answer was cut off at {max_tokens} tokens "
+                f"({len(text)} characters returned)"
+            )
+        return text
 
     async def answer(self, request: AskRequest) -> AskResponse:
         if self._client is None:

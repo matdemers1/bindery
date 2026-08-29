@@ -535,8 +535,9 @@ class _Answerer:
     def available(self) -> bool:
         return True
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(self, prompt: str, *, max_tokens: int = 4000) -> str:
         self.asked.append(prompt)
+        self.budget = max_tokens
         return self.payload
 
 
@@ -660,3 +661,54 @@ async def test_a_merged_away_type_is_not_offered_for_merging_again(
 
     listed = await unify._current_names(session, unify.KINDS["document_type"], [library.id])
     assert [entry["name"] for entry in listed] == ["Kept"]
+
+
+async def test_a_truncated_answer_says_it_was_truncated(session, signed_in) -> None:
+    """JSON cut off mid-string is invalid JSON.
+
+    The first real run over 277 document types hit the 4,000-token default and
+    was reported as "the answer could not be read" — true, and it sends you to
+    look at the parser rather than at max_tokens.
+    """
+    from api import unify
+    from api.ai_ask import TruncatedAnswerError
+
+    _, library = await signed_in()
+    for name in ["One", "Two"]:
+        session.add(
+            DocumentType(library_id=library.id, name=name, slug=f"{uuid.uuid4().hex[:8]}")
+        )
+    await session.commit()
+
+    class Cut:
+        model = "claude-sonnet-5"
+
+        def available(self) -> bool:
+            return True
+
+        async def complete(self, prompt: str, *, max_tokens: int = 4000) -> str:
+            raise TruncatedAnswerError(f"the answer was cut off at {max_tokens} tokens")
+
+    proposal = await unify.propose(session, [library.id], Cut(), "document_type")
+
+    assert proposal.groups == []
+    assert "cut off" in (proposal.unavailable_reason or "")
+
+
+async def test_the_unify_pass_asks_for_room_to_answer(session, signed_in) -> None:
+    """A taxonomy with hundreds of near-duplicates produces a long answer, and
+    output tokens are the cheap half."""
+    from api import unify
+
+    _, library = await signed_in()
+    for name in ["One", "Two"]:
+        session.add(
+            DocumentType(library_id=library.id, name=name, slug=f"{uuid.uuid4().hex[:8]}")
+        )
+    await session.commit()
+
+    answerer = _Answerer('{"groups": []}')
+    await unify.propose(session, [library.id], answerer, "document_type")
+
+    assert answerer.budget == unify.MAX_ANSWER_TOKENS
+    assert unify.MAX_ANSWER_TOKENS >= 16000
