@@ -799,3 +799,81 @@ async def test_the_overlap_does_not_propose_the_same_name_twice(
     proposal = await unify.propose(session, [library.id], answerer, "tag")
 
     assert len(proposal.groups) == 1, "claimed once, not once per chunk"
+
+
+# --------------------------------------------------------------------------
+# Guards learned from over-merging a real archive (T-9.3)
+# --------------------------------------------------------------------------
+
+
+def _names(*pairs):
+    return [{"id": str(uuid.uuid4()), "name": n, "documents": d} for n, d in pairs]
+
+
+def test_a_general_kind_is_never_dissolved_into_a_specific_one() -> None:
+    """The merge that did the most damage.
+
+    `Receipt` was merged into `Veterinary Receipt`, `Data Export` into `Survey
+    Data Export`, `Presentation` into `Training Presentation`. In each the
+    survivor carried strictly more words: the general kind was dissolved into a
+    special case, because the special case happened to have more documents and
+    the prompt said to prefer the name the archive had settled on.
+    """
+    from api.unify import _parse
+
+    names = _names(("Receipt", 3), ("Veterinary Receipt", 9))
+    proposal = _parse(
+        '{"groups": [{"canonical": "Veterinary Receipt", '
+        '"members": ["Receipt", "Veterinary Receipt"], "reason": "both receipts"}]}',
+        names, "m", "document_type",
+    )
+
+    assert proposal.groups == []
+
+
+def test_a_rewording_is_still_merged() -> None:
+    """The guard must not refuse the merges that are the point of the feature."""
+    from api.unify import _parse
+
+    names = _names(("Unit Emblem", 2), ("Unit Insignia", 3))
+    proposal = _parse(
+        '{"groups": [{"canonical": "Unit Insignia", '
+        '"members": ["Unit Emblem", "Unit Insignia"], "reason": "same thing"}]}',
+        names, "m", "document_type",
+    )
+
+    assert len(proposal.groups) == 1
+
+
+def test_a_group_whose_reason_rejects_it_is_dropped() -> None:
+    """A real response listed a group in order to explain it was not one.
+
+    Only a trailing-comma parse error stopped it being applied, which is not a
+    safeguard.
+    """
+    from api.unify import _parse
+
+    names = _names(("Weapons Instructor Course", 4), ("weapons configuration", 1))
+    proposal = _parse(
+        '{"groups": [{"canonical": "Weapons Instructor Course", '
+        '"members": ["Weapons Instructor Course", "weapons configuration"], '
+        '"reason": "Left out - different concepts, not a true duplicate"}]}',
+        names, "m", "document_type",
+    )
+
+    assert proposal.groups == []
+
+
+def test_a_trailing_comma_does_not_discard_the_whole_answer() -> None:
+    """One comma before `]}` cost every group in a real response."""
+    from api.unify import _parse
+
+    names = _names(("receipt", 2), ("receipts", 5))
+    proposal = _parse(
+        '{"groups": [\n  {"canonical": "receipts", '
+        '"members": ["receipt", "receipts"], "reason": "plural"},\n]}',
+        names, "m", "tag",
+    )
+
+    assert len(proposal.groups) == 1
+    assert proposal.groups[0].canonical == "receipts"

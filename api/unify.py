@@ -32,6 +32,7 @@ the right place — which is what stops the same four folders growing back.
 
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 
@@ -90,10 +91,27 @@ Rules:
 - Group entries ONLY when you are confident they mean the same thing. Leave
   anything you are unsure about out entirely: a missed merge costs nothing, and
   a wrong one puts two different things in one folder.
-- Prefer the clearest, most conventional name as the canonical one.
+
+- **A special case is not a duplicate.** If one name is a narrower version of
+  another, they are DIFFERENT and must not be grouped at all — not in either
+  direction. "Receipt" and "Veterinary Receipt" are two kinds. "Data Export"
+  and "Survey Data Export" are two kinds. "Presentation" and "Training
+  Presentation" are two kinds. Do not group a general name with a specific one
+  merely because the specific one is more common in this archive.
+
+- **Never make a narrower name the canonical one.** The survivor must be at
+  least as general as every member.
+
+- Group only names that differ in *wording*, not in *meaning*: word order, a
+  plural, an abbreviation, punctuation, a synonym.
+
+- Do NOT include a group you have decided against. If you considered some names
+  and concluded they are different, simply omit them — do not list them with an
+  explanation of why you left them out.
+
 - Give a one-line reason for each group, in plain language.
 
-Return JSON only, in exactly this shape:
+Return JSON only, with no trailing commas, in exactly this shape:
 {"groups": [{"canonical": "<name>", "members": ["<name>", "<name>"], "reason": "<why>"}]}
 """
 
@@ -330,6 +348,44 @@ async def propose(
     )
 
 
+_TRAILING_COMMA = re.compile(r",\s*([}\]])")
+
+# Phrases a model uses when it lists a group in order to explain that it is
+# *not* a group. One real response contained
+#     {"canonical": "Weapons Instructor Course",
+#      "members": ["Weapons Instructor Course", "weapons configuration"],
+#      "reason": "Left out - different concepts, not a true duplicate"}
+# which only a trailing-comma parse error stopped from being applied. The prompt
+# now forbids it; this is the belt to that pair of braces.
+_NOT_A_GROUP = (
+    "left out", "not a true duplicate", "not a duplicate", "excluding",
+    "different concepts", "different things", "should not be merged",
+    "do not merge", "unsure", "not grouped",
+)
+
+
+def _looks_like_a_refusal(reason: str) -> bool:
+    lowered = reason.lower()
+    return any(phrase in lowered for phrase in _NOT_A_GROUP)
+
+
+def _is_narrower(member: str, canonical: str) -> bool:
+    """Is `canonical` a special case of `member` rather than a rewording of it?
+
+    Word containment, which is crude and catches the exact failure that
+    happened: `Receipt` was merged into `Veterinary Receipt`, `Data Export` into
+    `Survey Data Export`, `Presentation` into `Training Presentation`. In every
+    one the survivor carried strictly more words, and the general kind was
+    dissolved into a specific one because the specific one had more documents.
+
+    False positives cost a merge that a person can still make by hand. False
+    negatives cost a document type.
+    """
+    member_words = set(member.lower().replace("/", " ").split())
+    canonical_words = set(canonical.lower().replace("/", " ").split())
+    return bool(member_words) and member_words < canonical_words
+
+
 def _parse(
     raw: str, names: list[dict], model: str | None, kind_key: str = "correspondent"
 ) -> UnifyProposal:
@@ -342,6 +398,10 @@ def _parse(
     text = raw.strip()
     if "```" in text:
         text = text.split("```")[1].removeprefix("json").strip()
+    # A trailing comma is the most common way a model produces *nearly* valid
+    # JSON, and rejecting the whole answer over one costs every group in it. One
+    # real response was discarded for a comma before `]}`.
+    text = _TRAILING_COMMA.sub(r"\1", text)
 
     try:
         payload = json.loads(text)
@@ -373,6 +433,11 @@ def _parse(
         if len(members) < 2:
             continue
 
+        reason = str(group.get("reason", "")).strip()
+        if _looks_like_a_refusal(reason):
+            log.info("dropping a group whose own reason rejects it: %r", reason[:80])
+            continue
+
         canonical_name = str(group.get("canonical", "")).strip()
         canonical = by_name.get(canonical_name.lower())
         if canonical is None:
@@ -382,12 +447,20 @@ def _parse(
             canonical = max(members, key=lambda m: m["documents"])
             canonical_name = canonical["name"]
 
+        narrower = [m["name"] for m in members if _is_narrower(m["name"], canonical_name)]
+        if narrower:
+            log.info(
+                "dropping a group that would dissolve %s into the narrower %r",
+                ", ".join(repr(n) for n in narrower), canonical_name,
+            )
+            continue
+
         groups.append(
             ProposedGroup(
                 canonical=canonical_name,
                 canonical_id=uuid.UUID(canonical["id"]),
                 members=members,
-                reason=str(group.get("reason", "")).strip(),
+                reason=reason,
             )
         )
 
