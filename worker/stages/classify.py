@@ -300,6 +300,7 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
         gate_decision=verdict.decision.value,
         gate_reasons=verdict.reasons,
         extracted_fields=dict(result.extracted_fields),
+        page_images_sent=len(page_images),
         usage=response.usage,
     )
     session.add(classification)

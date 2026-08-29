@@ -15,7 +15,15 @@ from api import eventlog
 from api.auth.dependencies import current_user
 from api.db import repository
 from api.db.enums import JobState, SourceFileState
-from api.db.models import AppUser, Document, EventLog, Job, Page, SourceFile
+from api.db.models import (
+    AppUser,
+    Classification,
+    Document,
+    EventLog,
+    Job,
+    Page,
+    SourceFile,
+)
 from api.db.session import get_session
 from api.schemas import (
     FileProgressOut,
@@ -237,6 +245,18 @@ async def photos(
         .scalar_subquery()
     )
 
+    # Whether anything has *looked* at this document — a classification that
+    # carried page images. Distinct from whether OCR read anything, which is
+    # what the first version of this asked and which no vision pass can change:
+    # OCR still finds nothing on a photograph after the photograph has been
+    # described, so the wall went on offering to describe it again, at cost.
+    looked_at = (
+        sa.select(sa.func.coalesce(sa.func.max(Classification.page_images_sent), 0))
+        .where(Classification.document_id == Document.id)
+        .correlate(Document)
+        .scalar_subquery()
+    )
+
     conditions: list[sa.ColumnElement[bool]] = [
         Document.library_id.in_(library_ids),
         Document.superseded_at.is_(None),
@@ -264,7 +284,10 @@ async def photos(
         # are the pictures a description pass would actually help, and they are
         # exactly the ones the classify stage now sends as images.
         conditions.append(
-            sa.or_(text_chars < MIN_USABLE_TEXT, text_chars.is_(None))
+            sa.and_(
+                sa.or_(text_chars < MIN_USABLE_TEXT, text_chars.is_(None)),
+                looked_at == 0,
+            )
         )
 
     total = await session.scalar(
@@ -281,6 +304,7 @@ async def photos(
                 SourceFile.original_filename,
                 SourceFile.received_at,
                 text_chars.label("text_chars"),
+                looked_at.label("looked_at"),
             )
             .join(SourceFile, SourceFile.id == Document.source_file_id)
             .where(sa.and_(*conditions))
@@ -306,7 +330,7 @@ async def photos(
                 described=bool(
                     row[0].title
                     and row[0].summary
-                    and (row.text_chars or 0) >= MIN_USABLE_TEXT
+                    and ((row.text_chars or 0) >= MIN_USABLE_TEXT or row.looked_at)
                 ),
             )
             for row in rows

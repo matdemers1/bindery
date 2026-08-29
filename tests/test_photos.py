@@ -12,10 +12,12 @@ import uuid
 import pytest
 
 from api.db.enums import IngestSource, SourceFileState
-from api.db.models import Document, Page, SourceFile
+from api.db.models import Classification, Document, Page, SourceFile
 
 
-async def _image(session, library, filename: str, *, title=None, summary=None, text=""):
+async def _image(
+    session, library, filename: str, *, title=None, summary=None, text="", looked_at=0
+):
     source_file = SourceFile(
         library_id=library.id,
         sha256=uuid.uuid4().hex * 2,
@@ -45,6 +47,16 @@ async def _image(session, library, filename: str, *, title=None, summary=None, t
             thumb_path="derived/x/thumbs/0001.webp",
         )
     )
+    await session.flush()
+    if looked_at:
+        session.add(
+            Classification(
+                document_id=document.id,
+                model="claude-sonnet-5",
+                prompt_version="v1",
+                page_images_sent=looked_at,
+            )
+        )
     await session.flush()
     return source_file, document
 
@@ -129,3 +141,32 @@ async def test_the_wall_does_not_leak_another_library(
     body = (await client.get("/api/photos")).json()
 
     assert all(p["original_filename"] != "not-yours.png" for p in body["photos"])
+
+
+async def test_a_photograph_something_has_looked_at_is_described(
+    client, session, signed_in
+) -> None:
+    """OCR reads nothing off a photograph before *or* after it is described.
+
+    Keying the filter on text alone meant the wall went on offering to describe
+    the same 146 images forever, at real cost per press. The question it has to
+    ask is whether anything ever looked at them.
+    """
+    _user, library = await signed_in()
+    await _image(
+        session, library, "patch.png",
+        title="805th Combat Training Squadron - Unit Patch",
+        summary="A squadron patch with a lightning bolt.",
+        looked_at=1,
+    )
+    await _image(session, library, "never-seen.png")
+    await session.commit()
+
+    body = (await client.get("/api/photos", params={"undescribed": "true"})).json()
+
+    assert [p["original_filename"] for p in body["photos"]] == ["never-seen.png"]
+
+    everything = (await client.get("/api/photos")).json()
+    by_name = {p["original_filename"]: p for p in everything["photos"]}
+    assert by_name["patch.png"]["described"] is True
+    assert by_name["patch.png"]["text_chars"] == 0, "still nothing readable on it"

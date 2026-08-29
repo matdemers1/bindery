@@ -55,6 +55,15 @@ class Classification(Base):
         JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
     )
 
+    # How many rendered pages went to the model as pictures. Zero for the
+    # ordinary text path. Non-zero says something *looked* at this document,
+    # which is a different question from whether OCR found anything on it — and
+    # it is the one the photo wall needs, or it offers to re-describe an already
+    # described photograph forever, at cost.
+    page_images_sent: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("0")
+    )
+
     # Cache health (REQ-053) and cost, straight from `usage`.
     usage: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
