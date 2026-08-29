@@ -345,12 +345,20 @@ def test_the_refusals_that_have_a_safe_answer() -> None:
     signed = _remedy_for(
         CommandError(["ocrmypdf"], 2, "DigitalSignatureError: Input PDF has a digital signature.")
     )
-    assert signed is not None and "--invalidate-digital-signatures" in signed[0]
+    assert signed is not None
+    _key, _overrides, flags, _why = signed
+    assert "--invalidate-digital-signatures" in flags
 
+    # XFA must *replace* --skip-text rather than join it: ocrmypdf rejects both
+    # together with "Choose only one of --force-ocr, --skip-text, --redo-ocr",
+    # so appending the flag turned one failure into a different one.
     xfa = _remedy_for(
         CommandError(["ocrmypdf"], 2, "InputFileError: This PDF contains dynamic XFA forms")
     )
-    assert xfa is not None and "--force-ocr" in xfa[0]
+    assert xfa is not None
+    _key, overrides, flags, _why = xfa
+    assert overrides.get("force") is True
+    assert "--force-ocr" not in flags
 
 
 def test_failures_with_no_safe_answer_are_still_failures() -> None:
@@ -387,3 +395,43 @@ def test_a_degenerate_image_is_refused_in_plain_language() -> None:
         )
         with _pytest.raises(ValueError, match="too small to be a document"):
             _prepare_image(source_file, tiny)
+
+
+def test_remedies_accumulate_rather_than_replace_each_other() -> None:
+    """A signed PDF that then fails PDF/A needs both fixes.
+
+    Applying them one at a time in isolation reports the second failure as if
+    the first had never been solved — which is what happened to two signed
+    military forms: the signature remedy worked, Ghostscript then refused the
+    PDF/A conversion, and the file failed anyway.
+    """
+    from pathlib import Path as P
+
+    from worker.stages.normalize import _ocr_argv, _remedy_for
+    from worker.subprocess_util import CommandError
+
+    overrides = {"pdfa": True, "image": False, "force": False, "scanned": True}
+    extra: list[str] = []
+
+    for error in (
+        CommandError(["ocrmypdf"], 2, "DigitalSignatureError: Input PDF has a digital signature."),
+        CommandError(["ocrmypdf"], 7, "SubprocessOutputError: Ghostscript PDF/A rendering failed"),
+    ):
+        _key, argv_overrides, flags, _why = _remedy_for(error)
+        overrides.update(argv_overrides)
+        extra += flags
+
+    argv = _ocr_argv(P("i"), P("o"), P("s"), **overrides) + extra
+    assert "--invalidate-digital-signatures" in argv
+    assert "--output-type" in argv and argv[argv.index("--output-type") + 1] == "pdf"
+
+
+def test_the_mutually_exclusive_ocr_modes_never_appear_together() -> None:
+    """ocrmypdf refuses --force-ocr alongside --skip-text outright."""
+    from pathlib import Path as P
+
+    from worker.stages.normalize import _ocr_argv
+
+    for force in (True, False):
+        argv = _ocr_argv(P("i"), P("o"), P("s"), pdfa=True, image=False, force=force)
+        assert not ("--force-ocr" in argv and "--skip-text" in argv)

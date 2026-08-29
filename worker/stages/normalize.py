@@ -154,29 +154,40 @@ async def _run_ocr(
     force: bool = False,
     scanned: bool = True,
 ) -> None:
-    try:
-        code, _, _ = await subprocess_util.run(
-            _ocr_argv(
-                source, output, sidecar,
-                pdfa=True, image=image, force=force, scanned=scanned,
-            ),
-            timeout=OCR_TIMEOUT_SECONDS,
-            ok_codes=(0, ALREADY_HAS_TEXT),
-        )
-    except subprocess_util.CommandError as exc:
-        remedy = _remedy_for(exc)
-        if remedy is None:
-            raise
-        extra, why = remedy
-        log.warning("%s: %s (%s)", source.name, why, str(exc)[:160])
-        code, _, _ = await subprocess_util.run(
-            _ocr_argv(
-                source, output, sidecar,
-                pdfa=not _is_pdfa_failure(exc), image=image, force=force, scanned=scanned,
-            ) + extra,
-            timeout=OCR_TIMEOUT_SECONDS,
-            ok_codes=(0, ALREADY_HAS_TEXT),
-        )
+    """Run OCR, applying a known remedy for each refusal that has one.
+
+    Remedies accumulate rather than replace each other. A signed PDF that then
+    fails PDF/A conversion needs both fixes, and trying them one at a time in
+    isolation would report the second failure as if the first had not been
+    solved — which is exactly what happened to two signed military forms.
+    """
+    overrides: dict = {"pdfa": True, "image": image, "force": force, "scanned": scanned}
+    extra: list[str] = []
+    applied: set[str] = set()
+
+    # Bounded: one attempt per distinct remedy, plus the original.
+    for _ in range(len(("signature", "xfa", "pdfa")) + 1):
+        try:
+            code, _out, _err = await subprocess_util.run(
+                _ocr_argv(source, output, sidecar, **overrides) + extra,
+                timeout=OCR_TIMEOUT_SECONDS,
+                ok_codes=(0, ALREADY_HAS_TEXT),
+            )
+            break
+        except subprocess_util.CommandError as exc:
+            remedy = _remedy_for(exc)
+            if remedy is None:
+                raise
+            key, argv_overrides, flags, why = remedy
+            if key in applied:
+                # Already tried this; it is not going to work a second time.
+                raise
+            applied.add(key)
+            overrides.update(argv_overrides)
+            extra += flags
+            log.warning("%s: %s (%s)", source.name, why, str(exc)[:160])
+    else:
+        raise RuntimeError(f"OCR for {source.name} exhausted every known remedy")
 
     if code == ALREADY_HAS_TEXT and not output.exists():
         # Nothing to add: the original is already the searchable artifact.
@@ -184,39 +195,55 @@ async def _run_ocr(
         log.info("%s already carried a full text layer; copied through", source.name)
 
 
-
-def _remedy_for(error: subprocess_util.CommandError) -> tuple[list[str], str] | None:
+def _remedy_for(error: subprocess_util.CommandError) -> tuple[str, dict, list[str], str] | None:
     """One more attempt for the refusals that have a safe answer, or None.
 
+    Returns `(key, argv_overrides, extra_flags, explanation)`. The key exists so
+    a remedy is applied at most once — a fix that did not work will not work on
+    the second try either, and a loop that keeps re-applying it would spin.
+
     Every one of these is a case where ocrmypdf is right to refuse by default
-    and wrong for this application, because of a property the rest of the
-    system guarantees: **the original is never modified.** Everything written
-    here is a derived artifact sitting beside a blob that still holds the exact
-    bytes that arrived.
+    and wrong for this application, because of a property the rest of the system
+    guarantees: **the original is never modified.** Everything written here is a
+    derived artifact sitting beside a blob that still holds the exact bytes that
+    arrived.
     """
     message = str(error)
-
-    if _is_pdfa_failure(error):
-        # PDF/A is a nice-to-have for archival fidelity; searchability is not
-        # negotiable. For a DeviceN document plain PDF is arguably the better
-        # artifact anyway, since it keeps the original colour space.
-        return [], "PDF/A conversion failed, falling back to plain PDF"
 
     if "DigitalSignatureError" in message:
         # OCR would invalidate the signature — on the *copy*. The signed
         # original stays in the blob store, byte for byte, and is what an
-        # export hands back. Refusing instead would mean every signed form you
-        # own is unsearchable, which is a strange price for protecting a
-        # signature on a file nobody will ever verify from here.
+        # export hands back. Refusing instead would leave every signed form you
+        # own unsearchable, to protect a signature on a file nobody will ever
+        # verify from here.
         return (
+            "signature",
+            {},
             ["--invalidate-digital-signatures"],
             "signed PDF: OCR-ing a copy, the signed original is untouched",
         )
 
     if "XFA" in message or "LiveCycle" in message:
-        # A dynamic XFA form has no static content for ocrmypdf to pass
-        # through, so rasterizing is the only way to read it at all.
-        return ["--force-ocr"], "dynamic XFA form: rasterizing to read it"
+        # A dynamic XFA form has no static content to pass through, so
+        # rasterizing is the only way to read it. This *replaces* --skip-text
+        # rather than joining it: ocrmypdf refuses both together.
+        return (
+            "xfa",
+            {"force": True},
+            [],
+            "dynamic XFA form: rasterizing to read it",
+        )
+
+    if _is_pdfa_failure(error):
+        # PDF/A is a nice-to-have for archival fidelity; searchability is not
+        # negotiable. For a DeviceN document plain PDF is arguably the better
+        # artifact anyway, since it keeps the original colour space.
+        return (
+            "pdfa",
+            {"pdfa": False},
+            [],
+            "PDF/A conversion failed, falling back to plain PDF",
+        )
 
     return None
 
