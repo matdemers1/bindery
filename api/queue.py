@@ -36,9 +36,32 @@ BASE_BACKOFF = timedelta(minutes=1)
 MAX_BACKOFF = timedelta(hours=1)
 MAX_ATTEMPTS = 5
 
-# How long a claim is honoured before another worker may take the job. Must
-# comfortably exceed the slowest stage: OCR on a 100-page bundle is minutes.
+# How long a claim is honoured before another worker may take the job. One
+# number for every stage meant it had to suit the slowest — OCR on a 300-page
+# bundle — and a classify job that takes four seconds was then stranded for
+# three quarters of an hour when a deploy restarted the worker under it. That
+# happened twice in one evening.
+#
+# So the lease is per stage, and each is roughly an order of magnitude above
+# what that stage actually takes. Too short is worse than too long: a live job
+# gets reclaimed and run twice, and while every stage is idempotent (REQ-111),
+# the second run of a classify is a second invoice.
 DEFAULT_LEASE = timedelta(minutes=45)
+STAGE_LEASES: dict[JobStage, timedelta] = {
+    JobStage.NORMALIZE: timedelta(minutes=45),   # OCR, deskew, PDF/A on a bundle
+    JobStage.PAGE: timedelta(minutes=30),        # one rasterise per page
+    JobStage.SEGMENT: timedelta(minutes=15),     # heuristics, plus an LLM pass on hard seams
+    JobStage.CLASSIFY: timedelta(minutes=10),    # one API call, with its retries
+    JobStage.EMBED: timedelta(minutes=5),        # local and lexical (ADR-007)
+    JobStage.RULES: timedelta(minutes=5),        # pure database work
+    JobStage.INGEST: timedelta(minutes=15),      # hashing and storing a large blob
+    # `file` and `mirror` are deliberately absent from the worker's STAGES, so a
+    # job naming one dead-letters rather than quietly succeeding. They are given
+    # leases anyway: the alternative is that whoever implements them inherits 45
+    # minutes without choosing it, which is the bug this whole map exists for.
+    JobStage.FILE: timedelta(minutes=5),
+    JobStage.MIRROR: timedelta(minutes=30),
+}
 
 
 def _now() -> datetime:
@@ -308,18 +331,35 @@ async def release(session: AsyncSession, job_id: uuid.UUID) -> None:
     )
 
 
-async def reclaim_stale(session: AsyncSession, lease: timedelta = DEFAULT_LEASE) -> int:
+async def reclaim_stale(
+    session: AsyncSession, lease: timedelta | None = None
+) -> int:
     """Return jobs whose worker died mid-run to the queue.
 
     A killed container cannot release its own claims, so the lease is what makes
     the queue self-healing. The attempt already charged stands, so a job that
     reliably kills its worker still reaches dead_letter instead of looping.
+
+    Each stage has its own lease (`STAGE_LEASES`), because one number for all of
+    them has to suit the slowest and therefore strands the fastest. Passing
+    `lease` overrides every stage, which is for tests.
     """
+    if lease is not None:
+        expired = Job.locked_at < _now() - lease
+    else:
+        expired = sa.case(
+            *[
+                (Job.stage == stage.value, Job.locked_at < _now() - stage_lease)
+                for stage, stage_lease in STAGE_LEASES.items()
+            ],
+            else_=Job.locked_at < _now() - DEFAULT_LEASE,
+        )
+
     result = await session.execute(
         sa.update(Job)
         .where(
             Job.state == JobState.RUNNING.value,
-            Job.locked_at < _now() - lease,
+            expired,
         )
         .values(
             state=JobState.QUEUED.value,

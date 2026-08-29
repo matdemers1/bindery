@@ -281,3 +281,62 @@ async def test_holding_repeatedly_never_dead_letters(session) -> None:
 
     job = await session.get(Job, claimed.id)
     assert job.state == queue.JobState.QUEUED.value
+
+
+async def test_a_stalled_classify_is_reclaimed_long_before_a_stalled_ocr(
+    session,
+) -> None:
+    """One lease for every stage has to suit the slowest.
+
+    Three classify jobs sat stranded for forty-five minutes after a deploy
+    restarted the worker under them, because the lease was sized for OCR on a
+    300-page bundle. A classify job takes four seconds.
+    """
+    from datetime import timedelta
+
+    from api import queue
+
+    source_file = await _source_file(session, "cf" * 32)
+    await queue.enqueue(session, JobStage.NORMALIZE, source_file_id=source_file.id)
+    await queue.enqueue(session, JobStage.CLASSIFY, document_id=None,
+                        source_file_id=source_file.id)
+    await session.commit()
+
+    # Both claimed, both abandoned twenty minutes ago.
+    for _ in range(2):
+        claimed = await queue.claim(
+            session, [JobStage.NORMALIZE, JobStage.CLASSIFY], "doomed-worker"
+        )
+        assert claimed is not None
+        await session.execute(
+            sa.update(Job)
+            .where(Job.id == claimed.id)
+            .values(locked_at=queue._now() - timedelta(minutes=20))
+        )
+    await session.commit()
+
+    reclaimed = await queue.reclaim_stale(session)
+    await session.commit()
+
+    assert reclaimed == 1, "the classify job comes back; the OCR job is still working"
+    states = dict(
+        (row.stage, row.state)
+        for row in (
+            await session.execute(
+                sa.select(Job.stage, Job.state).where(
+                    Job.source_file_id == source_file.id
+                )
+            )
+        ).all()
+    )
+    assert states[JobStage.CLASSIFY.value] == JobState.QUEUED.value
+    assert states[JobStage.NORMALIZE.value] == JobState.RUNNING.value
+
+
+def test_every_stage_has_a_lease() -> None:
+    """A stage added without one silently inherits 45 minutes."""
+    from api import queue
+
+    assert set(queue.STAGE_LEASES) == set(JobStage), (
+        "a new stage needs a lease sized to what it actually takes"
+    )
