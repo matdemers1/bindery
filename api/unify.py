@@ -62,6 +62,29 @@ MAX_NAMES = 400
 # half; there is no reason to be frugal here.
 MAX_ANSWER_TOKENS = 16000
 
+# Above this many names, ask in chunks. 697 tags in one request came back with
+# `stop_reason=max_tokens` and *zero* characters of text — the whole budget went
+# on reasoning about a list that long before a single group was written.
+#
+# Chunks are cut from the alphabetically-ordered list, which is exactly the
+# ordering that would be wrong for the *candidate* list and is right here: tag
+# duplication is overwhelmingly lexical — a plural, a prefix, a hyphen — so
+# near-duplicates land in the same chunk. The overlap catches the pairs that
+# straddle a boundary.
+CHUNK_SIZE = 200
+CHUNK_OVERLAP = 10
+
+
+def _chunks(names: list[dict]) -> list[list[dict]]:
+    if len(names) <= CHUNK_SIZE:
+        return [names]
+    out: list[list[dict]] = []
+    start = 0
+    while start < len(names):
+        out.append(names[start : start + CHUNK_SIZE])
+        start += CHUNK_SIZE - CHUNK_OVERLAP
+    return out
+
 _SHARED_RULES = """
 Rules:
 - Group entries ONLY when you are confident they mean the same thing. Leave
@@ -258,21 +281,53 @@ async def propose(
             ),
         )
 
-    listing = "\n".join(
-        f"- {entry['name']}  ({entry['documents']} documents)" for entry in names[:MAX_NAMES]
-    )
-    try:
-        raw = await answerer.complete(
-            kind.prompt + "\n\n" + listing, max_tokens=MAX_ANSWER_TOKENS
+    proposals: list[UnifyProposal] = []
+    for chunk in _chunks(names):
+        listing = "\n".join(
+            f"- {entry['name']}  ({entry['documents']} documents)"
+            for entry in chunk[:MAX_NAMES]
         )
-    except Exception as error:
-        log.error("could not propose %s unifications: %s", kind_key, error)
+        try:
+            raw = await answerer.complete(
+                kind.prompt + "\n\n" + listing, max_tokens=MAX_ANSWER_TOKENS
+            )
+        except Exception as error:
+            log.error("could not propose %s unifications: %s", kind_key, error)
+            # One failed chunk must not discard the ones that worked. If every
+            # chunk failed there is nothing to show, and the reason is the
+            # useful thing to return.
+            if len(_chunks(names)) == 1 or not proposals:
+                return UnifyProposal(
+                    groups=[], considered=len(names), kind=kind_key,
+                    unavailable_reason=f"The model could not answer: {error}",
+                )
+            continue
+        proposals.append(_parse(raw, chunk, getattr(answerer, "model", None), kind_key))
+
+    if not proposals:
         return UnifyProposal(
             groups=[], considered=len(names), kind=kind_key,
-            unavailable_reason=f"The model could not answer: {error}",
+            unavailable_reason="The model returned nothing usable.",
         )
 
-    return _parse(raw, names, getattr(answerer, "model", None), kind_key)
+    # A name can appear in two chunks via the overlap, and being merged twice is
+    # a self-merge the second time. Keep the first group that claims it.
+    claimed: set[str] = set()
+    groups: list[ProposedGroup] = []
+    for proposal in proposals:
+        for group in proposal.groups:
+            ids = {member["id"] for member in group.members}
+            if ids & claimed:
+                continue
+            claimed |= ids
+            groups.append(group)
+
+    return UnifyProposal(
+        groups=groups,
+        considered=len(names),
+        model=proposals[0].model,
+        kind=kind_key,
+    )
 
 
 def _parse(

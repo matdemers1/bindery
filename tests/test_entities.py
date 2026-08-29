@@ -712,3 +712,90 @@ async def test_the_unify_pass_asks_for_room_to_answer(session, signed_in) -> Non
 
     assert answerer.budget == unify.MAX_ANSWER_TOKENS
     assert unify.MAX_ANSWER_TOKENS >= 16000
+
+
+async def test_a_long_list_is_asked_in_chunks(session, signed_in) -> None:
+    """697 tags in one request came back with zero characters of text.
+
+    The whole output budget went on reasoning about a list that long before a
+    single group was written. Chunks are cut alphabetically — the ordering that
+    would be wrong for the candidate list and is right here, because tag
+    duplication is overwhelmingly lexical.
+    """
+    from api import unify
+
+    _, library = await signed_in()
+    for n in range(unify.CHUNK_SIZE + 50):
+        session.add(
+            Tag(library_id=library.id, name=f"tag-{n:04d}", slug=f"{uuid.uuid4().hex[:8]}")
+        )
+    await session.commit()
+
+    answerer = _Answerer('{"groups": []}')
+    await unify.propose(session, [library.id], answerer, "tag")
+
+    assert len(answerer.asked) > 1, "a list past the threshold is split"
+    seen = sum(prompt.count("- tag-") for prompt in answerer.asked)
+    assert seen >= unify.CHUNK_SIZE + 50, "every name is asked about at least once"
+
+
+async def test_one_failed_chunk_does_not_discard_the_others(
+    session, signed_in
+) -> None:
+    """A partial answer is worth more than nothing, and this runs against a
+    live model that fails intermittently on long lists."""
+    from api import unify
+
+    _, library = await signed_in()
+    for n in range(unify.CHUNK_SIZE + 50):
+        session.add(
+            Tag(library_id=library.id, name=f"tag-{n:04d}", slug=f"{uuid.uuid4().hex[:8]}")
+        )
+    await session.commit()
+
+    class FailsTheSecond:
+        model = "claude-sonnet-5"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def available(self) -> bool:
+            return True
+
+        async def complete(self, prompt: str, *, max_tokens: int = 4000) -> str:
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("cut off")
+            return (
+                '{"groups": [{"canonical": "tag-0000", '
+                '"members": ["tag-0000", "tag-0001"], "reason": "test"}]}'
+            )
+
+    proposal = await unify.propose(session, [library.id], FailsTheSecond(), "tag")
+
+    assert proposal.unavailable_reason is None
+    assert proposal.groups, "the chunk that answered still counts"
+
+
+async def test_the_overlap_does_not_propose_the_same_name_twice(
+    session, signed_in
+) -> None:
+    """A name in two chunks would be merged twice, and the second is a
+    self-merge into a record that no longer exists as a target."""
+    from api import unify
+
+    _, library = await signed_in()
+    for n in range(unify.CHUNK_SIZE + 50):
+        session.add(
+            Tag(library_id=library.id, name=f"tag-{n:04d}", slug=f"{uuid.uuid4().hex[:8]}")
+        )
+    await session.commit()
+
+    # Every chunk proposes the same pair, which only the overlap could produce.
+    answerer = _Answerer(
+        '{"groups": [{"canonical": "tag-0000", '
+        '"members": ["tag-0000", "tag-0001"], "reason": "test"}]}'
+    )
+    proposal = await unify.propose(session, [library.id], answerer, "tag")
+
+    assert len(proposal.groups) == 1, "claimed once, not once per chunk"
