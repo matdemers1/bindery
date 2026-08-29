@@ -24,6 +24,7 @@ from api.db.enums import JobStage
 from api.db.models import Document, SourceFile
 from api.db.session import SessionFactory, engine
 from worker import convert
+from worker.ai.provider import ProviderUnavailableError
 from worker.ingest.watched_folder import watch_inbox
 from worker.stages import STAGES
 from worker.stages import normalize as normalize_stage
@@ -125,10 +126,19 @@ async def _run_one(job: queue.ClaimedJob) -> None:
                 await session.commit()
         except Exception as exc:  # every failure is recorded; none escape this loop
             permanent = isinstance(exc, normalize_stage.PermanentFailure)
+            # An unavailable provider is not a failed job. `ProviderUnavailable`
+            # has always been documented as "retried with backoff indefinitely",
+            # and was nonetheless being counted against MAX_ATTEMPTS like any
+            # other error — so an outage, or an exhausted credit balance, would
+            # dead-letter everything waiting on it within about four minutes.
+            waiting = isinstance(exc, ProviderUnavailableError)
             async with SessionFactory() as session:
-                state = await queue.fail(
-                    session, job.id, job.attempts, repr(exc), permanent=permanent
-                )
+                if waiting:
+                    state = await queue.hold(session, job.id, job.attempts, repr(exc))
+                else:
+                    state = await queue.fail(
+                        session, job.id, job.attempts, repr(exc), permanent=permanent
+                    )
                 await _announce(session, job, library_id, state.value)
                 await session.commit()
 
@@ -137,7 +147,13 @@ async def _run_one(job: queue.ClaimedJob) -> None:
             # filter with things that then succeed, and an error filter you
             # learn to ignore is the same as not having one. The traceback is
             # attached either way — it is the thing worth having.
-            if state is queue.JobState.DEAD_LETTER:
+            if waiting:
+                log.warning(
+                    "%s is waiting on the AI provider and will retry without "
+                    "counting an attempt: %s",
+                    job.stage.value, exc,
+                )
+            elif state is queue.JobState.DEAD_LETTER:
                 log.error(
                     "gave up on %s after %s attempts — it will not retry on its own: %s",
                     job.stage.value, job.attempts, exc, exc_info=exc,

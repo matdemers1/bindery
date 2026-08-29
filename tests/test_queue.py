@@ -231,3 +231,53 @@ async def test_an_ordinary_failure_still_retries(session) -> None:
     assert state is JobState.FAILED
     job = await session.get(Job, job_id)
     assert job.state is JobState.QUEUED, "back on the queue for another go"
+
+
+async def test_a_held_job_does_not_spend_an_attempt(session) -> None:
+    """An unavailable provider is not a failed job.
+
+    `fail` counts every error against MAX_ATTEMPTS, so five minutes of outage
+    dead-letters everything waiting on it. The work was never tried; the
+    attempt `claim` consumed is given back.
+    """
+    from api import queue
+
+    source_file = await _source_file(session, "cd" * 32)
+    await queue.enqueue(session, JobStage.NORMALIZE, source_file_id=source_file.id)
+    await session.commit()
+    claimed = await queue.claim(session, [JobStage.NORMALIZE], "worker-1")
+    assert claimed is not None and claimed.attempts == 1
+
+    state = await queue.hold(
+        session, claimed.id, claimed.attempts, "ProviderUnavailableError('no credit')"
+    )
+    await session.commit()
+
+    assert state is queue.JobState.QUEUED
+    job = await session.get(Job, claimed.id)
+    assert job.attempts == 0, "the attempt is given back"
+    assert job.state == queue.JobState.QUEUED.value
+    assert "no credit" in job.last_error, "and the reason is visible"
+    assert job.locked_by is None
+
+
+async def test_holding_repeatedly_never_dead_letters(session) -> None:
+    """The whole point: an outage must not consume the queue."""
+    from api import queue
+
+    source_file = await _source_file(session, "ce" * 32)
+    await queue.enqueue(session, JobStage.NORMALIZE, source_file_id=source_file.id)
+    await session.commit()
+
+    for _ in range(queue.MAX_ATTEMPTS * 2):
+        claimed = await queue.claim(session, [JobStage.NORMALIZE], "worker-1")
+        assert claimed is not None, "a held job stays claimable"
+        await queue.hold(session, claimed.id, claimed.attempts, "unavailable")
+        # Fast-forward past the backoff rather than sleeping through it.
+        await session.execute(
+            sa.update(Job).where(Job.id == claimed.id).values(scheduled_for=queue._now())
+        )
+        await session.commit()
+
+    job = await session.get(Job, claimed.id)
+    assert job.state == queue.JobState.QUEUED.value

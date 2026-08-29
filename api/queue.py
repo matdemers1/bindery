@@ -218,6 +218,38 @@ async def succeed(session: AsyncSession, job_id: uuid.UUID) -> None:
     )
 
 
+async def hold(
+    session: AsyncSession, job_id: uuid.UUID, attempts: int, reason: str
+) -> JobState:
+    """Put a job back because the world was not ready, not because it failed.
+
+    An unreachable provider, a rate limit, an account that cannot be billed:
+    none of these are anything the job did, and none of them get better by
+    giving up. `fail` would count each one against `MAX_ATTEMPTS` and
+    dead-letter the whole queue over a few minutes of outage — which is how a
+    billing problem comes to look like a corpus problem.
+
+    So the attempt `claim` consumed is given back, and the reason is recorded on
+    the job where the pipeline view will show it. The job is visible and
+    waiting, which is the honest description of its state (invariant 8).
+    """
+    backoff = min(BASE_BACKOFF * (2 ** max(attempts - 1, 0)), MAX_BACKOFF)
+    await session.execute(
+        sa.update(Job)
+        .where(Job.id == job_id)
+        .values(
+            state=JobState.QUEUED.value,
+            attempts=max(attempts - 1, 0),
+            last_error=reason[:4000],
+            scheduled_for=_now() + backoff,
+            locked_at=None,
+            locked_by=None,
+            updated_at=_now(),
+        )
+    )
+    return JobState.QUEUED
+
+
 async def fail(
     session: AsyncSession,
     job_id: uuid.UUID,

@@ -112,6 +112,17 @@ def build_document_block(request: ClassificationRequest) -> str:
     return "\n".join(parts)
 
 
+# Anthropic signals an exhausted balance with a 400 and this wording. Matching
+# on the message is unpleasant and there is no code to match on instead; the
+# check is deliberately narrow, and a miss costs the old behaviour rather than a
+# new one.
+_BILLING_SIGNATURES = ("credit balance is too low", "billing", "purchase credits")
+
+
+def _is_billing(exc: Exception) -> bool:
+    return any(signature in str(exc).lower() for signature in _BILLING_SIGNATURES)
+
+
 class ClaudeProvider:
     name = "claude"
 
@@ -196,6 +207,15 @@ class ClaudeProvider:
             # retrying unchanged will not help, so it fails loudly.
             if exc.status_code >= 500:
                 raise ProviderUnavailableError(f"upstream error {exc.status_code}") from exc
+            if _is_billing(exc):
+                # Except this one. An exhausted credit balance arrives as a 400,
+                # but retrying unchanged is *exactly* what will work — once
+                # somebody tops the account up. Treating it as a bad request
+                # dead-letters every document in the queue over about four
+                # minutes and presents a billing problem as a corpus problem.
+                raise ProviderUnavailableError(
+                    f"the Anthropic account cannot be billed: {exc}"
+                ) from exc
             raise AIProviderError(f"API rejected the request ({exc.status_code}): {exc}") from exc
         except ValidationError as exc:
             raise AIProviderError(f"response did not match the schema: {exc}") from exc
