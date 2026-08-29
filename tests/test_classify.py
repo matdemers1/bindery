@@ -8,6 +8,7 @@ would not survive the live contract fails here rather than passing quietly.
 """
 
 import hashlib
+import os
 import uuid
 
 import pytest
@@ -635,15 +636,54 @@ async def test_a_multi_page_scan_never_uses_the_original(session, document) -> N
     assert _original_image(source_file, doc) is None
 
 
-async def test_an_oversized_original_falls_back_to_the_render(
+async def test_an_oversized_original_is_downscaled_not_abandoned(
     session, document
 ) -> None:
-    """Skipping outright would throw away the only picture there is."""
+    """Falling back here swaps a large accurate picture for a small degraded one.
+
+    13 of the 148 took that path — including the only image in the set that a
+    working vision pass still failed to identify.
+    """
+    import io
+
+    from PIL import Image
+
+    from api.storage.blobs import blob_path
+    from worker.stages.classify import LONG_EDGE, MAX_IMAGE_BYTES, _page_images
+
+    _library, source_file, doc = document
+    source_file.original_filename = "huge.png"
+    source_file.page_count = 1
+    doc.page_end = doc.page_start
+    await session.commit()
+
+    _render_pages(source_file, doc.page_end)
+    original = blob_path(source_file.sha256)
+    original.parent.mkdir(parents=True, exist_ok=True)
+    # Noise, so PNG cannot compress it below the ceiling.
+    big = Image.frombytes("RGB", (2600, 2600), os.urandom(2600 * 2600 * 3))
+    big.save(original, "PNG")
+    assert original.stat().st_size > MAX_IMAGE_BYTES
+
+    images = _page_images(source_file, doc)
+
+    assert len(images) == 1
+    assert images[0].data != b"R" * 900, "not the render"
+    assert len(images[0].data) <= MAX_IMAGE_BYTES
+    with Image.open(io.BytesIO(images[0].data)) as sent:
+        assert max(sent.size) <= LONG_EDGE
+        assert max(sent.size) > 240, "and far larger than the thumbnail it replaced"
+
+
+async def test_an_unopenable_original_still_falls_back_to_the_render(
+    session, document
+) -> None:
+    """A file PIL cannot read leaves the ordinary path in place."""
     from api.storage.blobs import blob_path
     from worker.stages.classify import MAX_IMAGE_BYTES, _page_images
 
     _library, source_file, doc = document
-    source_file.original_filename = "huge.png"
+    source_file.original_filename = "corrupt.png"
     source_file.page_count = 1
     doc.page_end = doc.page_start
     await session.commit()

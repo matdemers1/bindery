@@ -12,11 +12,13 @@ document remains OCR'd, paged, segmented, and **fully searchable** throughout â€
 retrieval never depends on this stage (invariant 7, REQ-055).
 """
 
+import io
 import json
 import logging
 from pathlib import Path
 
 import sqlalchemy as sa
+from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import queue
@@ -72,6 +74,10 @@ MAX_PAGE_IMAGES = 3
 # resolution nothing in this pipeline produces.
 MAX_IMAGE_BYTES = 1_500_000
 
+# Anthropic downscales an image whose long edge exceeds this before reading it,
+# so anything beyond it is bytes uploaded and then discarded.
+LONG_EDGE = 1568
+
 
 def _has_text(pages: list[tuple[int, str]]) -> bool:
     return sum(len((text or "").strip()) for _, text in pages) >= MIN_USABLE_TEXT
@@ -83,6 +89,24 @@ DIRECT_MEDIA_TYPES = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
     ".gif": "image/gif", ".webp": "image/webp",
 }
+
+
+def _downscale(path: Path) -> tuple[bytes, str] | None:
+    """Re-encode an over-large original small enough to send.
+
+    Returns None when the file cannot be opened at all, which leaves the
+    ordinary render fallback in place.
+    """
+    try:
+        with Image.open(path) as image:
+            image = image.convert("RGB")
+            image.thumbnail((LONG_EDGE, LONG_EDGE))
+            buffer = io.BytesIO()
+            image.save(buffer, "WEBP", quality=82, method=4)
+    except (OSError, ValueError) as error:
+        log.warning("could not downscale %s: %s", path.name, error)
+        return None
+    return buffer.getvalue(), "image/webp"
 
 
 def _original_image(source_file: SourceFile, document: Document) -> PageImage | None:
@@ -108,14 +132,23 @@ def _original_image(source_file: SourceFile, document: Document) -> PageImage | 
         return None
     path = blob_path(source_file.sha256)
     try:
-        if path.stat().st_size > MAX_IMAGE_BYTES:
-            # The render is smaller and is a real fallback; skipping outright
-            # would throw away the only picture there is.
-            return None
+        oversized = path.stat().st_size > MAX_IMAGE_BYTES
         data = path.read_bytes()
     except OSError as error:
         log.warning("could not read the original of %s: %s", source_file.id, error)
         return None
+
+    if oversized:
+        # Falling back to the render here was the first answer and the wrong
+        # one: it swaps a large accurate picture for a small degraded one, and
+        # 13 of the 148 took that path. The API downscales anything over
+        # LONG_EDGE on its own, so doing it locally costs nothing it was going
+        # to keep and fits every original inside the ceiling.
+        shrunk = _downscale(path)
+        if shrunk is None:
+            return None
+        data, media_type = shrunk
+
     return PageImage(page_number=document.page_start, media_type=media_type, data=data)
 
 
