@@ -34,6 +34,54 @@ from worker.ai.provider import Candidate
 
 NEIGHBOUR_COUNT = 15
 MAX_CANDIDATES = 25
+
+# The archive-wide fallback can afford a much longer list than the neighbour
+# path, because it is identical for every document in a run and therefore sits
+# inside the cached prompt prefix. Twenty-five was never a considered number for
+# this path — it was the neighbour cap, reused.
+MAX_FALLBACK_CANDIDATES = 150
+
+# Usage bands, not exact counts. An exact count changes every time anything is
+# classified, and the candidate block is the *cached* half of the prompt — a
+# prefix that changes on every document is a prefix that is never read from
+# cache. A band moves rarely, so the block stays byte-identical across a run
+# while still telling the model which entries are common.
+_BANDS = (
+    (25, "used by 25+ documents"),
+    (10, "used by 10+ documents"),
+    (5, "used by 5+ documents"),
+    (2, "used by 2+ documents"),
+    (1, "used once"),
+)
+
+
+def _band(count: int) -> tuple[int, str]:
+    """`(rank, label)` for a usage count. Rank sorts; label explains.
+
+    Both are stable across a whole band, which is the point: a type going from
+    six documents to seven must not change a single byte of the prompt.
+    """
+    for index, (floor, label) in enumerate(_BANDS):
+        if count >= floor:
+            return len(_BANDS) - index, label
+    return 0, ""
+
+
+def _banded(identifier, name: str, count: int) -> Candidate:
+    return Candidate(
+        id=str(identifier), name=name, usage_count=count, usage_label=_band(count)[1]
+    )
+
+
+def _stable_order(candidates: list[Candidate]) -> list[Candidate]:
+    """Band descending, then name. Deliberately *not* by exact count.
+
+    SQL picks which entries make the cut, by exact count, which is the right
+    question for membership. Ordering them by exact count would then reshuffle
+    the list every time anything was classified — and this list is the cached
+    half of the prompt.
+    """
+    return sorted(candidates, key=lambda c: (-_band(c.usage_count)[0], c.name))
 # Cosine distance; 1.0 is orthogonal. Beyond this a "neighbour" shares so little
 # vocabulary that its tags are noise.
 MAX_NEIGHBOUR_DISTANCE = 0.85
@@ -131,7 +179,7 @@ async def _from_neighbours(
     ).all()
 
     to_candidates = lambda rows: [  # noqa: E731
-        Candidate(id=str(row[0]), name=row[1], neighbour_count=row[2]) for row in rows
+        Candidate(id=str(row[0]), name=row[1], usage_count=row[2]) for row in rows
     ]
     return to_candidates(correspondent_rows), to_candidates(type_rows), to_candidates(tag_rows)
 
@@ -139,23 +187,58 @@ async def _from_neighbours(
 async def _full_taxonomy(
     session: AsyncSession, library_ids: list[uuid.UUID], *, readable: bool = True
 ) -> tuple[list[Candidate], list[Candidate], list[Candidate]]:
-    """Cold-start fallback. Small archives can afford the whole list."""
+    """The archive's own taxonomy, most-used first.
 
-    async def load(model) -> list[Candidate]:
+    This is the fallback whenever the neighbour path has nothing to say, which
+    is cold start — and, since T-8.5, every document being classified from its
+    pictures. It used to read `.order_by(name).limit(25)`, under a docstring
+    saying "small archives can afford the whole list". That was true when it was
+    written and stopped being true silently, because a LIMIT truncates rather
+    than errors.
+
+    By the time the archive held 277 document types, the model was being shown
+    the first 25 **alphabetically** — a list ending at "Business Plan / Product
+    Concept". `Utility Bill`, `Resume`, `Training Presentation` and
+    `Purchase Order` were never offered, so they could not be reused, so the
+    model invented near-duplicates; and every invention made the alphabetical
+    window a smaller fraction of the whole. R-08's tripwire is 15% of tags used
+    exactly once. It reached 68.1%.
+    """
+    live_document = sa.and_(Document.superseded_at.is_(None), Document.library_id.in_(library_ids))
+
+    async def by_document_column(model, column) -> list[Candidate]:
         rows = (
             await session.execute(
-                sa.select(model.id, model.name)
+                sa.select(model.id, model.name, sa.func.count(Document.id))
+                .outerjoin(Document, sa.and_(column == model.id, live_document))
                 .where(sa.or_(model.library_id.in_(library_ids), model.library_id.is_(None)))
-                .order_by(model.name)
-                .limit(MAX_CANDIDATES)
+                .group_by(model.id, model.name)
+                .order_by(sa.func.count(Document.id).desc(), model.name)
+                .limit(MAX_FALLBACK_CANDIDATES)
             )
         ).all()
-        return [Candidate(id=str(row[0]), name=row[1]) for row in rows]
+        return _stable_order([_banded(row[0], row[1], row[2]) for row in rows])
 
-    types = await load(DocumentType)
+    tag_rows = (
+        await session.execute(
+            sa.select(Tag.id, Tag.name, sa.func.count(DocumentTag.document_id))
+            .outerjoin(
+                DocumentTag, sa.and_(DocumentTag.tag_id == Tag.id, live_tag_links())
+            )
+            .where(sa.or_(Tag.library_id.in_(library_ids), Tag.library_id.is_(None)))
+            .group_by(Tag.id, Tag.name)
+            .order_by(sa.func.count(DocumentTag.document_id).desc(), Tag.name)
+            .limit(MAX_FALLBACK_CANDIDATES)
+        )
+    ).all()
+
+    correspondents = await by_document_column(Correspondent, Document.correspondent_id)
+    types = await by_document_column(DocumentType, Document.document_type_id)
+    tags = _stable_order([_banded(row[0], row[1], row[2]) for row in tag_rows])
+
     if not readable:
         types = [t for t in types if not _describes_a_failure_to_read(t.name)]
-    return await load(Correspondent), types, await load(Tag)
+    return correspondents, types, tags
 
 
 async def build(

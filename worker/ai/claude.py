@@ -60,12 +60,15 @@ def _render_candidates(label: str, candidates: list[Candidate]) -> str:
         return f"### {label}\n\n(none yet — propose a new name if the document needs one)\n"
     lines = [f"### {label}", ""]
     for candidate in candidates:
-        seen = (
-            f"  · used by {candidate.neighbour_count} similar document"
-            f"{'s' if candidate.neighbour_count != 1 else ''}"
-            if candidate.neighbour_count
-            else ""
-        )
+        if candidate.usage_label is not None:
+            seen = f"  · {candidate.usage_label}" if candidate.usage_label else ""
+        elif candidate.usage_count:
+            seen = (
+                f"  · used by {candidate.usage_count} document"
+                f"{'s' if candidate.usage_count != 1 else ''}"
+            )
+        else:
+            seen = ""
         lines.append(f"- `{candidate.id}` — {candidate.name}{seen}")
     return "\n".join(lines) + "\n"
 
@@ -75,7 +78,9 @@ def build_candidate_block(request: ClassificationRequest) -> str:
     return "\n".join([
         "## Candidates from this archive",
         "",
-        "Ranked by how many documents similar to this one already use them.",
+        f"Ranked by use across {request.candidates_ranked_by}. Prefer one of these "
+        "over a new name unless none of them describes this document. A near-duplicate "
+        "of an entry already here is worse than an imperfect match to it.",
         "",
         _render_candidates("Correspondents", request.correspondents),
         _render_candidates("Document types", request.document_types),

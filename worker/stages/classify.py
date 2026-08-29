@@ -241,6 +241,11 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
         known_form_fields=list((known_form.field_extractors or {}).keys())
         if known_form
         else [],
+        candidates_ranked_by=(
+            "documents similar to this one"
+            if candidate_set.used_neighbours
+            else "the whole archive"
+        ),
     )
 
     # Raises ProviderUnavailableError or AIProviderError — both retried by the

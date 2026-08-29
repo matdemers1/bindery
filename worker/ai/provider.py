@@ -82,9 +82,17 @@ class Candidate:
 
     id: str
     name: str
-    # How many of the document's neighbours use this. Signals likelihood, which
-    # dumping the whole taxonomy cannot.
-    neighbour_count: int = 0
+    # How many documents already use this. Signals *likelihood*, which a bare
+    # list of names cannot — and which is the whole reason a ranked, truncated
+    # list beats an alphabetical one. What the count is over depends on how the
+    # set was built; `ClassificationRequest.candidates_ranked_by` says which.
+    usage_count: int = 0
+    # How that count is phrased. The neighbour path gives an exact number,
+    # because its block is rebuilt per document and never cached anyway. The
+    # archive-wide fallback gives a *band* — "used by 10+ documents" — because
+    # an exact count changes every time anything is classified, and a prompt
+    # prefix that changes is a prompt prefix that cannot be cached.
+    usage_label: str | None = None
 
 
 @dataclass
@@ -114,6 +122,11 @@ class ClassificationRequest:
     tags: list[Candidate] = field(default_factory=list)
     known_form_code: str | None = None
     known_form_fields: list[str] = field(default_factory=list)
+    # What each candidate's `usage_count` is counted over. Said out loud in the
+    # prompt, because "used by 14 similar documents" and "used by 14 documents
+    # in the archive" are different claims and only one of them is true at a
+    # time.
+    candidates_ranked_by: str = "documents similar to this one"
 
 
 @dataclass

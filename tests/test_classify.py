@@ -501,7 +501,7 @@ async def test_neighbour_tags_are_ranked_by_how_many_neighbours_use_them(
 
     names = [candidate.name for candidate in request.tags]
     assert names == ["insurance"], "only the neighbour's tags should be offered"
-    assert request.tags[0].neighbour_count == 1
+    assert request.tags[0].usage_count == 1
 
 
 async def test_a_known_form_is_stated_as_fact_in_the_prompt(session, document) -> None:
@@ -885,3 +885,122 @@ async def test_a_readable_document_is_still_offered_every_type(
     )
 
     assert "Blank or Unreadable Scan" in {candidate.name for candidate in types}
+
+
+# --------------------------------------------------------------------------
+# The candidate list — R-08 (T-9.1)
+# --------------------------------------------------------------------------
+
+
+async def test_the_fallback_offers_the_most_used_not_the_alphabetically_first(
+    session, document
+) -> None:
+    """The bug that fired R-08.
+
+    `.order_by(name).limit(25)` under a docstring reading "small archives can
+    afford the whole list". By 277 document types the model was shown a list
+    ending at the letter B: `Utility Bill`, `Resume` and `Training Presentation`
+    were never offered, so they could not be reused, so it invented
+    near-duplicates — and every invention shrank the window further. A LIMIT
+    truncates rather than errors, so nothing said a word.
+    """
+    from worker.classify import candidates as candidate_builder
+    from worker.classify.candidates import MAX_FALLBACK_CANDIDATES
+
+    _library, _source_file, doc = document
+
+    # More filler than the cap, all sorting before "Utility Bill".
+    for n in range(MAX_FALLBACK_CANDIDATES + 20):
+        session.add(
+            DocumentType(library_id=doc.library_id, name=f"Aaa Filler {n:04d}",
+                         slug=f"aaa-filler-{n:04d}")
+        )
+    used = DocumentType(library_id=doc.library_id, name="Utility Bill", slug="utility-bill")
+    session.add(used)
+    await session.flush()
+    doc.document_type_id = used.id
+    await session.commit()
+
+    offered = await candidate_builder.build(
+        session, doc, [doc.library_id], use_neighbours=False
+    )
+    names = [candidate.name for candidate in offered.document_types]
+
+    assert "Utility Bill" in names, "a type in use must survive the cap"
+    assert names[0] == "Utility Bill", "and rank above every unused filler"
+    assert len(names) <= MAX_FALLBACK_CANDIDATES
+
+
+async def test_the_candidate_block_is_unchanged_by_an_ordinary_classification(
+    session, document
+) -> None:
+    """The candidate block is the cached half of the prompt.
+
+    Ranking by exact count would reshuffle it every time anything was filed, so
+    every document after the first would miss the cache and pay full price for
+    a list that had not meaningfully changed. Bands move rarely; exact counts
+    move constantly.
+    """
+    from worker.ai.claude import build_candidate_block
+    from worker.ai.provider import ClassificationRequest
+    from worker.classify import candidates as candidate_builder
+
+    _library, _source_file, doc = document
+    kind = DocumentType(library_id=doc.library_id, name="Utility Bill", slug="ub")
+    session.add(kind)
+    await session.flush()
+    doc.document_type_id = kind.id
+    await session.commit()
+
+    def block(built):
+        return build_candidate_block(
+            ClassificationRequest(
+                document_id="x", pages=[],
+                correspondents=built.correspondents,
+                document_types=built.document_types,
+                tags=built.tags,
+                candidates_ranked_by="the whole archive",
+            )
+        )
+
+    before = block(
+        await candidate_builder.build(session, doc, [doc.library_id], use_neighbours=False)
+    )
+
+    # Filing more documents under the same type crosses 1 -> 5, a band change...
+    for extra in range(2, 6):
+        session.add(
+            Document(library_id=doc.library_id, source_file_id=doc.source_file_id,
+                     page_start=100 + extra, page_end=100 + extra,
+                     document_type_id=kind.id)
+        )
+    await session.commit()
+    mid = block(
+        await candidate_builder.build(session, doc, [doc.library_id], use_neighbours=False)
+    )
+    assert mid != before, "a band change should show — that is the signal"
+
+    # ...but 5 -> 6, inside the same band, must not move a byte.
+    session.add(
+        Document(library_id=doc.library_id, source_file_id=doc.source_file_id,
+                 page_start=200, page_end=200, document_type_id=kind.id)
+    )
+    await session.commit()
+    after = block(
+        await candidate_builder.build(session, doc, [doc.library_id], use_neighbours=False)
+    )
+    assert after == mid, "an ordinary filing must not invalidate the prompt cache"
+
+
+def test_the_prompt_says_what_the_counts_are_counted_over() -> None:
+    """"Used by 14 similar documents" and "used by 14 documents in the archive"
+    are different claims, and only one of them is true at a time."""
+    from worker.ai.claude import build_candidate_block
+    from worker.ai.provider import Candidate, ClassificationRequest
+
+    request = ClassificationRequest(
+        document_id="x", pages=[],
+        document_types=[Candidate(id="1", name="Utility Bill", usage_count=14)],
+        candidates_ranked_by="the whole archive",
+    )
+    assert "the whole archive" in build_candidate_block(request)
