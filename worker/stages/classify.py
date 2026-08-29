@@ -24,6 +24,7 @@ from api.db.enums import ActorType, JobStage, ReviewState, TagSource
 from api.db.models import Classification, Document, FieldProvenance, KnownForm, Page, SourceFile
 from api.queue import ClaimedJob
 from worker.ai import ClassificationRequest, get_provider
+from worker.ai.provider import PageImage
 from worker.classify import candidates as candidate_builder
 from worker.classify import gate as gate_module
 from worker.classify.resolve import apply_tags, resolve
@@ -55,6 +56,47 @@ def _absolute_page(document: Document, document_page: int | None) -> int | None:
     return absolute if document.page_start <= absolute <= document.page_end else None
 
 
+
+# Enough characters that the page plainly carried readable text. A handful of
+# stray marks misread as letters is not text worth classifying from.
+MIN_USABLE_TEXT = 40
+
+# Images are an order of magnitude more expensive than text, and a document
+# whose first pages say nothing is not usually saved by its twentieth.
+MAX_PAGE_IMAGES = 3
+
+
+def _has_text(pages: list[tuple[int, str]]) -> bool:
+    return sum(len((text or "").strip()) for _, text in pages) >= MIN_USABLE_TEXT
+
+
+def _page_images(source_file: SourceFile | None, document: Document) -> list[PageImage]:
+    """The rendered pages, for a document with nothing readable on it."""
+    if source_file is None:
+        return []
+    artifacts = derived_for(source_file.sha256)
+    images: list[PageImage] = []
+    for page_number in range(document.page_start, document.page_end + 1):
+        if len(images) >= MAX_PAGE_IMAGES:
+            break
+        # The thumbnail, not the full render: a page is identifiable from it,
+        # and a full-resolution scan would be megabytes of tokens per page.
+        path = artifacts.page_thumb(page_number)
+        if not path.is_file():
+            continue
+        try:
+            images.append(
+                PageImage(
+                    page_number=page_number,
+                    media_type="image/webp",
+                    data=path.read_bytes(),
+                )
+            )
+        except OSError as error:
+            log.warning("could not read render for page %s: %s", page_number, error)
+    return images
+
+
 async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
     document = await session.get(Document, job.document_id)
     if document is None or document.superseded_at is not None:
@@ -65,6 +107,7 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
 
     provider = await get_provider(session)
     library_ids = [document.library_id]
+    source_file = await session.get(SourceFile, document.source_file_id)
 
     known_form = (
         await session.get(KnownForm, document.known_form_id)
@@ -73,9 +116,19 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
     )
     candidate_set = await candidate_builder.build(session, document, library_ids)
 
+    pages = await _pages(session, document)
+
+    # A document OCR could not read is not a document nothing can be said
+    # about. It is usually a photograph, a patch, a diagram or a signature
+    # page — things a person identifies at a glance and a text pipeline
+    # cannot. The rendered pages go to the model only in that case, because
+    # images cost far more than text and add nothing when the text is good.
+    page_images = _page_images(source_file, document) if not _has_text(pages) else []
+
     request = ClassificationRequest(
         document_id=str(document.id),
-        pages=await _pages(session, document),
+        pages=pages,
+        page_images=page_images,
         correspondents=candidate_set.correspondents,
         document_types=candidate_set.document_types,
         tags=candidate_set.tags,
@@ -118,7 +171,6 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
     )
     verdict = gate_module.decide(signals)
 
-    source_file = await session.get(SourceFile, document.source_file_id)
     artifacts = derived_for(source_file.sha256) if source_file else None
     request_path = response_path = None
     if artifacts is not None:

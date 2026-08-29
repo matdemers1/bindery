@@ -238,6 +238,7 @@ EVERY_READ_PATH = [
     ("pending AI review", "/api/pipeline/reclassify/pending"),
     ("logs", "/api/logs"),
     ("pipeline files", "/api/pipeline/files"),
+    ("photo wall", "/api/photos"),
 ]
 
 

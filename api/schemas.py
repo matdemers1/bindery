@@ -340,7 +340,11 @@ class ArchiveStatsOut(BaseModel):
     documents: int = 0
     files: int = 0
     pages: int = 0
+    # Waiting for you today.
     needs_review: int = 0
+    # Waiting on the backlog surface, which is a different queue with a lower
+    # bar. Kept apart so a header can never send you to an empty screen.
+    backlog_pending: int = 0
     unclassified: int = 0
 
 
@@ -943,3 +947,49 @@ class FileProgressOut(BaseModel):
 class PipelineFilesOut(BaseModel):
     files: list[FileProgressOut]
     stages: list[str]
+
+
+class PhotoOut(BaseModel):
+    document_id: uuid.UUID
+    source_file_id: uuid.UUID
+    page: int
+    title: str | None
+    summary: str | None
+    original_filename: str | None
+    received_at: datetime
+    document_date: date | None
+    # Whether anything has actually said what this picture is.
+    described: bool
+
+
+class PhotoWallOut(BaseModel):
+    total: int
+    photos: list[PhotoOut]
+
+
+class UnifyMemberOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    documents: int
+
+
+class UnifyGroupOut(BaseModel):
+    canonical: str
+    canonical_id: uuid.UUID | None
+    reason: str
+    document_count: int
+    members: list[UnifyMemberOut]
+
+
+class UnifyProposalOut(BaseModel):
+    considered: int
+    model: str | None
+    unavailable_reason: str | None
+    groups: list[UnifyGroupOut]
+
+
+class UnifyApplyIn(BaseModel):
+    canonical_id: uuid.UUID
+    # Named explicitly so what gets applied is what was shown on screen, not
+    # whatever the model would say if it were asked a second time.
+    member_ids: list[uuid.UUID]

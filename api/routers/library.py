@@ -219,11 +219,25 @@ async def _stats(session: AsyncSession, library_ids: list[uuid.UUID]) -> Archive
             {"libs": library_ids},
         )
     ).scalar_one()
+    # Counted separately, because they go to different places. The header used
+    # to add them together and link the total to the daily queue — which
+    # excludes backlog — so it advertised 408 documents awaiting review and
+    # sent you to an empty screen.
     needs_review = (
         await session.execute(
             sa.select(sa.func.count()).select_from(Document).where(
                 Document.library_id.in_(library_ids), live(),
                 Document.review_state == ReviewState.NEEDS_REVIEW.value,
+                Document.is_backlog.is_(False),
+            )
+        )
+    ).scalar_one()
+    backlog_pending = (
+        await session.execute(
+            sa.select(sa.func.count()).select_from(Document).where(
+                Document.library_id.in_(library_ids), live(),
+                Document.review_state == ReviewState.NEEDS_REVIEW.value,
+                Document.is_backlog.is_(True),
             )
         )
     ).scalar_one()
@@ -237,7 +251,8 @@ async def _stats(session: AsyncSession, library_ids: list[uuid.UUID]) -> Archive
     ).scalar_one()
     return ArchiveStatsOut(
         documents=documents, files=files, pages=int(pages or 0),
-        needs_review=needs_review, unclassified=unclassified,
+        needs_review=needs_review, backlog_pending=backlog_pending,
+        unclassified=unclassified,
     )
 
 

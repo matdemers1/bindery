@@ -518,3 +518,56 @@ async def test_a_known_form_is_stated_as_fact_in_the_prompt(session, document) -
     request = provider.requests[0]
     assert request.known_form_code == "INS-DEC"
     assert request.known_form_fields == ["policy_number"]
+
+
+# --------------------------------------------------------------------------
+# Documents OCR could not read (T-8.15)
+# --------------------------------------------------------------------------
+
+
+def test_a_page_with_no_text_is_recognised_as_unreadable() -> None:
+    """A squadron patch, a photograph, a diagram.
+
+    OCR is right that there is no text; that does not mean nothing can be said
+    about the document. The threshold is not zero, because a handful of stray
+    marks misread as letters is not text worth classifying from.
+    """
+    from worker.stages.classify import _has_text
+
+    assert not _has_text([(1, "")])
+    assert not _has_text([(1, "   \n  ")])
+    assert not _has_text([(1, "aQ ~ l")])  # OCR noise on a picture
+    assert _has_text([(1, "Certificate of Release or Discharge from Active Duty, 2009")])
+
+
+def test_images_are_only_sent_when_there_is_nothing_to_read(
+    session, document, monkeypatch
+) -> None:
+    """Images cost an order of magnitude more than text and add nothing when
+    the text is good, so a readable document must never carry them."""
+    from worker.stages import classify as classify_stage
+
+    called: list[bool] = []
+    monkeypatch.setattr(
+        classify_stage, "_page_images", lambda *a, **k: called.append(True) or []
+    )
+    assert classify_stage._has_text([(1, "a" * 200)]) is True
+    assert called == [], "not consulted for a document with text"
+
+
+async def test_page_images_stop_at_the_cap(session, document, tmp_path) -> None:
+    """A document whose first pages say nothing is not usually saved by its
+    twentieth, and every page is a real cost."""
+    from worker.stages.classify import MAX_PAGE_IMAGES
+
+    assert MAX_PAGE_IMAGES <= 5
+
+
+async def test_a_missing_render_is_skipped_not_fatal(session, document) -> None:
+    """Renders are derived artifacts and can be absent — mid-pipeline, or after
+    a partial rebuild. Classification should degrade, not fail."""
+    from worker.stages.classify import _page_images
+
+    _library, source_file, doc = document
+    # Nothing has been rendered for this file in the test fixture.
+    assert _page_images(source_file, doc) == []

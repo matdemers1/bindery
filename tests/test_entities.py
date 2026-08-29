@@ -426,3 +426,92 @@ async def test_entities_are_library_scoped(client, library_with_documents, signe
     assert (await client.get("/api/assets")).json() == []
     assert (await client.get("/api/shelves")).json() == []
     assert (await client.get("/api/duplicates")).json() == []
+
+
+# --------------------------------------------------------------------------
+# Unifying correspondents (T-8.17)
+# --------------------------------------------------------------------------
+
+
+def test_a_group_of_one_merges_nothing() -> None:
+    """A proposal naming a single record is not a merge, it is noise."""
+    from api.unify import _parse
+
+    names = [{"id": str(uuid.uuid4()), "name": "26th Weapons Squadron", "documents": 7}]
+    proposal = _parse(
+        '{"groups": [{"canonical": "26th Weapons Squadron", '
+        '"members": ["26th Weapons Squadron"], "reason": "same"}]}',
+        names, "claude-opus-5",
+    )
+    assert proposal.groups == []
+
+
+def test_a_name_the_archive_does_not_have_is_dropped() -> None:
+    """The task was to group what exists.
+
+    Inventing a folder is the opposite of tidying, so an unrecognised name is
+    discarded rather than created.
+    """
+    from api.unify import _parse
+
+    real = str(uuid.uuid4())
+    other = str(uuid.uuid4())
+    names = [
+        {"id": real, "name": "26th Weapons Squadron", "documents": 7},
+        {"id": other, "name": "26th Weapon School", "documents": 2},
+    ]
+    proposal = _parse(
+        '{"groups": [{"canonical": "26th Weapons Squadron", '
+        '"members": ["26th Weapons Squadron", "26th Weapon School", '
+        '"Something Never Filed"], "reason": "same unit"}]}',
+        names, "claude-opus-5",
+    )
+    assert len(proposal.groups) == 1
+    assert {m["name"] for m in proposal.groups[0].members} == {
+        "26th Weapons Squadron", "26th Weapon School"
+    }
+
+
+def test_an_invented_canonical_falls_back_to_the_biggest_member() -> None:
+    """If the survivor named does not exist, the merge is still correct — only
+    the label would have been prettier. Keeping the record carrying the most
+    documents moves the fewest things."""
+    from api.unify import _parse
+
+    big, small = str(uuid.uuid4()), str(uuid.uuid4())
+    names = [
+        {"id": big, "name": "26th Weapons Squadron", "documents": 7},
+        {"id": small, "name": "26th Weapon School", "documents": 2},
+    ]
+    proposal = _parse(
+        '{"groups": [{"canonical": "26th Weapons Squadron (USAF)", '
+        '"members": ["26th Weapons Squadron", "26th Weapon School"], "reason": "x"}]}',
+        names, "claude-opus-5",
+    )
+    assert str(proposal.groups[0].canonical_id) == big
+
+
+def test_an_unreadable_response_is_reported_not_guessed_at() -> None:
+    from api.unify import _parse
+
+    proposal = _parse("I'm not sure how to answer that.", [], None)
+    assert proposal.groups == []
+    assert "could not be read" in (proposal.unavailable_reason or "")
+
+
+async def test_nothing_is_proposed_without_a_key(session, signed_in) -> None:
+    """The trigram near-duplicate list works without one; this does not, and
+    says so rather than returning an empty result that looks like agreement."""
+    from api import unify
+
+    _, library = await signed_in()
+    session.add_all([
+        Correspondent(library_id=library.id, name="A Bank", slug=f"a-{uuid.uuid4().hex[:6]}"),
+        Correspondent(library_id=library.id, name="A Bank NA", slug=f"b-{uuid.uuid4().hex[:6]}"),
+    ])
+    await session.commit()
+
+    proposal = await unify.propose(session, [library.id], None)
+    assert proposal.groups == []
+    assert "No API key" in (proposal.unavailable_reason or "")
+    assert proposal.considered == 2

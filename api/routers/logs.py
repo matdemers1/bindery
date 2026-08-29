@@ -21,6 +21,8 @@ from api.schemas import (
     FileProgressOut,
     LogEntryOut,
     LogPageOut,
+    PhotoOut,
+    PhotoWallOut,
     PipelineFilesOut,
 )
 
@@ -181,3 +183,93 @@ async def pipeline_files(
         )
 
     return PipelineFilesOut(files=out, stages=[state.value for state in STAGE_ORDER])
+
+
+# --------------------------------------------------------------------------
+# The photo wall (T-8.16)
+# --------------------------------------------------------------------------
+
+# What a person means by "my images": things that were photographed or drawn,
+# not a 40-page PDF that happens to contain a logo.
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff",
+                  ".heic", ".heif")
+
+
+@router.get("/photos", response_model=PhotoWallOut)
+async def photos(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+    q: str | None = Query(None, description="substring of the title or filename"),
+    undescribed: bool = Query(False, description="only ones nothing has said anything about"),
+    limit: int = Query(120, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> PhotoWallOut:
+    """Every image in the archive, as pictures rather than as rows.
+
+    A list of filenames is the wrong shape for photographs: you recognise a
+    picture instantly and read a filename slowly, so a grid finds things a
+    table cannot. It also makes the gap visible — an image OCR could not read
+    and nothing has described is, in a list, indistinguishable from any other
+    row.
+    """
+    library_ids = await repository.visible_library_ids(session, user.id)
+    if not library_ids:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "no visible libraries")
+
+    conditions: list[sa.ColumnElement[bool]] = [
+        Document.library_id.in_(library_ids),
+        Document.superseded_at.is_(None),
+        sa.or_(
+            *[SourceFile.original_filename.ilike(f"%{ext}") for ext in IMAGE_SUFFIXES]
+        ),
+    ]
+    if q:
+        conditions.append(
+            sa.or_(
+                Document.title.ilike(f"%{q}%"),
+                SourceFile.original_filename.ilike(f"%{q}%"),
+                Document.summary.ilike(f"%{q}%"),
+            )
+        )
+    if undescribed:
+        # Nothing has said anything about these — no title from a model, no
+        # summary. They are the ones a description pass would actually help.
+        conditions.append(
+            sa.or_(Document.title.is_(None), Document.summary.is_(None))
+        )
+
+    total = await session.scalar(
+        sa.select(sa.func.count())
+        .select_from(Document)
+        .join(SourceFile, SourceFile.id == Document.source_file_id)
+        .where(sa.and_(*conditions))
+    )
+
+    rows = (
+        await session.execute(
+            sa.select(Document, SourceFile.original_filename, SourceFile.received_at)
+            .join(SourceFile, SourceFile.id == Document.source_file_id)
+            .where(sa.and_(*conditions))
+            .order_by(SourceFile.received_at.desc(), Document.page_start)
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+
+    return PhotoWallOut(
+        total=total or 0,
+        photos=[
+            PhotoOut(
+                document_id=row[0].id,
+                source_file_id=row[0].source_file_id,
+                page=row[0].page_start,
+                title=row[0].title,
+                summary=row[0].summary,
+                original_filename=row.original_filename,
+                received_at=row.received_at,
+                document_date=row[0].document_date,
+                described=bool(row[0].title and row[0].summary),
+            )
+            for row in rows
+        ],
+    )

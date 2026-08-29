@@ -4,6 +4,7 @@ import {
   Activity,
   ClipboardCheck,
   FolderTree,
+  Images,
   Import,
   Library as LibraryIcon,
   LogOut,
@@ -56,6 +57,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
       { to: "/search", label: "Search", icon: Search, hint: "Every page in the archive" },
       { to: "/archive", label: "Archive", icon: LibraryIcon, hint: "Browse everything" },
       { to: "/files", label: "Files", icon: FolderTree, hint: "The folder tree" },
+      { to: "/photos", label: "Photos", icon: Images, hint: "Everything you recognise by looking" },
     ],
   },
   {

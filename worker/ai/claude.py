@@ -11,6 +11,7 @@ the per-document page text after it. Cache health is read back from
 silent invalidation shows up as a number rather than as a bill (REQ-053).
 """
 
+import base64
 import json
 import logging
 from pathlib import Path
@@ -147,6 +148,35 @@ class ClaudeProvider:
             },
         ]
         user_content = build_document_block(request)
+
+        # When OCR read nothing, the text block says so and nothing else. Looking
+        # at the page is then the only way anything true can be said about it —
+        # a squadron patch, a photograph, a hand-drawn diagram. The images go
+        # after the text so the instructions and candidates stay cacheable.
+        if request.page_images:
+            user_content = [
+                {"type": "text", "text": user_content},
+                *(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": page.media_type,
+                            "data": base64.b64encode(page.data).decode(),
+                        },
+                    }
+                    for page in request.page_images
+                ),
+                {
+                    "type": "text",
+                    "text": (
+                        "The page text above is empty because OCR found no readable "
+                        "text. Describe what these page images actually show and "
+                        "classify from that. Say what is visibly there — do not "
+                        "infer an issuer, a date or an account from a design."
+                    ),
+                },
+            ]
 
         try:
             response = await self._client.messages.parse(

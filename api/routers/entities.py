@@ -4,13 +4,14 @@ Merge is the operation everything here is shaped around: previewed before
 commit, executed in one transaction, recorded as one event, undone in one action.
 """
 
+import logging
 import uuid
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import entities, taxonomy_health
+from api import ai_ask, entities, settings_store, taxonomy_health, unify
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -39,8 +40,12 @@ from api.schemas import (
     SavedSearchOut,
     SimilarOut,
     TaxonomyHealthOut,
+    UnifyApplyIn,
+    UnifyProposalOut,
 )
 from api.segments import live
+
+log = logging.getLogger("bindery.entities")
 
 router = APIRouter(tags=["entities"])
 
@@ -437,3 +442,69 @@ async def scan_duplicates(
         found += await taxonomy_health.detect_duplicates(session, library_id)
     await session.commit()
     return {"found": found}
+
+
+# --------------------------------------------------------------------------
+# Unifying correspondents (T-8.17)
+# --------------------------------------------------------------------------
+
+
+@router.post("/correspondents/unify/preview", response_model=UnifyProposalOut)
+async def unify_preview(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> UnifyProposalOut:
+    """Ask which of these names are the same organisation. Changes nothing.
+
+    Only the names are sent — never document text — so this costs almost
+    nothing and nothing about the contents of the archive leaves it.
+    """
+    library_ids = await _writable(session, user)
+    key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
+    model = await settings_store.get(session, settings_store.BINDERY_MODEL) or "claude-opus-5"
+    answerer = ai_ask.ClaudeAnswerer(key or "", model=model) if key else None
+
+    proposal = await unify.propose(session, library_ids, answerer)
+    return UnifyProposalOut(**proposal.as_dict())
+
+
+@router.post("/correspondents/unify/apply", response_model=MergePreviewOut)
+async def unify_apply(
+    body: UnifyApplyIn,
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> MergePreviewOut:
+    """Apply one proposed group, as ordinary merges.
+
+    Deliberately one group at a time and never straight from the proposal: the
+    request names the exact records to merge, so what gets applied is what was
+    shown on screen rather than whatever the model would say if asked again.
+    Each merge is audited and undoable on its own.
+    """
+    library_ids = await _writable(session, user)
+    target = await session.get(Correspondent, body.canonical_id)
+    if target is None or target.library_id not in library_ids:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+
+    merged = 0
+    for source_id in body.member_ids:
+        if source_id == body.canonical_id:
+            continue
+        source = await session.get(Correspondent, source_id)
+        if source is None or source.library_id not in library_ids:
+            continue
+        try:
+            await entities.merge_correspondents(
+                session, source_id, body.canonical_id, actor_id=user.id
+            )
+            merged += 1
+        except entities.MergeError as error:
+            log.warning("skipping %s during unification: %s", source_id, error)
+
+    await session.commit()
+    return MergePreviewOut(
+        source_id=body.member_ids[0] if body.member_ids else body.canonical_id,
+        target_id=body.canonical_id,
+        documents=merged,
+        detail=f"merged {merged} name(s) into {target.name}",
+    )

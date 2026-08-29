@@ -99,6 +99,18 @@ export default function ArchivePage() {
                 </Link>
               </>
             )}
+            {/* A separate count, because it is a separate queue. Adding the two
+                together and linking the total to /review is what produced a
+                header advertising 408 documents and a review screen with
+                nothing on it. */}
+            {stats.backlog_pending > 0 && (
+              <>
+                {" · "}
+                <Link to="/pipeline" className="underline underline-offset-2">
+                  {stats.backlog_pending} imported, unreviewed
+                </Link>
+              </>
+            )}
             {stats.unclassified > 0 && (
               <>
                 {" · "}

@@ -12,6 +12,7 @@ import {
   type DuplicatePair,
   type MergePreview,
   type TaxonomyHealth,
+  type UnifyProposal,
   type TimelineEntry,
 } from "../../api";
 
@@ -56,7 +57,12 @@ export default function OrganisePage({ libraries }: { libraries: { id: string }[
 
       {tab === "correspondents" && <Correspondents />}
       {tab === "assets" && <Assets libraryId={libraries[0]?.id} />}
-      {tab === "taxonomy" && <Taxonomy />}
+      {tab === "taxonomy" && (
+        <>
+          <UnifyPass />
+          <Taxonomy />
+        </>
+      )}
     </div>
   );
 }
@@ -461,5 +467,150 @@ function Taxonomy() {
 function Empty({ children }: { children: React.ReactNode }) {
   return (
     <p className="rounded-lg border border-edge p-8 text-center text-sm text-muted">{children}</p>
+  );
+}
+
+
+/**
+ * Asking which folders are the same organisation.
+ *
+ * Trigram similarity — the near-duplicate list below — is the right tool for a
+ * typo, and it finds "26th Weapon School" next to "26th Weapons School" every
+ * time. What it cannot know is whether a squadron and its school are one
+ * organisation or two, because that is knowledge about the world rather than
+ * about the strings.
+ *
+ * So this asks, and then does nothing until you agree. Only the names are sent
+ * — never document text — so it costs almost nothing and nothing about the
+ * contents of the archive leaves it. Each group is applied as ordinary merges,
+ * which are audited and undoable one at a time.
+ */
+function UnifyPass() {
+  const [proposal, setProposal] = useState<UnifyProposal | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [applying, setApplying] = useState<string | null>(null);
+  const [applied, setApplied] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  async function propose() {
+    setBusy(true);
+    setError(null);
+    try {
+      setProposal(await api.unifyPreview());
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function apply(group: UnifyProposal["groups"][number]) {
+    if (!group.canonical_id) return;
+    setApplying(group.canonical_id);
+    try {
+      await api.unifyApply(
+        group.canonical_id,
+        group.members.map((m) => m.id).filter((id) => id !== group.canonical_id),
+      );
+      setApplied((current) => new Set(current).add(group.canonical_id!));
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : String(caught));
+    } finally {
+      setApplying(null);
+    }
+  }
+
+  return (
+    <section className="mb-5 rounded-xl border border-edge bg-surface p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-sm font-medium">Unify folders</h2>
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => void propose()}
+          disabled={busy}
+          className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
+        >
+          {busy ? "Looking…" : "Look for folders that are the same thing"}
+        </button>
+      </div>
+      <p className="mt-1 max-w-2xl text-sm text-muted">
+        Twenty years of letterheads spell one unit four ways. This reads the list of
+        names — never the documents — and proposes which ones are the same
+        organisation. Nothing merges until you say so, and every merge can be undone.
+      </p>
+
+      {error && (
+        <p role="alert" className="mt-3 rounded border border-red-900 bg-red-950/40 p-2.5 text-sm text-red-300">
+          {error}
+        </p>
+      )}
+
+      {proposal?.unavailable_reason && (
+        <p className="mt-3 rounded border border-edge bg-ink p-2.5 text-sm text-muted">
+          {proposal.unavailable_reason}
+        </p>
+      )}
+
+      {proposal && !proposal.unavailable_reason && proposal.groups.length === 0 && (
+        <p className="mt-3 text-sm text-muted">
+          Nothing worth merging among {proposal.considered} names.
+        </p>
+      )}
+
+      {proposal && proposal.groups.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {proposal.groups.map((group) => {
+            const done = group.canonical_id ? applied.has(group.canonical_id) : false;
+            return (
+              <li
+                key={group.canonical_id ?? group.canonical}
+                className={`rounded-lg border p-3 ${
+                  done ? "border-emerald-900/60 bg-emerald-950/20" : "border-edge bg-ink"
+                }`}
+              >
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="text-sm font-medium">{group.canonical}</span>
+                  <span className="text-xs text-muted">
+                    {group.members.length} names · {group.document_count} documents
+                  </span>
+                  <span className="flex-1" />
+                  {done ? (
+                    <span className="text-xs text-emerald-400">merged</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void apply(group)}
+                      disabled={applying !== null}
+                      className="rounded border border-edge px-2.5 py-1 text-xs hover:border-accent/60 disabled:opacity-40"
+                    >
+                      {applying === group.canonical_id ? "Merging…" : "Merge these"}
+                    </button>
+                  )}
+                </div>
+                {group.reason && (
+                  <p className="mt-1 text-xs text-muted">{group.reason}</p>
+                )}
+                <ul className="mt-2 flex flex-wrap gap-1.5">
+                  {group.members.map((member) => (
+                    <li
+                      key={member.id}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                        member.id === group.canonical_id
+                          ? "border-accent/60 text-accent"
+                          : "border-edge text-muted"
+                      }`}
+                    >
+                      {member.name}
+                      <span className="ml-1 opacity-60">{member.documents}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }

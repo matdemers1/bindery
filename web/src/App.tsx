@@ -8,6 +8,7 @@ import AddPage from "./features/add/AddPage";
 import ArchivePage from "./features/archive/ArchivePage";
 import AskPage from "./features/ask/AskPage";
 import FilesPage from "./features/files/FilesPage";
+import PhotosPage from "./features/photos/PhotosPage";
 import LibrariesPage from "./features/household/LibrariesPage";
 import ImportPage from "./features/import/ImportPage";
 import OrganisePage from "./features/organise/OrganisePage";
@@ -104,6 +105,7 @@ export default function App() {
           <Route path="/file/:fileId" element={<Navigate to="page/1" replace />} />
           <Route path="/archive" element={<ArchivePage />} />
           <Route path="/files" element={<FilesPage />} />
+          <Route path="/photos" element={<PhotosPage />} />
           <Route
             path="/add"
             element={<AddPage libraries={libraries} onUploaded={refresh} />}

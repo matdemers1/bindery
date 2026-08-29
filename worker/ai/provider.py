@@ -88,9 +88,27 @@ class Candidate:
 
 
 @dataclass
+class PageImage:
+    """A rendered page, for documents that OCR could not read.
+
+    Carried as bytes rather than a path because the provider is an adapter —
+    a local backend would receive exactly the same request, and a filesystem
+    path is not something every implementation can open.
+    """
+
+    page_number: int
+    media_type: str
+    data: bytes
+
+
+@dataclass
 class ClassificationRequest:
     document_id: str
     pages: list[tuple[int, str]]
+    # Populated only when the pages carry no usable text. A squadron patch, a
+    # photograph, a diagram — OCR correctly reports nothing, and looking at it
+    # is the only way anything can be said about it.
+    page_images: list[PageImage] = field(default_factory=list)
     correspondents: list[Candidate] = field(default_factory=list)
     document_types: list[Candidate] = field(default_factory=list)
     tags: list[Candidate] = field(default_factory=list)

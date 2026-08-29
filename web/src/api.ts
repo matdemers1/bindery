@@ -271,6 +271,7 @@ export interface ArchiveStats {
   files: number;
   pages: number;
   needs_review: number;
+  backlog_pending: number;
   unclassified: number;
 }
 
@@ -768,6 +769,25 @@ export const api = {
     return request<PipelineFiles>(`/pipeline/files${query.size ? `?${query}` : ""}`);
   },
 
+
+  photos: (params: { q?: string; undescribed?: boolean; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "" && value !== false) query.set(key, String(value));
+    }
+    return request<PhotoWall>(`/photos${query.size ? `?${query}` : ""}`);
+  },
+
+  /** Ask which correspondent names are the same organisation. Changes nothing. */
+  unifyPreview: () =>
+    request<UnifyProposal>("/correspondents/unify/preview", { method: "POST" }),
+  unifyApply: (canonicalId: string, memberIds: string[]) =>
+    request<MergePreview>("/correspondents/unify/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ canonical_id: canonicalId, member_ids: memberIds }),
+    }),
+
   upload: (libraryId: string, file: File) => {
     const form = new FormData();
     form.append("library_id", libraryId);
@@ -1011,6 +1031,39 @@ export interface FileProgress {
 export interface PipelineFiles {
   files: FileProgress[];
   stages: string[];
+}
+
+
+export interface Photo {
+  document_id: string;
+  source_file_id: string;
+  page: number;
+  title: string | null;
+  summary: string | null;
+  original_filename: string | null;
+  received_at: string;
+  document_date: string | null;
+  described: boolean;
+}
+
+export interface PhotoWall {
+  total: number;
+  photos: Photo[];
+}
+
+export interface UnifyGroup {
+  canonical: string;
+  canonical_id: string | null;
+  reason: string;
+  document_count: number;
+  members: { id: string; name: string; documents: number }[];
+}
+
+export interface UnifyProposal {
+  considered: number;
+  model: string | null;
+  unavailable_reason: string | null;
+  groups: UnifyGroup[];
 }
 
 /** Blob URLs. Authenticated and library-scoped server-side; no token in the URL. */

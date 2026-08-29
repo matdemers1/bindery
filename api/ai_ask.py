@@ -112,6 +112,23 @@ class ClaudeAnswerer:
     def available(self) -> bool:
         return self._client is not None
 
+    async def complete(self, prompt: str, *, max_tokens: int = 4000) -> str:
+        """A plain completion, for asking about the archive's own structure.
+
+        Used by the correspondent unification pass, which sends a list of
+        folder names and no document content at all.
+        """
+        if self._client is None:
+            raise RuntimeError("no Anthropic API key configured")
+        response = await self._client.messages.create(
+            model=self.model,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return "".join(
+            block.text for block in response.content if getattr(block, "type", None) == "text"
+        )
+
     async def answer(self, request: AskRequest) -> AskResponse:
         if self._client is None:
             raise RuntimeError("no Anthropic API key configured")
