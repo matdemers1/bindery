@@ -555,12 +555,81 @@ def test_images_are_only_sent_when_there_is_nothing_to_read(
     assert called == [], "not consulted for a document with text"
 
 
-async def test_page_images_stop_at_the_cap(session, document, tmp_path) -> None:
+def _render_pages(source_file, pages: int, *, size: int = 900, thumb_size: int = 40):
+    """Lay down renders and thumbnails the way the page stage would."""
+    from api.artifacts import derived_for
+
+    artifacts = derived_for(source_file.sha256)
+    artifacts.mkdirs()
+    for number in range(1, pages + 1):
+        artifacts.page_render(number).write_bytes(b"R" * size)
+        artifacts.page_thumb(number).write_bytes(b"T" * thumb_size)
+    return artifacts
+
+
+async def test_the_render_is_sent_rather_than_the_thumbnail(session, document) -> None:
+    """The thumbnail is 240px on its long edge — a postage stamp.
+
+    That is enough to tell a form from a photograph and nowhere near enough to
+    say what the photograph is *of*, which is the only reason to send it at
+    all. The first version of this reached for the thumbnail to save tokens the
+    render was never going to cost.
+    """
+    from worker.stages.classify import _page_images
+
+    _library, source_file, doc = document
+    _render_pages(source_file, doc.page_end)
+
+    images = _page_images(source_file, doc)
+
+    assert images, "a rendered page should be sent"
+    assert images[0].data.startswith(b"R"), "the render, not the thumbnail"
+
+
+async def test_the_thumbnail_is_the_fallback_when_no_render_exists(
+    session, document
+) -> None:
+    """A small picture beats no picture. Renders are derived and can be absent."""
+    from worker.stages.classify import _page_images
+
+    _library, source_file, doc = document
+    artifacts = _render_pages(source_file, doc.page_end)
+    for number in range(doc.page_start, doc.page_end + 1):
+        artifacts.page_render(number).unlink()
+
+    images = _page_images(source_file, doc)
+
+    assert images and images[0].data.startswith(b"T")
+
+
+async def test_page_images_stop_at_the_cap(session, document) -> None:
     """A document whose first pages say nothing is not usually saved by its
     twentieth, and every page is a real cost."""
-    from worker.stages.classify import MAX_PAGE_IMAGES
+    from worker.stages.classify import MAX_PAGE_IMAGES, _page_images
 
-    assert MAX_PAGE_IMAGES <= 5
+    _library, source_file, doc = document
+    doc.page_end = doc.page_start + MAX_PAGE_IMAGES + 4
+    _render_pages(source_file, doc.page_end)
+
+    assert len(_page_images(source_file, doc)) == MAX_PAGE_IMAGES
+
+
+async def test_an_oversized_render_is_skipped_not_sent(session, document) -> None:
+    """Over the ceiling the API rejects the request whole.
+
+    Skipping one page costs a page of context. Sending it costs the document.
+    """
+    from worker.stages.classify import MAX_IMAGE_BYTES, _page_images
+
+    _library, source_file, doc = document
+    artifacts = _render_pages(source_file, doc.page_end)
+    artifacts.page_render(doc.page_start).write_bytes(b"R" * (MAX_IMAGE_BYTES + 1))
+    artifacts.page_thumb(doc.page_start).unlink()
+
+    sent = _page_images(source_file, doc)
+
+    assert doc.page_start not in [image.page_number for image in sent]
+    assert all(len(image.data) <= MAX_IMAGE_BYTES for image in sent)
 
 
 async def test_a_missing_render_is_skipped_not_fatal(session, document) -> None:

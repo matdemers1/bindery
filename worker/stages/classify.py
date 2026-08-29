@@ -65,6 +65,11 @@ MIN_USABLE_TEXT = 40
 # whose first pages say nothing is not usually saved by its twentieth.
 MAX_PAGE_IMAGES = 3
 
+# Anthropic rejects a request whose images exceed 5 MB. Three pages under this
+# ceiling stay comfortably clear of it, and a render over it is a scan at a
+# resolution nothing in this pipeline produces.
+MAX_IMAGE_BYTES = 1_500_000
+
 
 def _has_text(pages: list[tuple[int, str]]) -> bool:
     return sum(len((text or "").strip()) for _, text in pages) >= MIN_USABLE_TEXT
@@ -79,21 +84,36 @@ def _page_images(source_file: SourceFile | None, document: Document) -> list[Pag
     for page_number in range(document.page_start, document.page_end + 1):
         if len(images) >= MAX_PAGE_IMAGES:
             break
-        # The thumbnail, not the full render: a page is identifiable from it,
-        # and a full-resolution scan would be megabytes of tokens per page.
-        path = artifacts.page_thumb(page_number)
+        # The full render, falling back to the thumbnail only if it is
+        # missing. The first version of this reached for the thumbnail on the
+        # theory that a full page would be "megabytes of tokens" — both halves
+        # of that were wrong. The thumbnail is 240px on its long edge, which is
+        # a postage stamp: enough to tell a form from a photograph and nowhere
+        # near enough to say what the photograph is of, which is the entire
+        # point of sending it. And the render is a 150 DPI webp — the three
+        # sampled from the archive were 2.5 to 10 KB.
+        path = artifacts.page_render(page_number)
+        if not path.is_file():
+            path = artifacts.page_thumb(page_number)
         if not path.is_file():
             continue
         try:
-            images.append(
-                PageImage(
-                    page_number=page_number,
-                    media_type="image/webp",
-                    data=path.read_bytes(),
-                )
-            )
+            data = path.read_bytes()
         except OSError as error:
             log.warning("could not read render for page %s: %s", page_number, error)
+            continue
+        if len(data) > MAX_IMAGE_BYTES:
+            # A render this large is a scan at a resolution nothing here asked
+            # for. Skipping it costs one page of context; sending it risks the
+            # request being rejected whole, which costs the document.
+            log.warning(
+                "render for page %s is %s bytes, over the %s limit; skipping",
+                page_number, len(data), MAX_IMAGE_BYTES,
+            )
+            continue
+        images.append(
+            PageImage(page_number=page_number, media_type="image/webp", data=data)
+        )
     return images
 
 
