@@ -18,7 +18,19 @@ from typing import Any
 
 log = logging.getLogger("bindery.ask")
 
-ASK_MAX_TOKENS = 2000
+ASK_MAX_TOKENS = 8000
+
+# Omitting `thinking` runs *adaptive* on current models, and adaptive expands to
+# fill `max_tokens`. At the old 2,000 the reasoning could consume the whole
+# budget and return an empty answer — which this module then discards as
+# uncited, so the reader would be told "I could not find that" about a question
+# the archive could answer. Low effort with room to spare keeps the citations
+# careful without the latency of a long think.
+ASK_THINKING = {"type": "adaptive"}
+ASK_EFFORT = {"effort": "low"}
+
+# For structured list work — see `ClaudeAnswerer.complete`.
+NO_THINKING = {"type": "disabled"}
 
 ASK_SYSTEM = """You answer questions about a person's own document archive.
 
@@ -120,7 +132,9 @@ class ClaudeAnswerer:
     def available(self) -> bool:
         return self._client is not None
 
-    async def complete(self, prompt: str, *, max_tokens: int = 4000) -> str:
+    async def complete(
+        self, prompt: str, *, max_tokens: int = 4000, thinking: dict | None = None
+    ) -> str:
         """A plain completion, for asking about the archive's own structure.
 
         Used by the unification pass, which sends a list of taxonomy names and
@@ -131,12 +145,29 @@ class ClaudeAnswerer:
         answer could not be read" — which is true, and sends you looking at the
         parser instead of at `max_tokens`. That is exactly what happened on the
         first run over 277 document types.
+
+        Thinking is **off** by default here, which is not a cost decision.
+        Measured on a 200-name grouping task against the deployed archive:
+
+        | thinking             | thinking tokens | groups found | wall clock |
+        |----------------------|----------------:|-------------:|-----------:|
+        | adaptive, effort low |             878 |            1 |        10s |
+        | adaptive, medium     |          11,476 |            2 |       118s |
+        | disabled             |               0 |       **11** |     **8s** |
+
+        Omitting the parameter runs *adaptive* on this model, and adaptive
+        expands to fill the budget it is given — the first attempt spent all
+        16,000 tokens reasoning and returned an empty string. The interesting
+        row is the middle one: even where thinking left room for an answer, it
+        produced a worse one. Grouping names by similarity is recognition, not
+        deduction, and reasoning talks the model out of groupings it can see.
         """
         if self._client is None:
             raise RuntimeError("no Anthropic API key configured")
         response = await self._client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
+            thinking=thinking or NO_THINKING,
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(
@@ -160,6 +191,8 @@ class ClaudeAnswerer:
         response = await self._client.messages.create(
             model=self.model,
             max_tokens=ASK_MAX_TOKENS,
+            thinking=ASK_THINKING,
+            output_config=ASK_EFFORT,
             system=ASK_SYSTEM,
             messages=[
                 {

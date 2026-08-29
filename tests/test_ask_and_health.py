@@ -9,6 +9,7 @@ The two failures this phase defends against are opposites, and both are quiet:
   scanned never made it in — discovered years later, when you go looking.
 """
 
+import typing
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -379,3 +380,80 @@ def test_with_no_webhook_configured_nothing_is_attempted() -> None:
     delivery = notifier.send(Alert("critical", "stalled", "stopped"))
     assert delivery.sent is False
     assert delivery.reason == "no webhook configured"
+
+
+# --------------------------------------------------------------------------
+# Thinking has to be configured, not left to the default (T-9.3)
+# --------------------------------------------------------------------------
+
+
+class _Recorder:
+    """Captures the kwargs a request was actually built with."""
+
+    def __init__(self) -> None:
+        self.kwargs: dict = {}
+
+    class _Messages:
+        def __init__(self, outer) -> None:
+            self.outer = outer
+
+        async def create(self, **kwargs):
+            self.outer.kwargs = kwargs
+
+            class Response:
+                content: typing.ClassVar[list] = []
+                stop_reason = "end_turn"
+
+                class usage:
+                    @staticmethod
+                    def model_dump():
+                        return {}
+
+            return Response()
+
+    @property
+    def messages(self):
+        return self._Messages(self)
+
+
+async def test_a_plain_completion_turns_thinking_off() -> None:
+    """Omitting `thinking` runs adaptive, and adaptive expands to fill
+    `max_tokens` — the first unify run spent all 16,000 tokens reasoning and
+    returned an empty string.
+
+    Measured on the deployed archive, thinking also made the answer *worse*:
+    11 groups found with it off, 1 with it on at low effort.
+    """
+    from api.ai_ask import NO_THINKING, ClaudeAnswerer
+
+    recorder = _Recorder()
+    answerer = ClaudeAnswerer("", model="claude-sonnet-5", client=recorder)
+    await answerer.complete("group these", max_tokens=16000)
+
+    assert recorder.kwargs["thinking"] == NO_THINKING
+    assert recorder.kwargs["max_tokens"] == 16000
+
+
+async def test_asking_bounds_thinking_rather_than_leaving_it_to_the_default() -> None:
+    """At the old 2,000-token ceiling, adaptive reasoning could eat the whole
+    budget and return nothing — which `/api/ask` discards as uncited, so the
+    reader is told "I could not find that" about an answerable question."""
+    from api.ai_ask import ASK_MAX_TOKENS, AskRequest, AskSource, ClaudeAnswerer
+
+    recorder = _Recorder()
+    answerer = ClaudeAnswerer("", model="claude-sonnet-5", client=recorder)
+    await answerer.answer(
+        AskRequest(
+            question="when were the brakes done?",
+            sources=[
+                AskSource(
+                    document_id="d", source_file_id="s", title="Receipt",
+                    page_number=1, text="Brake pads replaced 4 March 2024.",
+                )
+            ],
+        )
+    )
+
+    assert recorder.kwargs["thinking"]["type"] == "adaptive"
+    assert recorder.kwargs["output_config"] == {"effort": "low"}
+    assert ASK_MAX_TOKENS >= 8000, "room for the answer after the reasoning"
