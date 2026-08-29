@@ -788,3 +788,60 @@ async def test_neighbours_are_skipped_when_asked(session, document) -> None:
     assert built.used_neighbours is False
     assert built.neighbour_ids == []
     assert built.best_similarity is None
+
+
+async def test_a_type_meaning_unreadable_is_withheld_from_the_image_path(
+    session, document
+) -> None:
+    """"You can see this, tell me what it is" and "nothing could be read" are
+    contradictory. Offering both got back "Blank or Unreadable Scan - Bird
+    Illustration" — the model had seen the bird and picked the type it was
+    given.
+
+    Skipping the neighbours was not enough on its own: the fallback is the
+    library's whole taxonomy, and the junk type is in it.
+    """
+    from worker.classify import candidates as candidate_builder
+
+    _library, _source_file, doc = document
+    session.add_all([
+        DocumentType(library_id=doc.library_id, name="Blank or Unreadable Scan",
+                     slug="blank-or-unreadable-scan"),
+        DocumentType(library_id=doc.library_id, name="Illegible Scan",
+                     slug="illegible-scan"),
+        DocumentType(library_id=doc.library_id, name="Unit Patch", slug="unit-patch"),
+    ])
+    await session.commit()
+
+    offered = await candidate_builder.build(
+        session, doc, [doc.library_id], use_neighbours=False
+    )
+    names = {candidate.name for candidate in offered.document_types}
+
+    assert "Unit Patch" in names
+    assert "Blank or Unreadable Scan" not in names
+    assert "Illegible Scan" not in names
+
+
+async def test_a_readable_document_is_still_offered_every_type(
+    session, document
+) -> None:
+    """A scan that genuinely is blank should still be filed as one.
+
+    The type is withheld from the picture path, not retired from the archive —
+    nothing here deletes anything (REQ-090).
+    """
+    from worker.classify import candidates as candidate_builder
+
+    _library, _source_file, doc = document
+    session.add(
+        DocumentType(library_id=doc.library_id, name="Blank or Unreadable Scan",
+                     slug="blank-or-unreadable-scan-2")
+    )
+    await session.commit()
+
+    _, types, _ = await candidate_builder._full_taxonomy(
+        session, [doc.library_id], readable=True
+    )
+
+    assert "Blank or Unreadable Scan" in {candidate.name for candidate in types}

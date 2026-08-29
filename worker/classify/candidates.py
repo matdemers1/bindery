@@ -38,6 +38,27 @@ MAX_CANDIDATES = 25
 # vocabulary that its tags are noise.
 MAX_NEIGHBOUR_DISTANCE = 0.85
 
+# Document types that describe a *failure to read* rather than a kind of
+# document. They enter the taxonomy honestly — a text-only pass over a
+# photograph really did have nothing to work from, and "Blank or Unreadable
+# Scan" was a fair summary of an empty string — and then they persist, because
+# reuse offers back whatever already exists.
+#
+# They are withheld only from a document being classified from its pictures,
+# where offering them is self-contradictory: the premise of that request is
+# "you can see this, tell me what it is", and the reply came back as
+# "Unknown - Blank or Unreadable Scan - Bird Illustration". The model had seen
+# the bird. It picked the type it was given.
+UNREADABLE_TYPE_SIGNATURES = (
+    "unreadable", "illegible", "blank scan", "blank or unreadable",
+    "no extractable", "no legible", "not legible", "cannot be identified",
+)
+
+
+def _describes_a_failure_to_read(name: str) -> bool:
+    lowered = name.lower()
+    return any(signature in lowered for signature in UNREADABLE_TYPE_SIGNATURES)
+
 
 @dataclass(frozen=True)
 class CandidateSet:
@@ -116,7 +137,7 @@ async def _from_neighbours(
 
 
 async def _full_taxonomy(
-    session: AsyncSession, library_ids: list[uuid.UUID]
+    session: AsyncSession, library_ids: list[uuid.UUID], *, readable: bool = True
 ) -> tuple[list[Candidate], list[Candidate], list[Candidate]]:
     """Cold-start fallback. Small archives can afford the whole list."""
 
@@ -131,7 +152,10 @@ async def _full_taxonomy(
         ).all()
         return [Candidate(id=str(row[0]), name=row[1]) for row in rows]
 
-    return await load(Correspondent), await load(DocumentType), await load(Tag)
+    types = await load(DocumentType)
+    if not readable:
+        types = [t for t in types if not _describes_a_failure_to_read(t.name)]
+    return await load(Correspondent), types, await load(Tag)
 
 
 async def build(
@@ -153,6 +177,11 @@ async def build(
     or Unreadable Scan - Aircraft Icon" — the model had seen the aircraft and
     still picked the junk type, because it was what it was offered.
 
+    It also withholds the document types that describe a failure to read —
+    see `UNREADABLE_TYPE_SIGNATURES`. Skipping the neighbours alone was not
+    enough: the fallback is the library's whole taxonomy, and "Blank or
+    Unreadable Scan" is in it.
+
     A failed run must not get to set the vocabulary for its own retry.
     """
     neighbours = (
@@ -173,7 +202,9 @@ async def build(
                 used_neighbours=True,
             )
 
-    correspondents, types, tags = await _full_taxonomy(session, library_ids)
+    correspondents, types, tags = await _full_taxonomy(
+        session, library_ids, readable=use_neighbours
+    )
     return CandidateSet(
         correspondents=correspondents,
         document_types=types,
