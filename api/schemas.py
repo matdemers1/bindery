@@ -986,6 +986,7 @@ class UnifyGroupOut(BaseModel):
 
 
 class UnifyProposalOut(BaseModel):
+    kind: str = "correspondent"
     considered: int
     model: str | None
     unavailable_reason: str | None

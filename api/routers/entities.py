@@ -449,28 +449,35 @@ async def scan_duplicates(
 # --------------------------------------------------------------------------
 
 
-@router.post("/correspondents/unify/preview", response_model=UnifyProposalOut)
+@router.post("/taxonomy/unify/preview", response_model=UnifyProposalOut)
 async def unify_preview(
+    kind: str = Query("correspondent", description="correspondent | document_type | tag"),
     session: AsyncSession = Depends(get_session),
     user: AppUser = Depends(current_user),
 ) -> UnifyProposalOut:
-    """Ask which of these names are the same organisation. Changes nothing.
+    """Ask which entries of this kind are the same thing. Changes nothing.
 
     Only the names are sent — never document text — so this costs almost
     nothing and nothing about the contents of the archive leaves it.
     """
+    if kind not in unify.KINDS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"kind must be one of {', '.join(unify.KINDS)}",
+        )
     library_ids = await _writable(session, user)
     key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
     model = await settings_store.get(session, settings_store.BINDERY_MODEL) or "claude-opus-5"
     answerer = ai_ask.ClaudeAnswerer(key or "", model=model) if key else None
 
-    proposal = await unify.propose(session, library_ids, answerer)
+    proposal = await unify.propose(session, library_ids, answerer, kind)
     return UnifyProposalOut(**proposal.as_dict())
 
 
-@router.post("/correspondents/unify/apply", response_model=MergePreviewOut)
+@router.post("/taxonomy/unify/apply", response_model=MergePreviewOut)
 async def unify_apply(
     body: UnifyApplyIn,
+    kind: str = Query("correspondent", description="correspondent | document_type | tag"),
     session: AsyncSession = Depends(get_session),
     user: AppUser = Depends(current_user),
 ) -> MergePreviewOut:
@@ -481,8 +488,16 @@ async def unify_apply(
     shown on screen rather than whatever the model would say if asked again.
     Each merge is audited and undoable on its own.
     """
+    if kind not in unify.KINDS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"kind must be one of {', '.join(unify.KINDS)}",
+        )
+    spec = unify.KINDS[kind]
+    merge = getattr(entities, spec.merge)
+
     library_ids = await _writable(session, user)
-    target = await session.get(Correspondent, body.canonical_id)
+    target = await session.get(spec.model, body.canonical_id)
     if target is None or target.library_id not in library_ids:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
 
@@ -490,13 +505,11 @@ async def unify_apply(
     for source_id in body.member_ids:
         if source_id == body.canonical_id:
             continue
-        source = await session.get(Correspondent, source_id)
+        source = await session.get(spec.model, source_id)
         if source is None or source.library_id not in library_ids:
             continue
         try:
-            await entities.merge_correspondents(
-                session, source_id, body.canonical_id, actor_id=user.id
-            )
+            await merge(session, source_id, body.canonical_id, actor_id=user.id)
             merged += 1
         except entities.MergeError as error:
             log.warning("skipping %s during unification: %s", source_id, error)
@@ -506,5 +519,5 @@ async def unify_apply(
         source_id=body.member_ids[0] if body.member_ids else body.canonical_id,
         target_id=body.canonical_id,
         documents=merged,
-        detail=f"merged {merged} name(s) into {target.name}",
+        detail=f"merged {merged} {spec.label[:-1]} name(s) into {target.name}",
     )

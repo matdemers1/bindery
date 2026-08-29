@@ -18,6 +18,7 @@ from api.db.models import (
     Document,
     DocumentAsset,
     DocumentTag,
+    DocumentType,
     Page,
     SourceFile,
     Tag,
@@ -515,3 +516,147 @@ async def test_nothing_is_proposed_without_a_key(session, signed_in) -> None:
     assert proposal.groups == []
     assert "No API key" in (proposal.unavailable_reason or "")
     assert proposal.considered == 2
+
+
+# --------------------------------------------------------------------------
+# Unifying types and tags, not only correspondents (T-9.2)
+# --------------------------------------------------------------------------
+
+
+class _Answerer:
+    """Returns a fixed grouping, so the test is about the plumbing not the model."""
+
+    model = "claude-sonnet-5"
+
+    def __init__(self, payload: str) -> None:
+        self.payload = payload
+        self.asked: list[str] = []
+
+    def available(self) -> bool:
+        return True
+
+    async def complete(self, prompt: str) -> str:
+        self.asked.append(prompt)
+        return self.payload
+
+
+async def test_document_types_can_be_unified(session, signed_in) -> None:
+    """166 of 277 types were used exactly once when R-08 fired.
+
+    `Unit Patch`, `Unit Patch Image`, `Unit Emblem` and `Insignia` are one kind
+    of document described four ways.
+    """
+    from api import unify
+
+    _, library = await signed_in()
+    names = ["Unit Patch", "Unit Patch Image", "Unit Emblem"]
+    for name in names:
+        session.add(
+            DocumentType(library_id=library.id, name=name, slug=f"{uuid.uuid4().hex[:8]}")
+        )
+    await session.commit()
+
+    answerer = _Answerer(
+        '{"groups": [{"canonical": "Unit Patch", '
+        '"members": ["Unit Patch", "Unit Patch Image", "Unit Emblem"], '
+        '"reason": "three phrasings of a squadron patch"}]}'
+    )
+    proposal = await unify.propose(session, [library.id], answerer, "document_type")
+
+    assert proposal.kind == "document_type"
+    assert len(proposal.groups) == 1
+    assert proposal.groups[0].canonical == "Unit Patch"
+    assert len(proposal.groups[0].members) == 3
+    # The prompt has to be the one written for types, not the organisation one.
+    assert "document *kinds*" in answerer.asked[0]
+    assert "squadron and its wing" not in answerer.asked[0]
+
+
+async def test_tags_can_be_unified(session, signed_in) -> None:
+    from api import unify
+
+    _, library = await signed_in()
+    for name in ["receipt", "receipts"]:
+        session.add(Tag(library_id=library.id, name=name, slug=f"{uuid.uuid4().hex[:8]}"))
+    await session.commit()
+
+    answerer = _Answerer(
+        '{"groups": [{"canonical": "receipts", "members": ["receipt", "receipts"], '
+        '"reason": "singular and plural"}]}'
+    )
+    proposal = await unify.propose(session, [library.id], answerer, "tag")
+
+    assert proposal.kind == "tag"
+    assert [m["name"] for m in proposal.groups[0].members] == ["receipt", "receipts"]
+    assert "tag vocabulary" in answerer.asked[0]
+    # The hierarchy rule is the one that keeps `medical` and `dental` apart.
+    assert "Do not collapse a hierarchy into its root" in answerer.asked[0]
+
+
+async def test_merging_a_document_type_moves_its_documents_and_is_undoable(
+    session, signed_in
+) -> None:
+    """Document types had no merge at all until T-9.2 — the one kind of taxonomy
+    the model invents most freely was the only kind that could not be tidied."""
+    from api import entities
+
+    user, library = await signed_in()
+    source = DocumentType(
+        library_id=library.id, name="Unit Patch Image", slug=f"s-{uuid.uuid4().hex[:6]}"
+    )
+    target = DocumentType(
+        library_id=library.id, name="Unit Patch", slug=f"t-{uuid.uuid4().hex[:6]}"
+    )
+    source_file = SourceFile(
+        library_id=library.id, sha256=uuid.uuid4().hex * 2, byte_size=1,
+        original_filename="patch.png", ingest_source=IngestSource.WEB_UPLOAD,
+    )
+    session.add_all([source, target, source_file])
+    await session.flush()
+    document = Document(
+        library_id=library.id, source_file_id=source_file.id,
+        page_start=1, page_end=1, document_type_id=source.id,
+    )
+    session.add(document)
+    await session.commit()
+
+    event_id = await entities.merge_document_types(
+        session, source.id, target.id, actor_id=user.id
+    )
+    await session.commit()
+    await session.refresh(document)
+    await session.refresh(source)
+
+    assert document.document_type_id == target.id
+    assert source.merged_into_id == target.id, "tombstoned, not deleted (REQ-090)"
+
+    restored = await entities.undo_merge(session, event_id, actor_id=user.id)
+    await session.commit()
+    await session.refresh(document)
+    await session.refresh(source)
+
+    assert restored == 1
+    assert document.document_type_id == source.id
+    assert source.merged_into_id is None
+
+
+async def test_a_merged_away_type_is_not_offered_for_merging_again(
+    session, signed_in
+) -> None:
+    from api import entities, unify
+
+    user, library = await signed_in()
+    source = DocumentType(
+        library_id=library.id, name="Gone", slug=f"g-{uuid.uuid4().hex[:6]}"
+    )
+    target = DocumentType(
+        library_id=library.id, name="Kept", slug=f"k-{uuid.uuid4().hex[:6]}"
+    )
+    session.add_all([source, target])
+    await session.commit()
+
+    await entities.merge_document_types(session, source.id, target.id, actor_id=user.id)
+    await session.commit()
+
+    listed = await unify._current_names(session, unify.KINDS["document_type"], [library.id])
+    assert [entry["name"] for entry in listed] == ["Kept"]

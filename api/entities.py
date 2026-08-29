@@ -34,6 +34,7 @@ from api.db.models import (
     Document,
     DocumentAsset,
     DocumentTag,
+    DocumentType,
     Tag,
 )
 from api.segments import live
@@ -269,12 +270,63 @@ async def merge_tags(
     return event.id
 
 
+async def merge_document_types(
+    session: AsyncSession, source_id: uuid.UUID, target_id: uuid.UUID,
+    *, actor_id: uuid.UUID | None,
+) -> uuid.UUID:
+    """Merge two document types, retroactively, as one undoable action.
+
+    Simpler than the correspondent merge because a type has no aliases: a
+    document points at exactly one, so the whole operation is a re-point plus a
+    tombstone. The document ids are recorded in `before` so undo can put back
+    exactly the rows that moved, rather than every document now on the target.
+    """
+    source = await session.get(DocumentType, source_id)
+    target = await session.get(DocumentType, target_id)
+    if source is None or target is None:
+        raise MergeError("one of those document types does not exist")
+    if source.id == target.id:
+        raise MergeError("cannot merge a document type into itself")
+    if source.library_id != target.library_id:
+        raise MergeError("cannot merge document types across libraries")
+
+    moved = (
+        await session.execute(
+            sa.select(Document.id).where(Document.document_type_id == source_id)
+        )
+    ).scalars().all()
+
+    event = await record(
+        session,
+        entity_type="document_type", entity_id=target_id, action="merge_document_type",
+        actor_type=ActorType.HUMAN, actor_id=actor_id,
+        before={
+            "source_id": str(source_id), "source_name": source.name,
+            "document_ids": [str(d) for d in moved],
+        },
+        after={"target_id": str(target_id), "document_count": len(moved)},
+    )
+    await session.flush()
+
+    await session.execute(
+        sa.update(Document)
+        .where(Document.document_type_id == source_id)
+        .values(document_type_id=target_id)
+    )
+    source.merged_into_id = target_id
+    source.merged_at = datetime.now(UTC)
+    await session.flush()
+    return event.id
+
+
 async def undo_merge(
     session: AsyncSession, event_id: uuid.UUID, *, actor_id: uuid.UUID | None
 ) -> int:
     """Reverse a merge — both the record and every link row it moved."""
     event = await session.get(AuditEvent, event_id)
-    if event is None or event.action not in ("merge_correspondent", "merge_tag"):
+    if event is None or event.action not in (
+        "merge_correspondent", "merge_tag", "merge_document_type"
+    ):
         raise MergeError("that is not a merge")
 
     already = (
@@ -302,6 +354,22 @@ async def undo_merge(
             )
             restored = len(document_ids)
         source = await session.get(Correspondent, source_id)
+        if source:
+            source.merged_into_id = None
+            source.merged_at = None
+    elif event.action == "merge_document_type":
+        # A document points at exactly one type, so undo is the same re-point
+        # in reverse — and only for the ids the merge actually moved, not every
+        # document sitting on the target now.
+        document_ids = [uuid.UUID(d) for d in before.get("document_ids", [])]
+        if document_ids:
+            await session.execute(
+                sa.update(Document)
+                .where(Document.id.in_(document_ids))
+                .values(document_type_id=source_id)
+            )
+            restored = len(document_ids)
+        source = await session.get(DocumentType, source_id)
         if source:
             source.merged_into_id = None
             source.merged_at = None

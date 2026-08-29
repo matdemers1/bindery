@@ -28,6 +28,14 @@ class DocumentType(Base):
     )
     name: Mapped[str] = mapped_column(sa.Text, nullable=False)
     slug: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    # Set when this type was merged away. Correspondents and tags have carried
+    # these since Phase 5; document types did not, which meant the one kind of
+    # taxonomy the model invents most freely was the one kind that could not be
+    # tidied. See Correspondent.merged_into_id.
+    merged_into_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("document_type.id")
+    )
+    merged_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at()
 
 

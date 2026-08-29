@@ -12,6 +12,7 @@ import {
   type DuplicatePair,
   type MergePreview,
   type TaxonomyHealth,
+  type UnifyKind,
   type UnifyProposal,
   type TimelineEntry,
 } from "../../api";
@@ -485,7 +486,29 @@ function Empty({ children }: { children: React.ReactNode }) {
  * contents of the archive leaves it. Each group is applied as ordinary merges,
  * which are audited and undoable one at a time.
  */
+const UNIFY_KINDS: { key: UnifyKind; label: string; blurb: string }[] = [
+  {
+    key: "correspondent",
+    label: "Folders",
+    blurb:
+      "Twenty years of letterheads spell one unit four ways. Reads the list of names — never the documents — and proposes which are the same organisation.",
+  },
+  {
+    key: "document_type",
+    label: "Document types",
+    blurb:
+      "Types get invented one at a time while classifying. \u201cUnit Patch\u201d, \u201cUnit Patch Image\u201d, \u201cUnit Emblem\u201d and \u201cInsignia\u201d are one kind of document described four ways.",
+  },
+  {
+    key: "tag",
+    label: "Tags",
+    blurb:
+      "Tags accumulate faster than anything else, and most duplication is a plural, an abbreviation, or two phrasings of one idea. A broader tag and a narrower one are left alone.",
+  },
+];
+
 function UnifyPass() {
+  const [kind, setKind] = useState<UnifyKind>("correspondent");
   const [proposal, setProposal] = useState<UnifyProposal | null>(null);
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState<string | null>(null);
@@ -496,7 +519,7 @@ function UnifyPass() {
     setBusy(true);
     setError(null);
     try {
-      setProposal(await api.unifyPreview());
+      setProposal(await api.unifyPreview(kind));
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : String(caught));
     } finally {
@@ -509,6 +532,7 @@ function UnifyPass() {
     setApplying(group.canonical_id);
     try {
       await api.unifyApply(
+        kind,
         group.canonical_id,
         group.members.map((m) => m.id).filter((id) => id !== group.canonical_id),
       );
@@ -523,7 +547,30 @@ function UnifyPass() {
   return (
     <section className="mb-5 rounded-xl border border-edge bg-surface p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-sm font-medium">Unify folders</h2>
+        <h2 className="text-sm font-medium">Unify</h2>
+        <div className="flex rounded-lg border border-edge p-0.5" role="tablist">
+          {UNIFY_KINDS.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              role="tab"
+              aria-selected={kind === option.key}
+              onClick={() => {
+                setKind(option.key);
+                setProposal(null);
+                setApplied(new Set());
+                setError(null);
+              }}
+              className={`rounded-md px-2.5 py-1 text-xs ${
+                kind === option.key
+                  ? "bg-accent/15 text-accent"
+                  : "text-muted hover:text-neutral-100"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         <span className="flex-1" />
         <button
           type="button"
@@ -531,13 +578,12 @@ function UnifyPass() {
           disabled={busy}
           className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
         >
-          {busy ? "Looking…" : "Look for folders that are the same thing"}
+          {busy ? "Looking…" : "Look for duplicates"}
         </button>
       </div>
       <p className="mt-1 max-w-2xl text-sm text-muted">
-        Twenty years of letterheads spell one unit four ways. This reads the list of
-        names — never the documents — and proposes which ones are the same
-        organisation. Nothing merges until you say so, and every merge can be undone.
+        {UNIFY_KINDS.find((option) => option.key === kind)?.blurb} Nothing merges
+        until you say so, and every merge can be undone.
       </p>
 
       {error && (
@@ -554,7 +600,8 @@ function UnifyPass() {
 
       {proposal && !proposal.unavailable_reason && proposal.groups.length === 0 && (
         <p className="mt-3 text-sm text-muted">
-          Nothing worth merging among {proposal.considered} names.
+          Nothing worth merging among {proposal.considered}{" "}
+          {UNIFY_KINDS.find((option) => option.key === kind)?.label.toLowerCase()}.
         </p>
       )}
 

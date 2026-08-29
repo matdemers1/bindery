@@ -778,11 +778,11 @@ export const api = {
     return request<PhotoWall>(`/photos${query.size ? `?${query}` : ""}`);
   },
 
-  /** Ask which correspondent names are the same organisation. Changes nothing. */
-  unifyPreview: () =>
-    request<UnifyProposal>("/correspondents/unify/preview", { method: "POST" }),
-  unifyApply: (canonicalId: string, memberIds: string[]) =>
-    request<MergePreview>("/correspondents/unify/apply", {
+  /** Ask which entries of a kind are the same thing. Changes nothing. */
+  unifyPreview: (kind: UnifyKind = "correspondent") =>
+    request<UnifyProposal>(`/taxonomy/unify/preview?kind=${kind}`, { method: "POST" }),
+  unifyApply: (kind: UnifyKind, canonicalId: string, memberIds: string[]) =>
+    request<MergePreview>(`/taxonomy/unify/apply?kind=${kind}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ canonical_id: canonicalId, member_ids: memberIds }),
@@ -1060,7 +1060,10 @@ export interface UnifyGroup {
   members: { id: string; name: string; documents: number }[];
 }
 
+export type UnifyKind = "correspondent" | "document_type" | "tag";
+
 export interface UnifyProposal {
+  kind: UnifyKind;
   considered: number;
   model: string | null;
   unavailable_reason: string | null;
