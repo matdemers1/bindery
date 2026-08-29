@@ -567,6 +567,97 @@ def _render_pages(source_file, pages: int, *, size: int = 900, thumb_size: int =
     return artifacts
 
 
+async def test_the_original_image_is_sent_rather_than_a_render_of_it(
+    session, document
+) -> None:
+    """A round trip through PDF cannot improve on the file that was uploaded.
+
+    Every render of the 148 unreadable images in the deployed archive came out
+    at exactly half the original's linear resolution: the image is wrapped into
+    a PDF sized in points and rasterised back at 150 DPI. A 70x70 die face
+    reached the model at 35x35 and was reported, accurately, as impossible to
+    identify.
+    """
+    from api.storage.blobs import blob_path
+    from worker.stages.classify import _page_images
+
+    _library, source_file, doc = document
+    source_file.original_filename = "patch.png"
+    source_file.page_count = 1
+    doc.page_end = doc.page_start
+    await session.commit()
+
+    _render_pages(source_file, doc.page_end)
+    original = blob_path(source_file.sha256)
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_bytes(b"O" * 5000)
+
+    images = _page_images(source_file, doc)
+
+    assert len(images) == 1
+    assert images[0].data.startswith(b"O"), "the original, not a render of it"
+    assert images[0].media_type == "image/png"
+
+
+async def test_a_format_the_api_will_not_take_goes_via_the_render(
+    session, document
+) -> None:
+    """HEIC and TIFF are not accepted as image blocks. The render is."""
+    from api.storage.blobs import blob_path
+    from worker.stages.classify import _page_images
+
+    _library, source_file, doc = document
+    source_file.original_filename = "IMG_4417.HEIC"
+    source_file.page_count = 1
+    doc.page_end = doc.page_start
+    await session.commit()
+
+    _render_pages(source_file, doc.page_end)
+    original = blob_path(source_file.sha256)
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_bytes(b"O" * 5000)
+
+    images = _page_images(source_file, doc)
+
+    assert images and images[0].data.startswith(b"R")
+    assert images[0].media_type == "image/webp"
+
+
+async def test_a_multi_page_scan_never_uses_the_original(session, document) -> None:
+    """The original of a 100-page bundle is the whole bundle, not one page."""
+    from worker.stages.classify import _original_image
+
+    _library, source_file, doc = document
+    source_file.original_filename = "bundle.png"
+    source_file.page_count = 12
+    await session.commit()
+
+    assert _original_image(source_file, doc) is None
+
+
+async def test_an_oversized_original_falls_back_to_the_render(
+    session, document
+) -> None:
+    """Skipping outright would throw away the only picture there is."""
+    from api.storage.blobs import blob_path
+    from worker.stages.classify import MAX_IMAGE_BYTES, _page_images
+
+    _library, source_file, doc = document
+    source_file.original_filename = "huge.png"
+    source_file.page_count = 1
+    doc.page_end = doc.page_start
+    await session.commit()
+
+    _render_pages(source_file, doc.page_end)
+    original = blob_path(source_file.sha256)
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_bytes(b"O" * (MAX_IMAGE_BYTES + 1))
+
+    images = _page_images(source_file, doc)
+
+    assert images and images[0].data.startswith(b"R")
+
+
 async def test_the_render_is_sent_rather_than_the_thumbnail(session, document) -> None:
     """The thumbnail is 240px on its long edge — a postage stamp.
 

@@ -14,6 +14,7 @@ retrieval never depends on this stage (invariant 7, REQ-055).
 
 import json
 import logging
+from pathlib import Path
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,7 @@ from api.artifacts import derived_for, relative_to_data
 from api.db.enums import ActorType, JobStage, ReviewState, TagSource
 from api.db.models import Classification, Document, FieldProvenance, KnownForm, Page, SourceFile
 from api.queue import ClaimedJob
+from api.storage.blobs import blob_path
 from worker.ai import ClassificationRequest, get_provider
 from worker.ai.provider import PageImage
 from worker.classify import candidates as candidate_builder
@@ -75,10 +77,57 @@ def _has_text(pages: list[tuple[int, str]]) -> bool:
     return sum(len((text or "").strip()) for _, text in pages) >= MIN_USABLE_TEXT
 
 
+# What Anthropic will accept as an image block. HEIC, TIFF and BMP are not on
+# the list, so those go via the render.
+DIRECT_MEDIA_TYPES = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".gif": "image/gif", ".webp": "image/webp",
+}
+
+
+def _original_image(source_file: SourceFile, document: Document) -> PageImage | None:
+    """The photograph itself, rather than a render of a PDF wrapper around it.
+
+    Every render of the 148 unreadable images in the deployed archive came out
+    at exactly half the original's linear resolution — the image is wrapped
+    into a PDF sized in points and rasterised back at 150 DPI, which halves it.
+    Mostly that is a waste; for the small ones it is fatal. A 70x70 die face
+    reached the model at 35x35 and was reported, accurately, as impossible to
+    identify.
+
+    Nothing a round trip through PDF can do improves on the file that was
+    uploaded, so when the source *is* an image and the format is one the API
+    takes directly, send that. The original is opened read-only and never
+    modified (invariant 1).
+    """
+    if (source_file.page_count or 1) != 1 or document.page_start != document.page_end:
+        return None
+    suffix = Path(source_file.original_filename or "").suffix.lower()
+    media_type = DIRECT_MEDIA_TYPES.get(suffix)
+    if media_type is None:
+        return None
+    path = blob_path(source_file.sha256)
+    try:
+        if path.stat().st_size > MAX_IMAGE_BYTES:
+            # The render is smaller and is a real fallback; skipping outright
+            # would throw away the only picture there is.
+            return None
+        data = path.read_bytes()
+    except OSError as error:
+        log.warning("could not read the original of %s: %s", source_file.id, error)
+        return None
+    return PageImage(page_number=document.page_start, media_type=media_type, data=data)
+
+
 def _page_images(source_file: SourceFile | None, document: Document) -> list[PageImage]:
-    """The rendered pages, for a document with nothing readable on it."""
+    """The pictures to send, for a document with nothing readable on it."""
     if source_file is None:
         return []
+
+    original = _original_image(source_file, document)
+    if original is not None:
+        return [original]
+
     artifacts = derived_for(source_file.sha256)
     images: list[PageImage] = []
     for page_number in range(document.page_start, document.page_end + 1):
