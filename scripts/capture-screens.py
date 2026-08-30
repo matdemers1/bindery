@@ -61,18 +61,24 @@ SOURCES: dict[str, list[str]] = {
 SHARED = ["web/src/components/Shell.tsx", "web/src/index.css"]
 
 
-def _now_commit_time() -> int:
-    """The timestamp of HEAD, not the wall clock.
+def _source_commit(paths: list[str]) -> str:
+    """The commit that last changed any of these paths.
 
-    Wall clock would make every capture look newer than every source, so the
-    staleness check would never fire — which is the failure this whole file
-    exists to prevent.
+    A *hash*, not a timestamp. The first version recorded HEAD's timestamp and
+    compared it against the source's — which fired the moment the screenshots
+    were committed, because that commit is newer than everything it contains.
+    Every capture immediately invalidated itself.
+
+    A hash of the sources has no such problem: committing a picture does not
+    change the code it is a picture of, so the recorded value still matches.
+    And when somebody *does* change a screen, it stops matching, which is the
+    entire point.
     """
     out = subprocess.run(
-        ["git", "log", "-1", "--format=%ct"], cwd=REPO,
-        capture_output=True, text=True, check=True,
+        ["git", "log", "-1", "--format=%H", "--", *paths], cwd=REPO,
+        capture_output=True, text=True, check=False,
     )
-    return int(out.stdout.strip())
+    return out.stdout.strip() or "unknown"
 
 
 async def main() -> int:
@@ -98,7 +104,6 @@ async def main() -> int:
 
     guides = json.loads(GUIDES.read_text())["guides"]
     OUT.mkdir(parents=True, exist_ok=True)
-    captured_at = _now_commit_time()
     entries = []
 
     async with async_playwright() as playwright:
@@ -166,12 +171,13 @@ async def main() -> int:
                 return 1
 
             await page.screenshot(path=str(OUT / shot))
+            sources = SOURCES.get(route, []) + SHARED
             entries.append(
                 {
                     "route": route,
                     "screenshot": shot,
-                    "captured_at": captured_at,
-                    "sources": SOURCES.get(route, []) + SHARED,
+                    "sources": sources,
+                    "source_commit": _source_commit(sources),
                 }
             )
             print(f"  {shot:16} {route}")

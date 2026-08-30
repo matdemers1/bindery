@@ -98,14 +98,19 @@ def test_no_screenshot_is_older_than_the_screen_it_shows() -> None:
     """The check that makes this survive contact with the next six months.
 
     A screenshot does not announce that it is out of date — it is simply a
-    picture of an application that no longer looks like that. Comparing the
-    commit that last touched a screen's source against the commit the screenshot
-    was captured at turns silent rot into a failing build.
+    picture of an application that no longer looks like that. Recording which
+    commit last changed a screen's source, and comparing it against the same
+    question asked now, turns silent rot into a failing build.
 
-    Deliberately *not* a pixel comparison. Antialiasing, font hinting and
-    timestamps differ between machines, so that check would fail for reasons
-    that have nothing to do with the documentation and would be switched off
-    within a month.
+    A commit *hash*, not a timestamp. The first version compared timestamps and
+    fired the moment the screenshots were committed, because that commit is
+    newer than everything in it — every capture immediately invalidated itself.
+    Committing a picture does not change the code it is a picture of, so a hash
+    still matches; changing the screen is what stops it matching.
+
+    Deliberately *not* a pixel comparison either. Antialiasing and font hinting
+    differ between machines, so that check would fail for reasons unrelated to
+    the documentation and would be switched off within a month.
     """
     manifest_file = SCREENS / "manifest.json"
     if not manifest_file.is_file():
@@ -117,13 +122,13 @@ def test_no_screenshot_is_older_than_the_screen_it_shows() -> None:
         sources = entry.get("sources") or []
         if not sources:
             continue
-        newest = subprocess.run(
-            ["git", "log", "-1", "--format=%ct", "--", *sources],
+        current = subprocess.run(
+            ["git", "log", "-1", "--format=%H", "--", *sources],
             cwd=REPO, capture_output=True, text=True, check=False,
         ).stdout.strip()
-        if not newest:
+        if not current:
             continue
-        if int(newest) > int(entry["captured_at"]):
+        if current != entry.get("source_commit"):
             stale.append(entry["screenshot"])
 
     assert not stale, (

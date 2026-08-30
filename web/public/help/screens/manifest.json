@@ -3,153 +3,153 @@
     {
       "route": "/",
       "screenshot": "ask.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/ask",
         "web/src/features/firstrun",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/search",
       "screenshot": "search.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/search",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/add",
       "screenshot": "add.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/add",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/files",
       "screenshot": "files.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/files",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/review",
       "screenshot": "review.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/review",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/archive",
       "screenshot": "archive.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/archive",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/photos",
       "screenshot": "photos.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/photos",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/organise",
       "screenshot": "organise.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/organise",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/import",
       "screenshot": "import.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/import",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/trust",
       "screenshot": "trust.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/trust",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/pipeline",
       "screenshot": "pipeline.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/pipeline",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/account",
       "screenshot": "account.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/accounts/AccountPage.tsx",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/people",
       "screenshot": "people.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/accounts/AdminPage.tsx",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/settings",
       "screenshot": "settings.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/settings",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     },
     {
       "route": "/rules",
       "screenshot": "rules.png",
-      "captured_at": 1788093897,
       "sources": [
         "web/src/features/rules",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
-      ]
+      ],
+      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
     }
   ]
 }
