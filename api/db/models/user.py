@@ -18,12 +18,35 @@ class AppUser(Base):
     is_active: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.true()
     )
+    # Set when repeated failures locked the account, cleared by a successful
+    # login or by an administrator. Short and self-expiring on purpose: a
+    # permanent lockout anyone can trigger by guessing badly is a weapon, not a
+    # defence (see api/auth/throttle.py).
+    locked_until: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at()
 
     @validates("email")
     def _normalise_email(self, _key: str, value: str) -> str:
         """One place, so every write path agrees with every lookup."""
         return value.strip().lower()
+
+
+class LoginAttempt(Base):
+    """One attempt at the login form, successful or not (REQ-133, REQ-144).
+
+    Kept rather than counted-and-discarded because "was anyone trying?" is a
+    question you only think to ask afterwards. The email is stored as typed —
+    lowercased — including addresses that do not exist, which is what makes a
+    password-spray against invented names visible at all.
+    """
+
+    __tablename__ = "login_attempt"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    email: Mapped[str] = mapped_column(sa.Text, nullable=False, index=True)
+    ip: Mapped[str | None] = mapped_column(sa.Text, index=True)
+    succeeded: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
+    created_at: Mapped[datetime] = created_at()
 
 
 class RefreshToken(Base):

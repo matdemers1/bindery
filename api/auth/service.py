@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.auth.passwords import verify_password
+from api.auth.passwords import decoy_hash, verify_password
 from api.auth.tokens import hash_refresh_secret, issue_access_token, new_refresh_secret
 from api.db.models import AppUser, RefreshToken
 
@@ -24,9 +24,16 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> AppU
         sa.select(AppUser).where(AppUser.email == email.strip().lower())
     )
     user = result.scalar_one_or_none()
-    # Verify even when the user is missing would be better still; for now keep
-    # the branches identical from the caller's point of view.
-    if user is None or not verify_password(user.password_hash, password):
+
+    # Verify against a decoy when the address does not exist, so both branches
+    # do the same Argon2 work. Argon2 is deliberately slow — that is its job —
+    # which made the short-circuit a clean timing oracle: a wrong password took
+    # tens of milliseconds and an unknown address took none. The message was
+    # already identical (REQ-135); the clock was not.
+    if user is None:
+        verify_password(decoy_hash(), password)
+        raise AuthError("invalid credentials")
+    if not verify_password(user.password_hash, password):
         raise AuthError("invalid credentials")
     if not user.is_active:
         raise AuthError("account is disabled")

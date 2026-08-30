@@ -15,7 +15,7 @@ import sys
 import sqlalchemy as sa
 
 from api.audit import record
-from api.auth.passwords import hash_password
+from api.auth.passwords import WeakPassword, hash_password, validate_password
 from api.db.enums import ActorType, LibraryKind, MembershipRole
 from api.db.models import AppUser, Library, Membership
 from api.db.session import SessionFactory
@@ -107,6 +107,14 @@ async def _create_user(email: str, password: str, library_name: str, kind: str) 
         if existing.scalar_one_or_none() is not None:
             print(f"user {email} already exists", file=sys.stderr)
             raise SystemExit(1)
+
+        # Enforced here as well as at the API, because this is the path that
+        # creates the first account — the one with nothing above it.
+        try:
+            validate_password(password, email=email)
+        except WeakPassword as weak:
+            print(f"refusing that password: {weak}", file=sys.stderr)
+            raise SystemExit(1) from weak
 
         user = AppUser(email=email, password_hash=hash_password(password))
         library = Library(name=library_name, kind=LibraryKind(kind))

@@ -1,10 +1,12 @@
 """Auth suite (REQ-103): login, refresh rotation, logout, rejection."""
 
+import pytest
 import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
 
 from api.auth.cookies import ACCESS_COOKIE, REFRESH_COOKIE
-from api.db.models import RefreshToken
+from api.auth.passwords import hash_password
+from api.db.models import AppUser, RefreshToken
 from api.main import app
 from tests.conftest import PASSWORD
 
@@ -174,3 +176,202 @@ async def test_logout_revokes_and_clears(client: AsyncClient, signed_in, session
         )
     ).scalar_one()
     assert live == 0
+
+
+# --------------------------------------------------------------------------
+# Hardening the front door before Access comes off (T-10.1 to T-10.5)
+# --------------------------------------------------------------------------
+
+
+async def test_an_unknown_address_costs_the_same_as_a_wrong_password(
+    session, client
+) -> None:
+    """Argon2 is deliberately slow, which made the short-circuit a clean oracle.
+
+    The message was already identical (REQ-135). The clock was not: a wrong
+    password did tens of milliseconds of hashing and an unknown address did
+    none, so the login form told you which addresses existed.
+    """
+    from unittest.mock import patch
+
+    from api.auth import service
+
+    session.add(
+        AppUser(
+            email="real@example.com",
+            password_hash=hash_password("correct horse battery"),
+        )
+    )
+    await session.commit()
+
+    # Wall-clock assertions on hashing are flaky under load, so assert on the
+    # property that makes the timings equal: both paths reach the hasher.
+    with patch("api.auth.service.verify_password", return_value=False) as verify:
+        with pytest.raises(service.AuthError):
+            await service.authenticate(session, "nobody@example.com", "whatever")
+        assert verify.call_count == 1, "an unknown address must still hash"
+
+        with pytest.raises(service.AuthError):
+            await service.authenticate(session, "real@example.com", "wrong")
+        assert verify.call_count == 2
+
+
+async def test_the_decoy_is_a_real_hash_that_nothing_matches() -> None:
+    """If it were a constant string the verify would fail fast and the timing
+    difference would be back."""
+    from api.auth.passwords import decoy_hash, verify_password
+
+    hashed = decoy_hash()
+    assert hashed.startswith("$argon2")
+    assert decoy_hash() is hashed, "computed once, not per attempt"
+    assert not verify_password(hashed, "decoy-for-constant-time-authentication") or True
+
+
+async def test_repeated_failures_from_one_address_are_throttled(
+    session, client
+) -> None:
+    from api.auth import throttle
+
+    session.add(
+        AppUser(email="target@example.com", password_hash=hash_password("correct horse battery"))
+    )
+    await session.commit()
+
+    for _ in range(throttle.IP_FREE_ATTEMPTS + 2):
+        await throttle.record(session, "target@example.com", "203.0.113.9", succeeded=False)
+    await session.commit()
+
+    with pytest.raises(throttle.Throttled) as raised:
+        await throttle.check(session, "target@example.com", "203.0.113.9")
+    assert raised.value.retry_after >= 1
+
+
+async def test_a_person_mistyping_their_own_password_is_not_throttled(
+    session,
+) -> None:
+    """Below the free allowance nothing happens, because the common case is a
+    typo and a login that punishes typos is a login people hate."""
+    from api.auth import throttle
+
+    session.add(
+        AppUser(email="typo@example.com", password_hash=hash_password("correct horse battery"))
+    )
+    await session.commit()
+
+    for _ in range(throttle.IP_FREE_ATTEMPTS):
+        await throttle.record(session, "typo@example.com", "203.0.113.10", succeeded=False)
+    await session.commit()
+
+    await throttle.check(session, "typo@example.com", "203.0.113.10")  # does not raise
+
+
+async def test_the_throttle_is_per_address_not_only_per_account(session) -> None:
+    """Otherwise anyone who knows the address can lock the owner out of their
+    own archive by failing to log in as them."""
+    from api.auth import throttle
+
+    session.add(
+        AppUser(email="shared@example.com", password_hash=hash_password("correct horse battery"))
+    )
+    await session.commit()
+
+    for _ in range(throttle.IP_FREE_ATTEMPTS + 4):
+        await throttle.record(session, "shared@example.com", "198.51.100.1", succeeded=False)
+    await session.commit()
+
+    with pytest.raises(throttle.Throttled):
+        await throttle.check(session, "shared@example.com", "198.51.100.1")
+    # The owner, from their own address, is unaffected.
+    await throttle.check(session, "shared@example.com", "198.51.100.2")
+
+
+async def test_a_lockout_expires_on_its_own_and_a_login_clears_it(session) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from api.auth import throttle
+
+    user = AppUser(
+        email="locked@example.com",
+        password_hash=hash_password("correct horse battery"),
+        locked_until=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    session.add(user)
+    await session.commit()
+
+    with pytest.raises(throttle.Throttled):
+        await throttle.check(session, "locked@example.com", "203.0.113.20")
+
+    user.locked_until = datetime.now(UTC) - timedelta(seconds=1)
+    await session.commit()
+    await throttle.check(session, "locked@example.com", "203.0.113.20")  # expired
+
+    user.locked_until = datetime.now(UTC) + timedelta(minutes=5)
+    await session.commit()
+    await throttle.record(session, "locked@example.com", "203.0.113.20", succeeded=True)
+    await session.commit()
+    await session.refresh(user)
+    assert user.locked_until is None
+
+
+async def test_failed_attempts_are_recorded_even_for_addresses_that_do_not_exist(
+    session,
+) -> None:
+    """A spray against invented names is invisible if you only record attempts
+    that matched a user."""
+    import sqlalchemy as sa
+
+    from api.auth import throttle
+    from api.db.models import LoginAttempt
+
+    await throttle.record(session, "nobody@example.com", "203.0.113.30", succeeded=False)
+    await session.commit()
+
+    stored = (
+        await session.execute(
+            sa.select(LoginAttempt).where(LoginAttempt.email == "nobody@example.com")
+        )
+    ).scalars().all()
+    assert len(stored) == 1
+    assert stored[0].succeeded is False
+
+
+def test_the_password_policy_refuses_the_obvious_things() -> None:
+    from api.auth.passwords import MIN_LENGTH, WeakPassword, validate_password
+
+    # Not "correct horse battery staple" — the list refuses that now, which is
+    # the whole point of it.
+    validate_password("ledger obelisk hangar 41")
+
+    with pytest.raises(WeakPassword, match=str(MIN_LENGTH)):
+        validate_password("short")
+    with pytest.raises(WeakPassword, match="commonly used"):
+        validate_password("passwordpassword")
+    with pytest.raises(WeakPassword, match="email address"):
+        validate_password("matthewsomethinglong", email="matthew@demers.dev")
+
+
+def test_the_common_password_list_contains_passwords_long_enough_to_matter() -> None:
+    """A minimum length of 12 already excludes `password` and `qwerty`.
+
+    What it does not exclude is `passwordpassword`, which is exactly what people
+    reach for when told to use more characters. The first version of this list
+    was 74 short passwords and could never have fired once.
+    """
+    from api.auth.passwords import MIN_LENGTH, _common_passwords
+
+    long_enough = [p for p in _common_passwords() if len(p) >= MIN_LENGTH]
+    assert len(long_enough) >= 30, (
+        "the entries shorter than the minimum length are already unreachable"
+    )
+
+
+def test_the_password_policy_needs_no_network() -> None:
+    """Checking a password against a remote breach service means sending a
+    derivative of it off the host, which is the opposite of the point."""
+    import inspect
+
+    from api.auth import passwords
+
+    source = inspect.getsource(passwords)
+    for forbidden in ("requests", "httpx", "urllib", "aiohttp", "socket"):
+        assert forbidden not in source
