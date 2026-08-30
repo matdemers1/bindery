@@ -15,14 +15,26 @@ import logging
 import os
 import signal
 import uuid
+from datetime import timedelta
 
 import sqlalchemy as sa
 
-from api import eventlog, events, health_panel, notify, queue, settings_store, version
+from api import (
+    eventlog,
+    events,
+    health_panel,
+    notify,
+    offsite,
+    offsite_runs,
+    queue,
+    settings_store,
+    version,
+)
 from api.config import get_settings
 from api.db.enums import JobStage
-from api.db.models import Document, SourceFile
+from api.db.models import Document, OffsiteRun, SourceFile
 from api.db.session import SessionFactory, engine
+from api.export import integrity
 from worker import convert
 from worker.ai.provider import ProviderRefusedError, ProviderUnavailableError
 from worker.ingest.watched_folder import watch_inbox
@@ -44,7 +56,23 @@ RECLAIM_INTERVAL_SECONDS = 60.0
 # checking more often than this would only find the same stall sooner than it
 # is a stall.
 HEALTH_INTERVAL_SECONDS = 300.0
+# Replication is checked often and runs rarely. The check is two indexed
+# queries; the run happens when the cadence in `offsite_runs` says it is due,
+# which is at most twice a day.
+OFFSITE_INTERVAL_SECONDS = 600.0
+# A `running` row held longer than this belongs to a worker that is gone. It
+# blocks every future run — the partial unique index sees to that — so an
+# abandoned row is an outage, not untidiness.
+OFFSITE_LEASE = timedelta(hours=6)
 SHUTDOWN_GRACE_SECONDS = 20.0
+
+
+class _NotConfigured(Exception):
+    """No AWS settings yet. Not an error, and not worth a log line every pass."""
+
+
+class _NothingDue(Exception):
+    """The cadence says no, or another worker got there first."""
 
 
 class UnknownStageError(RuntimeError):
@@ -290,6 +318,97 @@ def _report_unexpected_exit(task: asyncio.Task) -> None:
         log.warning("worker task %s exited", task.get_name())
 
 
+
+async def _offsite_replication(stopping: asyncio.Event) -> None:
+    """Get a copy out of the building, on a cadence, without being asked.
+
+    In the worker rather than the api for the same reason the health monitor is:
+    it is long-running work that must survive the request that would otherwise
+    have started it. A 300 MB upload inside a request handler holds a connection
+    open for minutes and dies with it.
+
+    Deliberately **not** a `JobStage`. A global job has a null idempotency key,
+    and `enqueue` is `on_conflict_do_nothing` — so the first run would insert and
+    every run after it would silently no-op forever, success or failure alike.
+    The queue would look perfectly healthy while nothing left the building. See
+    ADR-010.
+    """
+    while not stopping.is_set():
+        try:
+            async with SessionFactory() as session:
+                # Configuration first, and deliberately so. This was the other
+                # way round until the loop was watched on a real stack: a worker
+                # that came up before its migration was applied — which REQ-114
+                # explicitly permits, since migrations are never run on boot —
+                # wrote to `offsite_run` before discovering it had nothing to
+                # do, and logged an UndefinedTableError stack trace every ten
+                # minutes. Reading a table that has existed since Phase 0 costs
+                # nothing and cannot fail that way.
+                config = await offsite.config_from_settings(session)
+                if not config.complete:
+                    # Not an error and not worth a log line every ten minutes.
+                    # The Trust screen says "not configured", which is where
+                    # that belongs.
+                    raise _NotConfigured
+
+                released = await offsite_runs.release_stale(
+                    session, older_than=OFFSITE_LEASE
+                )
+                if released:
+                    log.warning(
+                        "released %s abandoned replication run(s) — a worker died "
+                        "mid-run and was blocking every future one", released,
+                    )
+
+                due = await offsite_runs.what_is_due(session)
+                if due is None:
+                    raise _NothingDue
+
+                run = await offsite_runs.begin(session, due)
+                if run is None:
+                    raise _NothingDue
+
+            # A separate session for the run itself: the upload can take
+            # minutes, and holding the connection that claimed the run open for
+            # all of it would tie up a pool slot for no reason.
+            async with SessionFactory() as session:
+                run = await session.get(OffsiteRun, run.id)
+                try:
+                    # Re-read rather than carrying `config` across sessions: a
+                    # credential rotated between the claim and the run should
+                    # take effect, not fail with the one it replaced.
+                    config = await offsite.config_from_settings(session)
+                    result = await offsite.replicate(
+                        session,
+                        config,
+                        offsite.make_client(config),
+                        kind=offsite.Kind(run.kind),
+                        blob_root=get_settings().blob_root,
+                        integrity_report=await integrity.check(session),
+                    )
+                except Exception as error:
+                    # Whatever went wrong, the row must not be left `running`:
+                    # it holds the partial unique index and would block every
+                    # future run until a human noticed.
+                    log.exception("replication run failed")
+                    await offsite_runs.abandon(session, run, f"{type(error).__name__}: {error}")
+                else:
+                    await offsite_runs.finish(session, run, result)
+                    if result.ok:
+                        log.info("offsite replication: %s", result.detail)
+                    else:
+                        # The row is the record and the health panel raises the
+                        # alert (T-13.8). A second notification path here would
+                        # be a second thing to keep in step.
+                        log.error("offsite replication failed: %s", result.detail)
+        except (_NotConfigured, _NothingDue):
+            pass
+        except Exception:
+            log.exception("offsite replication pass failed")
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stopping.wait(), timeout=OFFSITE_INTERVAL_SECONDS)
+
+
 async def main() -> None:
     settings = get_settings()
     worker_id = f"{os.uname().nodename}:{os.getpid()}"
@@ -320,6 +439,9 @@ async def main() -> None:
     tasks.append(asyncio.create_task(_reclaimer(stopping), name="reclaimer"))
     tasks.append(asyncio.create_task(watch_inbox(stopping), name="watched-folder"))
     tasks.append(asyncio.create_task(_health_monitor(stopping), name="health-monitor"))
+    tasks.append(
+        asyncio.create_task(_offsite_replication(stopping), name="offsite-replication")
+    )
     tasks.append(
         asyncio.create_task(
             eventlog.drain_forever(stopping, SessionFactory), name="log-drain"

@@ -129,6 +129,31 @@ The integrity check gates all of it, for the reason the local backup gives: a
 backup taken over a corrupt blob is a corrupt backup, faithfully replicated and
 eventually rotated into every generation you hold.
 
+## The cadence
+
+Two schedules, deliberately expressed differently.
+
+**Daily is an interval** — due when the newest success is more than 20 hours
+old. Twenty rather than 24 so a run does not creep an hour later each day until
+it lands in the middle of the afternoon, and an interval rather than a clock
+time so a machine switched off overnight runs when it comes back instead of
+skipping a day and reporting success.
+
+**Weekly is a calendar week**, because the object key *is* the ISO week. The
+bucket can hold one weekly generation per week, so "one per ISO week" is not a
+policy choice — it is the only thing the naming scheme can express. A seven-day
+interval would drift across a week boundary and silently leave a week with no
+generation at all. (Sunday the 30th and Monday the 24th are the same ISO week,
+six days apart. "Last week" and "seven days ago" are different questions.)
+
+A failed run never counts as a success, and no successful run at all reads as
+**stale**, not as green. A dashboard that is reassuring because nothing has
+happened yet is the failure the Trust screen exists to prevent.
+
+The loop lives in the worker, checks every ten minutes, and is silent when
+nothing is configured. It is deliberately **not** a `JobStage` — see ADR-010 for
+why that would silently stop after the first run.
+
 ## The connection test
 
 **Settings → Offsite replication → Test connection.** It writes an object,
