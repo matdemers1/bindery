@@ -140,3 +140,4 @@ async def test_golden_corpus_word_accuracy(workspace) -> None:
         "R-01 gate. Do not start Phase 3 on this text — improve preprocessing, "
         "escalate to PaddleOCR, or re-scan the sources first."
     )
+

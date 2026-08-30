@@ -61,7 +61,25 @@ class Score:
         return max(0.0, 1.0 - self.errors / self.reference_words)
 
 
+UNVERIFIED_MARKER = "# UNVERIFIED"
+
+
+class UnverifiedFixture(Exception):
+    """`expected.txt` still holds the OCR output it was staged from.
+
+    Scoring OCR against its own output returns 100% and measures nothing — a
+    number that looks like success and is the absence of a measurement. The
+    marker is removed by the person who checked the text against the page.
+    """
+
+
 def score(name: str, expected: str, actual: str) -> Score:
+    if expected.lstrip().startswith(UNVERIFIED_MARKER):
+        raise UnverifiedFixture(
+            f"{name}: expected.txt is still the staged OCR output. Correct it "
+            "against the page and delete the first line."
+        )
+
     reference = normalize_words(expected)
     hypothesis = normalize_words(actual)
     return Score(
