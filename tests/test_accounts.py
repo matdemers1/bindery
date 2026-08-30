@@ -435,3 +435,31 @@ async def test_a_suspended_account_cannot_log_in(session, client, user_factory) 
         "/api/auth/login", json={"email": user.email, "password": PASSWORD}
     )
     assert response.status_code == 401
+
+
+async def test_regenerating_recovery_codes_retires_them_rather_than_deleting(
+    session, user_factory
+) -> None:
+    """REQ-090, and a distinction worth keeping: "which codes did I spend" and
+    "which did I regenerate away" look alike and are not the same question."""
+    from api.db.models import RecoveryCode
+
+    user, _ = await user_factory()
+    first = await accounts.new_recovery_codes(session, user)
+    await session.commit()
+    await accounts.new_recovery_codes(session, user)
+    await session.commit()
+
+    rows = (
+        await session.execute(
+            sa.select(RecoveryCode).where(RecoveryCode.user_id == user.id)
+        )
+    ).scalars().all()
+    assert len(rows) == accounts.RECOVERY_CODE_COUNT * 2, "nothing was removed"
+    assert sum(1 for r in rows if r.superseded_at is not None) == accounts.RECOVERY_CODE_COUNT
+
+    user.totp_secret = totp.new_secret()
+    user.totp_confirmed_at = datetime.now(UTC)
+    await session.commit()
+    with pytest.raises(accounts.AccountError):
+        await accounts.check_second_factor(session, user=user, code=first[0])

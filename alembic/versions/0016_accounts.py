@@ -117,6 +117,9 @@ def upgrade() -> None:
         sa.Column("user_id", _UUID, sa.ForeignKey("app_user.id"), nullable=False),
         sa.Column("code_hash", sa.Text(), nullable=False),
         sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
+        # Retired when a new set is issued. Separate from `used_at` so "which
+        # codes did I spend" survives a regeneration (REQ-090).
+        sa.Column("superseded_at", sa.DateTime(timezone=True), nullable=True),
         _created_at(),
     )
     op.create_index("ix_recovery_code_user_id", "recovery_code", ["user_id"])

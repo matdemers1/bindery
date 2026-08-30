@@ -168,6 +168,10 @@ class RecoveryCode(Base):
     )
     code_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    # Set when a new set was issued and this one stopped being valid. Retired
+    # rather than deleted, and kept distinct from `used_at`, so "which of my
+    # codes did I spend" stays answerable after a regeneration (REQ-090).
+    superseded_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at()
 
 

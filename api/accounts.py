@@ -267,11 +267,20 @@ async def change_password(
 
 
 async def new_recovery_codes(session: AsyncSession, user: AppUser) -> list[str]:
-    """Replace this user's recovery codes. Returned once."""
+    """Replace this user's recovery codes. Returned once.
+
+    The old ones are *retired*, not deleted. Nothing in Bindery removes rows on
+    its own (REQ-090), and keeping them separates two questions that look alike
+    and are not: which codes did I spend, and which did I regenerate away.
+    """
     await session.execute(
-        sa.delete(RecoveryCode).where(
-            RecoveryCode.user_id == user.id, RecoveryCode.used_at.is_(None)
+        sa.update(RecoveryCode)
+        .where(
+            RecoveryCode.user_id == user.id,
+            RecoveryCode.used_at.is_(None),
+            RecoveryCode.superseded_at.is_(None),
         )
+        .values(superseded_at=_now())
     )
     codes = [
         "-".join(
@@ -323,6 +332,7 @@ async def check_second_factor(
                 RecoveryCode.user_id == user.id,
                 RecoveryCode.code_hash == _hash(normalised),
                 RecoveryCode.used_at.is_(None),
+                RecoveryCode.superseded_at.is_(None),
             )
         )
     ).scalar_one_or_none()
