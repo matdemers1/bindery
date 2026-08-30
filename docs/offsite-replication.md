@@ -154,6 +154,33 @@ The loop lives in the worker, checks every ten minutes, and is silent when
 nothing is configured. It is deliberately **not** a `JobStage` — see ADR-010 for
 why that would silently stop after the first run.
 
+## When it tells you
+
+The Trust screen shows all of this, and a screen only helps someone who opens
+it. So replication staleness also raises an alert on the health panel, through
+the same notifier a stalled pipeline uses. The failure being defended against is
+replication that quietly stopped in March and is noticed in November.
+
+`Notifier.dispatch` sends **only critical** alerts, so severity is the
+difference between "visible to anyone looking" and "pages you":
+
+| State | Severity | Pages? |
+|---|---|:-:|
+| Not configured — both copies in one building | warning | no |
+| Configured, first run not yet made | warning | no |
+| Succeeded recently, but failing since | warning | no |
+| Configured, every attempt has failed | **critical** | yes |
+| Last success more than 48 hours ago | **critical** | yes |
+
+Not-configured is deliberately not critical: every fresh install is in that
+state, and an alert that fires on first boot teaches people the channel is
+noise. It still appears on the panel, because "there is no offsite copy" is R-09
+and staying quiet about it is how that risk spent two days looking closed.
+
+The failing-since-last-success warning is the early one. A success ten hours ago
+followed by two failures is not stale yet — the threshold is 48 hours — but it
+is on its way, and saying so buys a day and a half.
+
 ## The connection test
 
 **Settings → Offsite replication → Test connection.** It writes an object,

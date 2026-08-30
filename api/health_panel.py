@@ -118,6 +118,92 @@ def estimate_cost(usage: dict, model: str | None = None) -> float:
     return sum(count / 1_000_000 * prices.price(kind) for kind, count in tokens.items())
 
 
+
+async def _offsite_alerts(session: AsyncSession, now: datetime) -> list[Alert]:
+    """Whether a copy has left the building lately (T-13.8, REQ-165, REQ-110).
+
+    The Trust screen already shows this, and a screen only helps someone who
+    opens it. Replication that quietly stopped in March and is noticed in
+    November is the failure this exists to catch — so it raises the same alert a
+    stalled pipeline does, on the same panel, through the same notifier.
+
+    Severity is doing real work here, because `Notifier.dispatch` sends only
+    critical alerts. A warning is visible to anyone looking at the Health screen
+    and pages nobody, which is exactly right for the two states that are either
+    a setup step or resolve on their own within minutes.
+    """
+    from api import offsite, offsite_runs
+
+    config = await offsite.config_from_settings(session)
+    if not config.complete:
+        # Deliberately a warning. Every fresh install and every dev stack is in
+        # this state, and a critical alert here would page on first boot and
+        # teach people that this channel is noise. It still appears on the
+        # panel, because "there is no offsite copy" is R-09 and staying silent
+        # about it is how that risk went two days looking closed.
+        return [
+            Alert(
+                "warning", "offsite_unconfigured",
+                "No offsite copy is configured. Both backups are in one building.",
+            )
+        ]
+
+    state = await offsite_runs.status(session, now=now)
+    if state["last_success_at"] is None:
+        if state["runs_total"] == 0:
+            # Configured seconds ago; the worker checks every ten minutes and a
+            # weekly run is due immediately on a fresh archive. Critical here
+            # would be a false alarm with a ten-minute lifespan.
+            return [
+                Alert(
+                    "warning", "offsite_pending",
+                    "Configured, but no copy has been made yet. The first run "
+                    "starts within ten minutes.",
+                )
+            ]
+        return [
+            Alert(
+                "critical", "offsite_never",
+                f"No copy has ever reached the bucket. {state['runs_total']} "
+                "attempt(s), all failed.",
+                {"attempts": state["runs_total"]},
+            )
+        ]
+
+    if state["stale"]:
+        hours = (state["last_success_age_seconds"] or 0) // 3600
+        return [
+            Alert(
+                "critical", "offsite_stale",
+                f"The last offsite copy succeeded {hours} hours ago. "
+                "Replication has stopped.",
+                {
+                    "age_seconds": state["last_success_age_seconds"],
+                    "failures_since": state["failures_since_success"],
+                },
+            )
+        ]
+
+    if state["failures_since_success"]:
+        # Failing *now*, but not stale yet — the last success is still inside
+        # the 48-hour window. This is the early warning: it says the archive is
+        # on its way to critical rather than waiting until it arrives.
+        #
+        # Note the direction. This counts failures *after* the newest success,
+        # not before it. A run that failed and then recovered needs no alert;
+        # one that succeeded and has failed twice since is the one worth
+        # catching a day and a half early.
+        return [
+            Alert(
+                "warning", "offsite_failing",
+                f"{state['failures_since_success']} replication run(s) have "
+                "failed since the last success.",
+                {"count": state["failures_since_success"]},
+            )
+        ]
+    return []
+
+
 async def collect(
     session: AsyncSession, library_ids: list[uuid.UUID] | None = None
 ) -> HealthPanel:
@@ -262,6 +348,8 @@ async def collect(
                 {"count": failed_24h},
             )
         )
+
+    alerts.extend(await _offsite_alerts(session, now))
 
     return HealthPanel(
         checked_at=now,

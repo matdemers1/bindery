@@ -234,6 +234,21 @@ async def status(session: AsyncSession, *, now: datetime | None = None) -> dict:
         )
     ).scalars().first()
 
+    runs_total = (
+        await session.execute(sa.select(sa.func.count(OffsiteRun.id)))
+    ).scalar_one()
+    # Failures since the last success — the number that separates "it has never
+    # run yet" from "it has been trying and failing", which want different
+    # severities and different sentences.
+    since = latest.started_at if latest else datetime.min.replace(tzinfo=UTC)
+    failures_since = (
+        await session.execute(
+            sa.select(sa.func.count(OffsiteRun.id)).where(
+                OffsiteRun.state == FAILED, OffsiteRun.started_at > since
+            )
+        )
+    ).scalar_one()
+
     return {
         "last_success_at": latest.started_at.isoformat() if latest else None,
         "last_success_age_seconds": int(age.total_seconds()) if age else None,
@@ -243,6 +258,8 @@ async def status(session: AsyncSession, *, now: datetime | None = None) -> dict:
         "in_flight": in_flight.state if in_flight else None,
         "last_daily_at": newest.started_at.isoformat() if newest else None,
         "last_weekly_at": weekly.started_at.isoformat() if weekly else None,
+        "runs_total": runs_total,
+        "failures_since_success": failures_since,
     }
 
 

@@ -598,6 +598,8 @@ class OffsiteStatusOut(BaseModel):
     in_flight: str | None = None
     last_daily_at: datetime | None = None
     last_weekly_at: datetime | None = None
+    runs_total: int = 0
+    failures_since_success: int = 0
     runs: list[OffsiteRunOut] = []
 
 
