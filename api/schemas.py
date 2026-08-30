@@ -563,6 +563,19 @@ class SettingsTestOut(BaseModel):
     output_tokens: int | None = None
 
 
+class OffsiteTestOut(BaseModel):
+    """The result of a real round trip, not a reachability check (REQ-160)."""
+
+    ok: bool
+    detail: str
+    encryption: str | None = None
+    kms_key_arn: str | None = None
+    bucket_key_enabled: bool | None = None
+    # What was actually proven, in order, so a partial failure says how far it
+    # got rather than only that it stopped.
+    checks: list[str] = []
+
+
 class HealthOut(BaseModel):
     status: str
     database: str
@@ -577,6 +590,7 @@ __all__ = [
     "AssetOut",
     "AssetTimelineOut",
     "AuditEventOut",
+    "OffsiteTestOut",
     "AuditPageOut",
     "BackupOut",
     "BulkEditIn",

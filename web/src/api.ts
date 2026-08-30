@@ -323,6 +323,16 @@ export interface Settings {
   offsite_kms_key_id: string | null;
 }
 
+export interface OffsiteTest {
+  ok: boolean;
+  detail: string;
+  encryption: string | null;
+  kms_key_arn: string | null;
+  bucket_key_enabled: boolean | null;
+  /** What was proven, in order, so a partial failure says how far it got. */
+  checks: string[];
+}
+
 export interface SettingsTest {
   ok: boolean;
   detail: string;
@@ -552,6 +562,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
   testAi: () => request<SettingsTest>("/settings/test-ai", { method: "POST" }),
+  testOffsite: () => request<OffsiteTest>("/settings/test-offsite", { method: "POST" }),
 
   imports: () => request<ImportSession[]>("/imports"),
   startImport: (body: { library_id: string; root_path: string; sample_size?: number }) =>

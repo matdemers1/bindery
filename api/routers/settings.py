@@ -13,7 +13,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import events, models, settings_store
+from api import events, models, offsite, settings_store
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -22,6 +22,7 @@ from api.db.models import AppUser
 from api.db.session import get_session
 from api.schemas import (
     ModelChoiceOut,
+    OffsiteTestOut,
     SettingsOut,
     SettingsTestOut,
     SettingsUpdateIn,
@@ -246,3 +247,31 @@ async def test_ai(
     except Exception as exc:  # surfaced verbatim — the message is the diagnosis
         name = type(exc).__name__
         return SettingsTestOut(ok=False, detail=f"{name}: {str(exc)[:300]}", model=model)
+
+
+@router.post("/test-offsite", response_model=OffsiteTestOut)
+async def test_offsite(
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> OffsiteTestOut:
+    """Prove a backup would actually survive, before one is ever taken.
+
+    Deliberately a write and a read rather than a `ListBucket`. Reachability
+    proves the credential exists; it proves nothing about whether S3 will accept
+    an object encrypted with the configured key, or hand it back. Those are four
+    separate permissions — PutObject, kms:GenerateDataKey, GetObject,
+    kms:Decrypt — and they fail independently.
+
+    Owner-only, like every other write on this screen: it costs money, however
+    little, and it writes to the bucket.
+    """
+    await _owner_only(session, user)
+    result = await offsite.probe(await offsite.config_from_settings(session))
+    return OffsiteTestOut(
+        ok=result.ok,
+        detail=result.detail,
+        encryption=result.encryption,
+        kms_key_arn=result.kms_key_arn,
+        bucket_key_enabled=result.bucket_key_enabled,
+        checks=result.checks,
+    )

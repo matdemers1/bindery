@@ -37,6 +37,13 @@ dependencies = [
     # AES-256 ZIP for the go-bag export. Standard enough that 7-Zip and Keka
     # open it, which is the point: the recipient may not have Bindery.
     "pyzipper",
+    # Offsite replication (ADR-010). The repo prefers implementing to depending
+    # — TOTP is forty lines of HMAC rather than a library — but SigV4 is not
+    # that: canonical request construction, chunked payload signing and
+    # multipart upload are each subtle, and a signing bug presents as an opaque
+    # 403. The api needs it too, not only the worker: the connection test is a
+    # synchronous request on a human's behalf, like /api/settings/test-ai.
+    "boto3",
 ]
 
 [project.optional-dependencies]

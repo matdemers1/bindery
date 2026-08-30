@@ -3,28 +3,71 @@
     {
       "ID": "expire-daily-dumps",
       "Status": "Enabled",
-      "Filter": { "Prefix": "dumps/daily/" },
-      "Expiration": { "Days": 7 },
-      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 }
+      "Filter": {
+        "Prefix": "dumps/daily/"
+      },
+      "Expiration": {
+        "Days": 7
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 1
+      }
     },
     {
       "ID": "expire-weekly-dumps",
       "Status": "Enabled",
-      "Filter": { "Prefix": "dumps/weekly/" },
-      "Expiration": { "Days": 35 },
-      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 }
+      "Filter": {
+        "Prefix": "dumps/weekly/"
+      },
+      "Expiration": {
+        "Days": 35
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 1
+      }
+    },
+    {
+      "ID": "expire-connection-probes",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "_probe/"
+      },
+      "Expiration": {
+        "Days": 1
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 1
+      }
     },
     {
       "ID": "tidy-expired-delete-markers",
       "Status": "Enabled",
-      "Filter": { "Prefix": "dumps/" },
-      "Expiration": { "ExpiredObjectDeleteMarker": true }
+      "Filter": {
+        "Prefix": "dumps/"
+      },
+      "Expiration": {
+        "ExpiredObjectDeleteMarker": true
+      }
     },
     {
       "ID": "abort-incomplete-multipart",
       "Status": "Enabled",
-      "Filter": { "Prefix": "" },
-      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+      "Filter": {
+        "Prefix": ""
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    },
+    {
+      "ID": "tidy-expired-probe-markers",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "_probe/"
+      },
+      "Expiration": {
+        "ExpiredObjectDeleteMarker": true
+      }
     }
   ]
 }

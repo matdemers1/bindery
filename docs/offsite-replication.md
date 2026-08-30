@@ -44,7 +44,12 @@ blobs/<sha256[0:2]>/<sha256>              put-once, never expires
 dumps/daily/<ISO8601>.dump                expires after 7 days
 dumps/weekly/<ISO week>.dump              expires after 35 days
 manifests/{daily,weekly}/<...>.json       never expires
+_probe/connection-test                    expires after 1 day
 ```
+
+`_probe/` exists because the connection test writes a real object and reads it
+back, and **Bindery cannot delete it** — so the bucket has to. Without that rule
+the prefix would accumulate one immortal object per press of the button.
 
 ## The two rules that matter
 
@@ -86,6 +91,34 @@ aws iam put-user-policy --user-name bindery-offsite \
 
 `BucketKeyEnabled` is **not optional**. Without it every blob upload is a
 separate KMS request, and so is every object read during a restore drill.
+
+## The connection test
+
+**Settings → Offsite replication → Test connection.** It writes an object,
+reads it back, and checks four things independently: that the bytes match, that
+the object came back encrypted with `aws:kms`, that it was stored under the
+configured key, and whether Bucket Keys are on.
+
+A `ListBucket` would have been simpler and would prove nothing — `PutObject`,
+`kms:GenerateDataKey`, `GetObject` and `kms:Decrypt` are four permissions that
+fail independently, and reachability exercises none of them.
+
+The put names the KMS key **explicitly** rather than relying on the bucket
+default. That is what makes a wrong key id detectable: an omitted `SSEKMSKeyId`
+would silently fall back to the bucket's default key and report success for a
+key that is not the one configured.
+
+Verified against the live bucket on 2026-08-30:
+
+| Given | AWS does |
+|---|---|
+| The correct key ARN | Stores it, reports the ARN and `BucketKeyEnabled: true` |
+| `alias/bindery-offsite` | Resolves it and reports the **key** ARN back |
+| A key UUID that does not exist | Refuses the put — `KMS.NotFoundException` |
+| An alias that does not exist | Refuses the put — `KMS.NotFoundException` |
+
+So a typo in either spelling fails at write time, and a real-but-different key
+is caught by comparing the returned ARN.
 
 ## Verifying the policy without issuing a credential
 

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import LogViewer from "../../components/LogViewer";
 import PendingReviewPanel from "../../components/PendingReview";
-import { ApiError, api, type ApiTokenRecord, type IssuedApiToken, type Settings, type SettingsTest } from "../../api";
+import { ApiError, api, type ApiTokenRecord, type IssuedApiToken, type OffsiteTest, type Settings, type SettingsTest } from "../../api";
 
 /**
  * Settings (screen 19).
@@ -413,9 +413,30 @@ function OffsiteReplication({
   const [kms, setKms] = useState(settings.offsite_kms_key_id ?? "");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [test, setTest] = useState<OffsiteTest | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const configured =
     settings.aws_secret_configured && !!settings.aws_access_key_id && !!settings.offsite_bucket;
+
+  async function runTest() {
+    setTesting(true);
+    setNotice(null);
+    try {
+      setTest(await api.testOffsite());
+    } catch (error) {
+      setTest({
+        ok: false,
+        detail: error instanceof ApiError ? error.message : "Could not reach the server.",
+        encryption: null,
+        kms_key_arn: null,
+        bucket_key_enabled: null,
+        checks: [],
+      });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -433,6 +454,9 @@ function OffsiteReplication({
       });
       setSecret("");
       setNotice("Saved.");
+      // A result from the previous configuration must not sit above the new
+      // one. This panel exists to avoid claiming more than it has checked.
+      setTest(null);
       onSaved();
     } catch (error) {
       // The server's message is the diagnosis here — it names the field and
@@ -472,14 +496,40 @@ function OffsiteReplication({
         )}
       </div>
 
-      {/* Deliberately not the word "connected". Nothing here has talked to AWS
-          yet; all this reports is that four fields are non-empty, and a green
-          light that means less than it looks like is worse than no light. */}
-      {configured && (
+      {/* Deliberately not the word "connected" until something has actually
+          talked to AWS. "Four fields are non-empty" is not a connection, and a
+          green light that means less than it looks like is worse than none. */}
+      {configured && !test && (
         <p className="mt-2 text-sm text-amber-400/90">
-          Saved, but never tested. Until the connection test lands, this says the
-          fields are filled in — not that a backup would succeed.
+          Saved, but not tested. This says the fields are filled in — not that a
+          backup would succeed. Run the test.
         </p>
+      )}
+
+      {test && (
+        <div
+          className={`mt-3 rounded-md border p-3 text-sm ${
+            test.ok
+              ? "border-emerald-500/40 bg-emerald-500/5"
+              : "border-red-500/40 bg-red-500/5"
+          }`}
+        >
+          <p className={test.ok ? "text-emerald-300" : "text-red-300"}>{test.detail}</p>
+          {test.checks.length > 0 && (
+            <ul className="mt-2 space-y-0.5 text-xs text-muted">
+              {test.checks.map((check) => (
+                <li key={check}>
+                  {/* Everything listed is something that happened, so a failure
+                      reads as "it got this far" rather than only "it stopped". */}
+                  <span className="text-emerald-400">✓</span> {check}
+                </li>
+              ))}
+            </ul>
+          )}
+          {test.kms_key_arn && (
+            <p className="mt-2 break-all font-mono text-xs text-muted">{test.kms_key_arn}</p>
+          )}
+        </div>
       )}
 
       <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={save}>
@@ -557,6 +607,15 @@ function OffsiteReplication({
             className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
           >
             {busy ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void runTest()}
+            disabled={testing || !configured}
+            title={configured ? undefined : "Fill in and save the fields first"}
+            className="rounded-md border border-edge px-3 py-2 text-sm disabled:opacity-40"
+          >
+            {testing ? "Testing…" : "Test connection"}
           </button>
           {notice && <span className="text-sm text-muted">{notice}</span>}
         </div>
