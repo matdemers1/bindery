@@ -16,7 +16,9 @@ import {
   ShieldCheck,
   Sparkles,
   Tags,
+  UserCircle,
   Users,
+  UsersRound,
   Workflow,
 } from "lucide-react";
 
@@ -47,6 +49,7 @@ type Item = {
   icon: typeof Search;
   hint?: string;
   badge?: "review" | "health";
+  adminOnly?: boolean;
 };
 
 const GROUPS: { title: string; items: Item[] }[] = [
@@ -75,12 +78,29 @@ const GROUPS: { title: string; items: Item[] }[] = [
       { to: "/trust", label: "Trust", icon: ShieldCheck, badge: "health" },
       { to: "/pipeline", label: "Pipeline", icon: Activity },
       { to: "/libraries", label: "Libraries", icon: Users },
+      { to: "/account", label: "Your account", icon: UserCircle },
+      // Only rendered for administrators — see `visibleGroups` below.
+      { to: "/people", label: "People", icon: UsersRound, adminOnly: true },
       { to: "/settings", label: "Settings", icon: Settings },
     ],
   },
 ];
 
 const COLLAPSED_KEY = "bindery.sidebar.collapsed";
+
+/**
+ * Hiding a link is presentation, not permission.
+ *
+ * `/people` is gated by `require_admin` at the API, which answers 404 to
+ * everyone else. This only keeps the sidebar honest — a link that always 404s
+ * is worse than no link.
+ */
+function visibleGroups(isAdmin: boolean) {
+  return GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => !item.adminOnly || isAdmin),
+  }));
+}
 
 export default function Shell({
   user,
@@ -180,7 +200,7 @@ export default function Shell({
         </div>
 
         <nav aria-label="Sections" className="flex-1 overflow-y-auto px-2.5 pb-2">
-          {GROUPS.map((group) => (
+          {visibleGroups(user.is_admin ?? false).map((group) => (
             <div key={group.title} className="mb-4">
               {!collapsed && (
                 <h2 className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">

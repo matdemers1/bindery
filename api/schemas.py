@@ -24,6 +24,9 @@ class UserOut(BaseModel):
     id: uuid.UUID
     email: str
     display_name: str | None
+    # So the shell knows whether to draw the People link. Hiding it is
+    # presentation only — `require_admin` answers 404 to everyone else.
+    is_admin: bool = False
 
 
 class LibraryOut(BaseModel):

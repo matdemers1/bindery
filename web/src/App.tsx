@@ -22,6 +22,9 @@ import ViewerPage from "./features/viewer/ViewerPage";
 import Shell from "./components/Shell";
 import { LiveProvider } from "./live/LiveProvider";
 import Login from "./pages/Login";
+import AccountPage from "./features/accounts/AccountPage";
+import AdminPage from "./features/accounts/AdminPage";
+import JoinPage from "./features/accounts/JoinPage";
 
 type State = { status: "loading" } | { status: "out" } | { status: "in"; user: User };
 
@@ -61,6 +64,16 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // An invitation link has to work before there is a session — it is how the
+  // session comes to exist. Read straight from the path rather than through the
+  // router, because the router lives inside the signed-in tree.
+  const joinToken = window.location.pathname.startsWith("/join/")
+    ? decodeURIComponent(window.location.pathname.slice("/join/".length))
+    : null;
+  if (joinToken && state.status !== "in") {
+    return <JoinPage token={joinToken} />;
+  }
+
   if (state.status === "loading") {
     return <Centered>Loading…</Centered>;
   }
@@ -87,11 +100,17 @@ export default function App() {
               because "find the thing I know I have" is a different job. */}
           <Route
             path="/"
-            element={<AskPage libraries={libraries} onUploaded={refresh} />}
+            element={
+              <AskPage
+                libraries={libraries}
+                onUploaded={refresh}
+                userId={state.user.id}
+              />
+            }
           />
           <Route
             path="/search"
-            element={<SearchPage libraries={libraries} />}
+            element={<SearchPage libraries={libraries} userId={state.user.id} />}
           />
           {/* Documents are the normal path: search returns page ranges, not files. */}
           <Route
@@ -117,6 +136,11 @@ export default function App() {
           <Route path="/organise" element={<OrganisePage libraries={libraries} />} />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/account" element={<AccountPage />} />
+          <Route path="/people" element={<AdminPage />} />
+          {/* Someone already signed in who opens an invitation link should end
+              up somewhere sensible rather than at a form they cannot use. */}
+          <Route path="/join/*" element={<Navigate to="/" replace />} />
           <Route path="/rules" element={<RulesPage libraries={libraries} />} />
           <Route path="/pipeline" element={<PipelinePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

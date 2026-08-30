@@ -5,6 +5,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** Seconds, from the `Retry-After` header on a 429. */
+    readonly retryAfter?: number,
   ) {
     super(message);
   }
@@ -16,7 +18,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const body = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new ApiError(response.status, body?.detail ?? response.statusText);
+    const retryAfter = Number(response.headers.get("retry-after"));
+    throw new ApiError(
+      response.status,
+      body?.detail ?? response.statusText,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+    );
   }
   return body as T;
 }
@@ -25,6 +32,7 @@ export interface User {
   id: string;
   email: string;
   display_name: string | null;
+  is_admin: boolean;
 }
 
 export interface Library {
@@ -469,11 +477,11 @@ function searchQueryString({
 
 export const api = {
   me: () => request<User>("/auth/me"),
-  login: (email: string, password: string) =>
+  login: (email: string, password: string, code?: string) =>
     request<User>("/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, code }),
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 
@@ -1077,4 +1085,133 @@ export const fileUrl = {
   pdf: (id: string) => `/api/files/${id}/pdf`,
   /** Just this document's pages, extracted as a standalone PDF. */
   documentPdf: (documentId: string) => `/api/documents/${documentId}/pdf`,
+};
+
+
+// --------------------------------------------------------------------------
+// Accounts (Phase 10)
+// --------------------------------------------------------------------------
+
+export interface Quota {
+  used_bytes: number;
+  quota_bytes: number | null;
+  files: number;
+}
+
+export interface Account {
+  id: string;
+  email: string;
+  display_name: string | null;
+  is_admin: boolean;
+  totp_enabled: boolean;
+  storage: Quota;
+}
+
+export interface AdminAccount {
+  id: string;
+  email: string;
+  display_name: string | null;
+  is_admin: boolean;
+  is_active: boolean;
+  suspended_at: string | null;
+  locked_until: string | null;
+  totp_enabled: boolean;
+  storage_quota_bytes: number | null;
+  used_bytes: number;
+  created_at: string;
+}
+
+export interface InvitePreview {
+  email: string;
+  library_name: string;
+  expires_at: string;
+  note: string | null;
+  storage_quota_bytes: number | null;
+}
+
+export interface AdminInvitation {
+  id: string;
+  email: string;
+  library_name: string;
+  expires_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  note: string | null;
+}
+
+export const accountsApi = {
+  me: () => request<Account>("/account"),
+  changePassword: (current_password: string, new_password: string) =>
+    request<void>("/account/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password, new_password }),
+    }),
+
+  totpStatus: () => request<{ enabled: boolean; required: boolean }>("/account/totp"),
+  totpStart: () =>
+    request<{ secret: string; uri: string }>("/account/totp/start", { method: "POST" }),
+  totpConfirm: (code: string) =>
+    request<string[]>("/account/totp/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    }),
+  totpDisable: () => request<void>("/account/totp", { method: "DELETE" }),
+
+  previewInvite: (token: string) =>
+    request<InvitePreview>(`/invitations/${encodeURIComponent(token)}`),
+  acceptInvite: (token: string, password: string, display_name: string | null) =>
+    request<User>(`/invitations/${encodeURIComponent(token)}/accept`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password, display_name }),
+    }),
+  redeemReset: (email: string, code: string, new_password: string) =>
+    request<void>("/account/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code, new_password }),
+    }),
+
+  // Administration — accounts only. Nothing here returns document data.
+  accounts: () => request<AdminAccount[]>("/admin/accounts"),
+  invitations: () => request<AdminInvitation[]>("/admin/invitations"),
+  invite: (body: {
+    email: string;
+    library_name: string;
+    storage_quota_bytes: number | null;
+    note: string | null;
+  }) =>
+    request<{ token: string; email: string; expires_at: string; path: string }>(
+      "/admin/invitations",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+  revokeInvite: (id: string) =>
+    request<void>(`/admin/invitations/${id}`, { method: "DELETE" }),
+  resetCode: (userId: string) =>
+    request<{ code: string; email: string; expires_in_hours: number }>(
+      `/admin/accounts/${userId}/reset-code`,
+      { method: "POST" },
+    ),
+  suspend: (userId: string) =>
+    request<{ sessions_ended: number }>(`/admin/accounts/${userId}/suspend`, {
+      method: "POST",
+    }),
+  restore: (userId: string) =>
+    request<void>(`/admin/accounts/${userId}/restore`, { method: "POST" }),
+  unlock: (userId: string) =>
+    request<void>(`/admin/accounts/${userId}/unlock`, { method: "POST" }),
+  setQuota: (userId: string, storage_quota_bytes: number | null) =>
+    request<void>(`/admin/accounts/${userId}/quota`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storage_quota_bytes }),
+    }),
+  grantAdmin: (userId: string) =>
+    request<void>(`/admin/accounts/${userId}/admin`, { method: "POST" }),
 };

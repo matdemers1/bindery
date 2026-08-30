@@ -14,6 +14,8 @@ import {
 import { ApiError, api, type AskAnswer, type Document, type Library } from "../../api";
 import { Logo } from "../../components/brand/Logo";
 import FirstRun from "../firstrun/FirstRun";
+import NextSteps from "../firstrun/NextSteps";
+import { hasFoundSomething } from "../firstrun/onboarding";
 
 /**
  * Ask — the landing screen.
@@ -45,13 +47,16 @@ const EXAMPLES = [
 export default function AskPage({
   libraries,
   onUploaded,
+  userId,
 }: {
   libraries: Library[];
   onUploaded: () => void;
+  userId?: string;
 }) {
   // An empty archive makes Ask pointless, and this is the landing screen — so
   // the first-run walkthrough lives here now rather than behind Search.
   const [empty, setEmpty] = useState<boolean | null>(null);
+  const [stepsHidden, setStepsHidden] = useState(false);
 
   useEffect(() => {
     // Source files rather than documents: a file that arrived but has not
@@ -110,9 +115,18 @@ export default function AskPage({
     );
   }
 
+  // Between "there is something in here" and "I have found one of my own
+  // documents" there is a gap the first-run narration used to leave wide open:
+  // it vanishes the moment a file arrives (REQ-146).
+  const showNextSteps =
+    empty === false && userId !== undefined && !hasFoundSomething(userId) && !stepsHidden;
+
   return (
     <div className="flex gap-6">
       <div className="mx-auto min-w-0 max-w-3xl flex-1">
+        {showNextSteps && (
+          <NextSteps documents={1} onDismiss={() => setStepsHidden(true)} />
+        )}
         {!asked && <Hero />}
 
         <form

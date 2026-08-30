@@ -3,12 +3,19 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { api, type Library, type SearchResponse, fileUrl } from "../../api";
+import { rememberFoundSomething } from "../firstrun/onboarding";
 import Snippet from "../../components/Snippet";
 import { ErrorState } from "../../components/States";
 
 // Every piece of search state lives in the URL (REQ-028), so a result is a link
 // you can send someone, and the back button behaves.
-export default function SearchPage({ libraries }: { libraries: Library[] }) {
+export default function SearchPage({
+  libraries,
+  userId,
+}: {
+  libraries: Library[];
+  userId?: string;
+}) {
   const [params, setParams] = useSearchParams();
   const query = params.get("q") ?? "";
   const libraryFilter = params.getAll("library");
@@ -34,7 +41,13 @@ export default function SearchPage({ libraries }: { libraries: Library[] }) {
         { q: query, libraryIds: libraryFilter, knownFormCodes: formFilter },
         controller.signal,
       )
-      .then(setResponse)
+      .then((found) => {
+        setResponse(found);
+        // Onboarding finishes here rather than at a dismissed dialog: being
+        // told the archive can find things is not the same as having watched
+        // it find one of yours (REQ-147).
+        if (userId && found.total > 0) rememberFoundSomething(userId);
+      })
       .catch((caught) => {
         // Not swallowed: a search that quietly returns nothing is
         // indistinguishable from an archive that does not contain the thing,
