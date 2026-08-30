@@ -99,7 +99,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "141fe482eda369c948cb28b8f551fb857f99472e"
     },
     {
       "route": "/pipeline",
