@@ -14,10 +14,14 @@ cannot clean it up.
 
 import asyncio
 import base64
+import hashlib
+import json
 import logging
 import secrets
+import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -26,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import settings_store
 from api.db.models import OffsiteObject
+from api.version import build_of_this_process
 
 log = logging.getLogger("bindery.offsite")
 
@@ -535,3 +540,240 @@ async def reconcile(
             "re-uploaded on the next sync", result.missing_from_bucket,
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# The database dump, and the manifest that makes a restore checkable
+# (T-13.5, REQ-162)
+# ---------------------------------------------------------------------------
+
+
+class Kind(StrEnum):
+    """Which retention the run is writing into.
+
+    Two schedules rather than one because the storage cost is indistinguishable
+    — twelve dumps is about 52 MB — and the failure they guard against is
+    different. Daily catches "I broke something yesterday". Weekly catches "the
+    taxonomy merge three weeks ago was wrong", which is the one you notice late.
+    """
+
+    DAILY = "daily"
+    WEEKLY = "weekly"
+
+
+DUMP_PREFIX = "dumps/"
+MANIFEST_PREFIX = "manifests/"
+
+
+def dump_object_key(kind: Kind, stamp: datetime) -> str:
+    """`dumps/daily/<ISO>.dump`, `dumps/weekly/<ISO week>.dump`.
+
+    The weekly key is the ISO week rather than a timestamp, so a re-run in the
+    same week overwrites its own generation instead of consuming one of the
+    five the retention window holds.
+    """
+    if kind is Kind.WEEKLY:
+        year, week, _ = stamp.isocalendar()
+        return f"{DUMP_PREFIX}weekly/{year}-W{week:02d}.dump"
+    return f"{DUMP_PREFIX}daily/{stamp.strftime('%Y-%m-%dT%H%M%SZ')}.dump"
+
+
+def manifest_object_key(dump_key: str) -> str:
+    return MANIFEST_PREFIX + dump_key[len(DUMP_PREFIX):].removesuffix(".dump") + ".json"
+
+
+def _sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def upload_bytes(client, config: Config, key: str, payload: bytes) -> None:
+    """A small object whose hash we compute here rather than already knowing."""
+    digest = hashlib.sha256(payload).hexdigest()
+    client.put_object(
+        Bucket=config.bucket,
+        Key=key,
+        Body=payload,
+        ServerSideEncryption="aws:kms",
+        SSEKMSKeyId=config.kms_key_id,
+        ChecksumAlgorithm="SHA256",
+        ChecksumSHA256=_checksum_header(digest),
+    )
+
+
+def upload_dump(client, config: Config, path: Path, key: str) -> tuple[str, int]:
+    """Put the dump under a key the retention rules will eventually expire."""
+    digest = _sha256_of(path)
+    size = path.stat().st_size
+    if size > MAX_SINGLE_PUT:
+        raise RuntimeError(
+            f"the dump is {size} bytes, past the single-PUT limit — this needs a "
+            "multipart upload, which is not implemented."
+        )
+    with path.open("rb") as handle:
+        client.put_object(
+            Bucket=config.bucket,
+            Key=key,
+            Body=handle,
+            ServerSideEncryption="aws:kms",
+            SSEKMSKeyId=config.kms_key_id,
+            ChecksumAlgorithm="SHA256",
+            ChecksumSHA256=_checksum_header(digest),
+        )
+    return digest, size
+
+
+@dataclass
+class ReplicationResult:
+    kind: Kind
+    ok: bool = False
+    detail: str = ""
+    dump_key: str | None = None
+    dump_bytes: int = 0
+    blobs_uploaded: int = 0
+    blobs_skipped: int = 0
+    bytes_sent: int = 0
+    failures: list[str] = field(default_factory=list)
+
+
+async def replicate(
+    session: AsyncSession,
+    config: Config,
+    client,
+    *,
+    kind: Kind,
+    blob_root: Path,
+    integrity_report=None,
+    allow_unhealthy: bool = False,
+    stamp: datetime | None = None,
+) -> ReplicationResult:
+    """One offsite generation: dump, then blobs, then the dump goes up last.
+
+    **The order is not the local backup's order, and the difference is the whole
+    point.** Locally the rule is dump-then-copy-blobs: blobs are append-only, so
+    a blob copied after the dump is an unreferenced orphan, which is harmless.
+
+    Replication is incremental and interruptible, which adds a case the local
+    copy does not have. Upload the dump first and fail partway through the
+    blobs, and the *bucket* now holds a dump referencing objects that are not
+    there — a dangling reference that persists until some later run finishes.
+    So the dump is written to disk first, at the same instant it would have
+    been, and is the last thing sent. Anything it references is already up;
+    anything uploaded after it is an orphan. Safe by construction, as before.
+
+    Integrity is checked before any of it, for the reason `run_backup` gives: a
+    backup taken over a corrupt blob is a corrupt backup, faithfully replicated
+    and eventually rotated into every generation you have.
+    """
+    from api.export import backup as local_backup
+
+    result = ReplicationResult(kind=kind)
+
+    if integrity_report is not None and not integrity_report.healthy and not allow_unhealthy:
+        result.detail = (
+            f"integrity check failed ({len(integrity_report.corrupt)} corrupt, "
+            f"{len(integrity_report.missing)} missing) — refusing to replicate over it"
+        )
+        result.failures.append(result.detail)
+        return result
+
+    stamp = stamp or datetime.now(UTC)
+    dump_key = dump_object_key(kind, stamp)
+
+    with tempfile.TemporaryDirectory(prefix="bindery-offsite-") as staging:
+        # Step 1: the dump, to disk only. Taken before the blob sync so that
+        # everything it references is captured by the sync that follows.
+        dump_path = Path(staging) / "bindery.dump"
+        try:
+            local_backup.dump_database(dump_path)
+        except Exception as error:
+            result.detail = f"pg_dump failed: {str(error)[:300]}"
+            result.failures.append(result.detail)
+            return result
+
+        # Step 2: blobs. A superset of anything the dump can refer to, because
+        # blobs are append-only and never removed.
+        sync = await sync_blobs(session, config, client, blob_root=blob_root)
+        result.blobs_uploaded = sync.uploaded
+        result.blobs_skipped = sync.skipped
+        result.bytes_sent = sync.bytes_sent
+        result.failures.extend(sync.failures)
+
+        if sync.failures:
+            # Deliberately no dump. A dump in the bucket is a promise that its
+            # blobs are there too, and this run cannot make that promise.
+            result.detail = (
+                f"{len(sync.failures)} blob(s) failed to upload — the dump was not "
+                "sent, because a dump whose blobs are missing is an unrestorable "
+                "backup rather than a partial one."
+            )
+            return result
+
+        # Step 3: the dump, last.
+        try:
+            digest, size = upload_dump(client, config, dump_path, dump_key)
+        except Exception as error:
+            result.detail = f"the dump failed to upload: {_explain(error, config)}"
+            result.failures.append(result.detail)
+            return result
+
+    await _record(session, dump_key, digest, size)
+
+    manifest = {
+        "created_at": stamp.isoformat(),
+        "kind": kind.value,
+        "dump": {"key": dump_key, "bytes": size, "sha256": digest},
+        "blobs": {
+            "uploaded_this_run": sync.uploaded,
+            "already_present": sync.skipped,
+            "total_in_ledger": await _ledger_count(session),
+        },
+        "integrity": integrity_report.as_dict() if integrity_report else None,
+        # What a restore has to match. A dump restored by code that expects a
+        # different schema fails somewhere far away and much later.
+        "schema_revision": await _applied_revision(session),
+        "build": build_of_this_process().commit,
+        "restore": "scripts/restore-drill.sh --from-s3",
+        "note": (
+            "Blobs were uploaded before this dump, so every blob it references "
+            "is already in the bucket. Anything uploaded afterwards is an "
+            "unreferenced orphan, never a dangling reference."
+        ),
+    }
+    payload = json.dumps(manifest, indent=2).encode()
+    manifest_key = manifest_object_key(dump_key)
+    try:
+        upload_bytes(client, config, manifest_key, payload)
+    except Exception as error:
+        # The dump is up and restorable; only its description is missing.
+        result.failures.append(f"manifest upload failed: {_explain(error, config)}")
+
+    await session.commit()
+
+    result.ok = True
+    result.dump_key = dump_key
+    result.dump_bytes = size
+    result.detail = (
+        f"{kind.value}: {size} byte dump, {sync.uploaded} new blob(s), "
+        f"{sync.skipped} already present"
+    )
+    return result
+
+
+async def _ledger_count(session: AsyncSession) -> int:
+    return (
+        await session.execute(
+            sa.select(sa.func.count(OffsiteObject.id)).where(
+                OffsiteObject.object_key.startswith(BLOB_PREFIX)
+            )
+        )
+    ).scalar_one()
+
+
+async def _applied_revision(session: AsyncSession) -> str | None:
+    return (
+        await session.execute(sa.text("select version_num from alembic_version"))
+    ).scalar_one_or_none()

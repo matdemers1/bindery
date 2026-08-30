@@ -47,6 +47,16 @@ manifests/{daily,weekly}/<...>.json       never expires
 _probe/connection-test                    expires after 1 day
 ```
 
+The weekly key is the **ISO week** rather than a timestamp, so a re-run in the
+same week overwrites its own generation instead of consuming one of the five the
+retention window holds.
+
+Verified against the live bucket on 2026-08-30: every key the code generates is
+matched by the lifecycle rule intended for it — daily dumps by
+`expire-daily-dumps`, weekly by `expire-weekly-dumps`, probes by
+`expire-connection-probes`, and manifests by nothing, which is deliberate. They
+are kilobytes, and they are the record of what each generation contained.
+
 `_probe/` exists because the connection test writes a real object and reads it
 back, and **Bindery cannot delete it** — so the bucket has to. Without that rule
 the prefix would accumulate one immortal object per press of the button.
@@ -91,6 +101,33 @@ aws iam put-user-policy --user-name bindery-offsite \
 
 `BucketKeyEnabled` is **not optional**. Without it every blob upload is a
 separate KMS request, and so is every object read during a restore drill.
+
+## The order a run goes in
+
+```
+pg_dump to disk  →  sync blobs  →  upload the dump  →  upload the manifest
+```
+
+**This is not the local backup's order, and the difference is load-bearing.**
+Locally the rule is dump, then copy blobs: blobs are append-only, so a blob
+copied after the dump is an unreferenced orphan, which is harmless.
+
+Replication adds a case the local copy does not have — it is incremental and it
+can be interrupted. Send the dump first, fail partway through the blobs, and the
+*bucket* holds a dump referencing objects that are not in it. That is a dangling
+reference, and it persists until some later run happens to finish.
+
+So the dump is written to disk at the moment it would have been taken anyway,
+and is the last thing sent. Everything it references is already up; anything
+uploaded after it is an orphan.
+
+For the same reason, **a run with any failed blob does not send its dump at
+all.** A dump in the bucket is a promise that its blobs are there too, and a
+partial run cannot make that promise.
+
+The integrity check gates all of it, for the reason the local backup gives: a
+backup taken over a corrupt blob is a corrupt backup, faithfully replicated and
+eventually rotated into every generation you hold.
 
 ## The connection test
 
