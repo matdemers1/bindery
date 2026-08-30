@@ -13,8 +13,6 @@ from api.db.models.entities import (
 )
 from api.db.models.event_log import EventLog, ServiceHeartbeat
 from api.db.models.importing import (
-    BatchRequest,
-    BatchSubmission,
     ImportItem,
     ImportSession,
 )
@@ -41,8 +39,6 @@ __all__ = [
     "AppUser",
     "Asset",
     "AuditEvent",
-    "BatchRequest",
-    "BatchSubmission",
     "Classification",
     "Correspondent",
     "CorrespondentAlias",

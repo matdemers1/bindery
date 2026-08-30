@@ -340,19 +340,6 @@ async def test_curation_sits_between_the_two_passes(client, session, import_sess
 
 
 # --------------------------------------------------------------------------
-# Batch reconciliation (T-4.2, REQ-054)
-# --------------------------------------------------------------------------
-
-
-def test_custom_ids_are_stable_and_document_scoped() -> None:
-    from worker.ai.batch import custom_id_for
-
-    document_id = uuid.uuid4()
-    assert custom_id_for(document_id) == custom_id_for(document_id)
-    assert custom_id_for(document_id) != custom_id_for(uuid.uuid4())
-
-
-# --------------------------------------------------------------------------
 # Bulk edit (T-4.6, REQ-087, REQ-068)
 # --------------------------------------------------------------------------
 
