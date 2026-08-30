@@ -243,21 +243,38 @@ async def merge_tags(
     )
     await session.flush()
 
-    already = set(
-        (
+    # Every existing link to the target, *including removed ones*.
+    #
+    # This used to filter on `removed_at IS NULL`, which reads naturally and is
+    # wrong: `document_tag`'s primary key is `(document_id, tag_id)`, so a
+    # removed link still occupies that key. A document that once carried the
+    # target tag and had it taken off would make this insert collide, and the
+    # whole merge would fail on a `pk_document_tag` violation.
+    #
+    # It survived Phase 5 because it needs a tag to have been removed from a
+    # document *and* another tag later merged into it — which is exactly what a
+    # merge, an undo, and a second merge produce.
+    existing = {
+        row.document_id: row
+        for row in (
             await session.execute(
-                sa.select(DocumentTag.document_id).where(
-                    DocumentTag.tag_id == target_id, DocumentTag.removed_at.is_(None)
-                )
+                sa.select(DocumentTag).where(DocumentTag.tag_id == target_id)
             )
         ).scalars().all()
-    )
+    }
     for document_id, link_source in links:
-        if document_id not in already:
-            session.add(
-                DocumentTag(document_id=document_id, tag_id=target_id, source=link_source)
+        held = existing.get(document_id)
+        if held is None:
+            link = DocumentTag(
+                document_id=document_id, tag_id=target_id, source=link_source
             )
-            already.add(document_id)
+            session.add(link)
+            existing[document_id] = link
+        elif held.removed_at is not None:
+            # Revive rather than insert. The merge is saying this document
+            # should carry the target tag, and it once did.
+            held.removed_at = None
+            held.removed_by_event_id = None
 
     await session.execute(
         sa.update(DocumentTag)

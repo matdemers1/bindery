@@ -877,3 +877,62 @@ def test_a_trailing_comma_does_not_discard_the_whole_answer() -> None:
 
     assert len(proposal.groups) == 1
     assert proposal.groups[0].canonical == "receipts"
+
+
+async def test_merging_into_a_tag_a_document_once_had_and_lost(
+    session, signed_in
+) -> None:
+    """`document_tag`'s primary key is `(document_id, tag_id)`, so a *removed*
+    link still occupies that key.
+
+    The duplicate check filtered on `removed_at IS NULL`, which reads naturally
+    and is wrong: merging a tag into one a document had previously carried and
+    lost collided on `pk_document_tag` and failed the whole merge. It needs a
+    removal *and* a later merge into the same tag to reproduce — which is what
+    a merge, an undo, and a second merge produce.
+    """
+    from datetime import UTC, datetime
+
+    from api import entities
+
+    user, library = await signed_in()
+    source_file = SourceFile(
+        library_id=library.id, sha256=uuid.uuid4().hex * 2, byte_size=1,
+        original_filename="x.pdf", ingest_source=IngestSource.WEB_UPLOAD,
+    )
+    keep = Tag(library_id=library.id, name="receipts", slug=f"k-{uuid.uuid4().hex[:6]}")
+    fold = Tag(library_id=library.id, name="receipt", slug=f"f-{uuid.uuid4().hex[:6]}")
+    session.add_all([source_file, keep, fold])
+    await session.flush()
+
+    document = Document(
+        library_id=library.id, source_file_id=source_file.id, page_start=1, page_end=1
+    )
+    session.add(document)
+    await session.flush()
+
+    # The document carried the survivor once and had it removed…
+    session.add(
+        DocumentTag(
+            document_id=document.id, tag_id=keep.id, source=TagSource.AI,
+            removed_at=datetime.now(UTC),
+        )
+    )
+    # …and carries the one about to be merged into it.
+    session.add(
+        DocumentTag(document_id=document.id, tag_id=fold.id, source=TagSource.AI)
+    )
+    await session.commit()
+
+    await entities.merge_tags(session, fold.id, keep.id, actor_id=user.id)
+    await session.commit()
+
+    live = (
+        await session.execute(
+            sa.select(DocumentTag).where(
+                DocumentTag.document_id == document.id,
+                DocumentTag.tag_id == keep.id,
+            )
+        )
+    ).scalar_one()
+    assert live.removed_at is None, "the link is revived, not duplicated"
