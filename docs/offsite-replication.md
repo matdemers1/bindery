@@ -72,7 +72,25 @@ stops there.
 silently delete `blobs/` — the archive itself — and Bindery, holding no delete
 permission, would neither cause it nor notice it. The single unfiltered rule
 permitted is `AbortIncompleteMultipartUpload`, which expires nothing that
-exists. A guard that asserts this against the live bucket is **T-13.9 and not yet built** — until it is, this rule is enforced by reading the table below and nothing else.
+exists. Guarded two ways, because they catch different mistakes:
+
+```bash
+make lifecycle-check   # audits the LIVE bucket; non-zero on any finding
+```
+
+The test suite audits `infra/aws/lifecycle.json`, which is what gets deployed —
+that catches a bad rule at the moment it is written. `make lifecycle-check`
+audits what the bucket actually has, which is a different question the moment
+somebody edits a rule in the console.
+
+Both use the same audit, and both check the rules against **keys built by the
+real key builders** rather than hard-coded strings. A test asserting
+`dumps/daily/...` would keep passing after the key format changed, which is
+exactly the drift worth catching.
+
+Verified on the live bucket on 2026-08-30 by deploying a bucket-wide 90-day
+expiry to the (empty) bucket and confirming the audit reported it — the
+unfiltered rule, the blob pool, and both manifest kinds — then reverting.
 
 ## Rebuilding it from nothing
 

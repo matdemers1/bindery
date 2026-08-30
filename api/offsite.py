@@ -816,3 +816,127 @@ async def _applied_revision(session: AsyncSession) -> str | None:
     return (
         await session.execute(sa.text("select version_num from alembic_version"))
     ).scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# The lifecycle audit (T-13.9, REQ-166, R-21)
+# ---------------------------------------------------------------------------
+
+# A representative key of each kind the code writes, used to check the rules
+# against what actually gets stored rather than against what they look like.
+# Derived from the same functions that build the real keys, so a change to the
+# key format cannot drift away from the rules that are supposed to match it.
+def sample_keys() -> dict[str, str]:
+    stamp = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    daily = dump_object_key(Kind.DAILY, stamp)
+    weekly = dump_object_key(Kind.WEEKLY, stamp)
+    return {
+        "blob": object_key_for_blob("a" * 64),
+        "daily dump": daily,
+        "weekly dump": weekly,
+        "daily manifest": manifest_object_key(daily),
+        "weekly manifest": manifest_object_key(weekly),
+        "connection probe": f"{PROBE_PREFIX}connection-test",
+    }
+
+
+# What each kind of object is *supposed* to happen to. The blob entry is the
+# whole point: expiring a blob is deleting the archive.
+EXPECTED_EXPIRY = {
+    "blob": None,
+    "daily dump": "expire-daily-dumps",
+    "weekly dump": "expire-weekly-dumps",
+    "daily manifest": None,
+    "weekly manifest": None,
+    "connection probe": "expire-connection-probes",
+}
+
+
+def _rule_prefix(rule: dict) -> str:
+    filt = rule.get("Filter") or {}
+    if "Prefix" in filt:
+        return filt["Prefix"] or ""
+    if "And" in filt:
+        return filt["And"].get("Prefix", "") or ""
+    # A rule with no filter at all applies to the whole bucket.
+    return rule.get("Prefix", "") or ""
+
+
+def _expires_objects(rule: dict) -> bool:
+    """Does this rule remove things that exist?
+
+    `AbortIncompleteMultipartUpload` does not: it discards the fragments of an
+    upload that never completed, which are not objects. It is the only rule
+    allowed to apply bucket-wide, because it cannot delete an archive.
+
+    `ExpiredObjectDeleteMarker` also removes nothing real — a delete marker with
+    no versions behind it — so it is not counted either.
+    """
+    if rule.get("Status") != "Enabled":
+        return False
+    expiration = rule.get("Expiration") or {}
+    if expiration.get("Days") or expiration.get("Date"):
+        return True
+    return bool(rule.get("NoncurrentVersionExpiration"))
+
+
+def audit_lifecycle(rules: list[dict]) -> list[str]:
+    """Findings, empty when the rules are safe (REQ-166).
+
+    Two failures are being defended against, and the first is catastrophic:
+
+    **A bucket-wide expiry deletes the archive.** Silently, with no error and no
+    alert, because Bindery holds no delete permission and would neither cause it
+    nor notice it. Every expiry rule must carry a prefix filter.
+
+    **A rule that stops matching the keys the code writes.** A dump landing
+    outside `dumps/daily/` is never rotated and accumulates forever; one landing
+    under a prefix with a shorter retention than intended disappears early. The
+    keys here come from the same functions that build the real ones, so the
+    check is against what is actually stored rather than against what the rules
+    look like.
+    """
+    findings: list[str] = []
+
+    for rule in rules:
+        if not _expires_objects(rule):
+            continue
+        if not _rule_prefix(rule):
+            findings.append(
+                f"lifecycle rule {rule.get('ID', '(unnamed)')!r} expires objects with no "
+                "prefix filter — it would delete the blob pool, which is the archive"
+            )
+
+    for name, key in sample_keys().items():
+        matched = [
+            rule.get("ID", "(unnamed)")
+            for rule in rules
+            if _expires_objects(rule) and key.startswith(_rule_prefix(rule))
+        ]
+        expected = EXPECTED_EXPIRY[name]
+        if expected is None and matched:
+            findings.append(
+                f"{name} objects ({key}) would be expired by {matched} — they are "
+                "meant to be kept"
+            )
+        elif expected is not None and expected not in matched:
+            findings.append(
+                f"{name} objects ({key}) are not covered by {expected!r} "
+                f"(matched: {matched or 'nothing'}) — they would never be rotated"
+            )
+    return findings
+
+
+def live_lifecycle_rules(client, config: Config) -> list[dict]:
+    """The rules the bucket actually has, not the ones in the repository."""
+    from botocore.exceptions import ClientError
+
+    try:
+        return client.get_bucket_lifecycle_configuration(Bucket=config.bucket)["Rules"]
+    except ClientError as error:
+        code = error.response.get("Error", {}).get("Code", "")
+        if code == "NoSuchLifecycleConfiguration":
+            # Not an empty result. No rules means dumps accumulate forever, and
+            # reporting "nothing wrong" would be the wrong answer.
+            return []
+        raise

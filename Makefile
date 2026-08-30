@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: up down build logs ps migrate revision test test-pipeline integrity backup export mirror drill ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
+.PHONY: up down build logs ps migrate revision test test-pipeline integrity backup export mirror drill lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
 
 build:            ## build all images
 	$(COMPOSE) build
@@ -34,6 +34,9 @@ test:             ## full suite against a throwaway database
 
 test-pipeline:    ## OCR / pipeline / golden-corpus suites (needs the OCR toolchain)
 	$(COMPOSE) --profile test run --rm test-worker
+
+lifecycle-check:  ## audit the offsite bucket's expiry rules (R-21: a bucket-wide rule deletes the archive)
+	$(COMPOSE) exec api python -m api.cli lifecycle-check
 
 integrity:        ## re-hash every original; run this BEFORE a backup, never after
 	$(COMPOSE) exec api python -m api.export.cli integrity

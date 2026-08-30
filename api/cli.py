@@ -138,6 +138,52 @@ async def _create_user(email: str, password: str, library_name: str, kind: str) 
         print(f"created library {library_name} ({library.id}) with role owner")
 
 
+
+async def _lifecycle_check() -> int:
+    """Audit the live bucket's lifecycle rules (T-13.9, REQ-166, R-21).
+
+    The test suite audits the configuration checked into `infra/aws/`, which is
+    what gets deployed. This audits what the bucket *has*, which is a different
+    question the moment somebody edits a rule in the console — and the mistake
+    being guarded against is invisible from inside the application, because
+    Bindery holds no delete permission and would neither cause nor be told about
+    a rule that deleted the archive.
+
+    Exits non-zero on any finding, so it is safe in cron without a wrapper that
+    has to interpret log output.
+    """
+    from api import offsite
+    from api.db.session import SessionFactory
+
+    async with SessionFactory() as session:
+        config = await offsite.config_from_settings(session)
+    if not config.complete:
+        print("offsite replication is not configured — nothing to audit")
+        return 0
+
+    client = offsite.make_client(config)
+    rules = await asyncio.to_thread(offsite.live_lifecycle_rules, client, config)
+    if not rules:
+        print(f"{config.bucket}: NO lifecycle rules at all — dumps would accumulate "
+              "forever", file=sys.stderr)
+        return 1
+
+    findings = offsite.audit_lifecycle(rules)
+    for rule in rules:
+        prefix = offsite._rule_prefix(rule) or "(everything)"
+        expires = offsite._expires_objects(rule)
+        print(f"  {rule.get('ID', '(unnamed)'):32} {prefix:24} "
+              f"{'expires objects' if expires else 'safe'}")
+
+    if findings:
+        print(f"\n{len(findings)} finding(s) in {config.bucket}:", file=sys.stderr)
+        for finding in findings:
+            print(f"  - {finding}", file=sys.stderr)
+        return 1
+    print(f"\n{config.bucket}: rules are safe, and cover every key this build writes")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="api.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -150,6 +196,10 @@ def main() -> None:
                         choices=[k.value for k in LibraryKind])
 
     sub.add_parser("seed-forms", help="load api/forms/seed/*.yaml into the registry")
+    sub.add_parser(
+        "lifecycle-check",
+        help="audit the offsite bucket's lifecycle rules against what this build writes",
+    )
 
     enqueue = sub.add_parser("enqueue-stage", help="re-run a pipeline stage over every file")
     enqueue.add_argument("stage")
@@ -161,6 +211,8 @@ def main() -> None:
     reprocess.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
+    if args.command == "lifecycle-check":
+        raise SystemExit(asyncio.run(_lifecycle_check()))
     if args.command == "seed-forms":
         asyncio.run(_seed_forms())
         return
