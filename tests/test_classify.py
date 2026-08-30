@@ -1139,3 +1139,48 @@ async def test_a_model_that_answers_is_never_second_guessed() -> None:
     )
 
     assert client.asked == ["claude-sonnet-5"]
+
+
+async def test_an_empty_response_names_the_stop_reason() -> None:
+    """"Structured output was empty" cost three wrong diagnoses on one document.
+
+    A suspected token limit, then a refusal that was genuinely there, then a
+    *real* token limit on the fallback model — all wearing the same six words.
+    The stop reason distinguishes them and is free to include.
+    """
+    from worker.ai.claude import ClaudeProvider
+    from worker.ai.provider import AIProviderError, ClassificationRequest
+
+    class Truncates:
+        @property
+        def messages(self):
+            class Messages:
+                @staticmethod
+                async def parse(**_kwargs):
+                    class Response:
+                        stop_reason = "max_tokens"
+                        stop_details = None
+                        parsed_output = None
+
+                        class usage:
+                            @staticmethod
+                            def model_dump():
+                                return {}
+
+                    return Response()
+
+            return Messages()
+
+    provider = ClaudeProvider("k", model="claude-sonnet-5", client=Truncates())
+    with pytest.raises(AIProviderError, match="max_tokens"):
+        await provider.classify(
+            ClassificationRequest(document_id="d", pages=[(1, "text" * 40)])
+        )
+
+
+def test_the_classify_budget_leaves_room_after_the_reasoning() -> None:
+    """Adaptive thinking expands to fill `max_tokens`. At 8,000 the fallback
+    model thought its way through the whole budget and returned nothing."""
+    from worker.ai.claude import MAX_TOKENS
+
+    assert MAX_TOKENS >= 16000

@@ -39,7 +39,11 @@ PROMPT_DIR = Path(__file__).parent / "prompts"
 # first pages carry the identifying content; the tail is continuation.
 MAX_PAGES = 12
 MAX_CHARS_PER_PAGE = 6000
-MAX_TOKENS = 8000
+# Adaptive thinking expands to fill this, so it has to leave room for an answer
+# after the reasoning. At 8,000 the fallback model would think its way through
+# the whole budget on a long document and return nothing — reported, unhelpfully,
+# as "structured output was empty".
+MAX_TOKENS = 16000
 
 # Asked once when the configured model refuses. A safety classifier declining an
 # ordinary mortgage deed is a false positive, and Sonnet does exactly that to a
@@ -208,10 +212,20 @@ class ClaudeProvider:
 
         result = getattr(response, "parsed_output", None)
         if result is None:
-            # Structured output guarantees this. A refusal is handled above and
-            # is the only known way to get here with a 200, so if it ever
-            # happens the correct response is to fail rather than guess.
-            raise AIProviderError("structured output was empty")
+            # Never just "empty". That message cost three wrong diagnoses on one
+            # document: first a suspected token limit, then a refusal that was
+            # genuinely there, then a *real* token limit on the fallback model —
+            # all wearing the same six words. The stop reason distinguishes them
+            # and is free to include.
+            stop = getattr(response, "stop_reason", "unknown")
+            raise AIProviderError(
+                f"the model returned no structured output (stop_reason={stop})."
+                + (
+                    " The answer was cut off — raise MAX_TOKENS."
+                    if stop == "max_tokens"
+                    else ""
+                )
+            )
 
         usage = response.usage.model_dump() if hasattr(response.usage, "model_dump") else {}
         cache_read = usage.get("cache_read_input_tokens") or 0
