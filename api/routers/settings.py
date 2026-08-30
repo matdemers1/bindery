@@ -8,6 +8,8 @@ sees the last four characters, and that is all — a settings form that renders
 your API key into the DOM has leaked it to every browser extension you run.
 """
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +36,55 @@ async def _owner_only(session: AsyncSession, user: AppUser) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner access required")
 
 
+# S3 bucket naming, the subset that matters: 3-63 characters, lowercase
+# alphanumeric plus hyphens and dots, starting and ending alphanumeric.
+_BUCKET = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
+_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
+# Long-term user keys are AKIA…; temporary session credentials are ASIA… and
+# would expire mid-backup, so they are refused rather than accepted.
+_ACCESS_KEY_ID = re.compile(r"^AKIA[A-Z0-9]{12,124}$")
+
+
+def _reject(detail: str) -> None:
+    """Refuse here rather than at 3am on the first replication run.
+
+    The precedent is the model picker above: a bad value accepted now becomes an
+    unexplained failure hours later, in a component that did not cause it.
+    """
+    raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail)
+
+
+def _check_offsite(payload: SettingsUpdateIn) -> None:
+    if payload.offsite_bucket:
+        name = payload.offsite_bucket.strip()
+        if not _BUCKET.match(name):
+            _reject(
+                f"{name!r} is not a valid S3 bucket name — 3-63 characters, "
+                "lowercase letters, digits, hyphens and dots only."
+            )
+    if payload.offsite_region:
+        region = payload.offsite_region.strip()
+        if not _REGION.match(region):
+            _reject(f"{region!r} does not look like an AWS region (e.g. us-east-1).")
+
+    key_id = (payload.aws_access_key_id or "").strip()
+    if key_id:
+        if key_id.startswith("ASIA"):
+            _reject(
+                "That is a temporary session credential (ASIA…). It expires, and "
+                "it would expire mid-backup. Create a long-term access key for the "
+                "bindery-offsite IAM user instead."
+            )
+        if not _ACCESS_KEY_ID.match(key_id):
+            # The mistake this actually catches: the two fields filled in the
+            # wrong order. A 40-character secret in the id field is otherwise
+            # stored happily and fails much later as an opaque 403.
+            _reject(
+                "That does not look like an AWS access key id (they begin AKIA). "
+                "Check the two fields are not swapped — the secret goes below."
+            )
+
+
 @router.get("", response_model=SettingsOut)
 async def read_settings(
     user: AppUser = Depends(current_user),
@@ -41,6 +92,7 @@ async def read_settings(
 ) -> SettingsOut:
     key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
     webhook = await settings_store.get(session, settings_store.NOTIFY_WEBHOOK_URL)
+    aws_secret = await settings_store.get(session, settings_store.AWS_SECRET_ACCESS_KEY)
     return SettingsOut(
         available_models=[
             ModelChoiceOut(
@@ -55,6 +107,16 @@ async def read_settings(
         prompt_version=await settings_store.get(session, settings_store.PROMPT_VERSION) or "v1",
         notify_webhook_configured=bool(webhook),
         notify_webhook_hint=settings_store.mask(webhook),
+        aws_access_key_id=await settings_store.get(
+            session, settings_store.AWS_ACCESS_KEY_ID
+        ),
+        aws_secret_configured=bool(aws_secret),
+        aws_secret_hint=settings_store.mask(aws_secret),
+        offsite_bucket=await settings_store.get(session, settings_store.OFFSITE_BUCKET),
+        offsite_region=await settings_store.get(session, settings_store.OFFSITE_REGION),
+        offsite_kms_key_id=await settings_store.get(
+            session, settings_store.OFFSITE_KMS_KEY_ID
+        ),
     )
 
 
@@ -65,6 +127,13 @@ async def update_settings(
     session: AsyncSession = Depends(get_session),
 ) -> SettingsOut:
     await _owner_only(session, user)
+    # Validated up front so the refusal is cheap and names the field. Note that
+    # this ordering is *not* what makes the update atomic — `get_session` never
+    # commits on an exception, so the transaction is what actually prevents a
+    # half-applied configuration. Moving this call below the writes changes
+    # nothing observable, which is worth knowing before someone "tidies" it and
+    # believes they have broken something.
+    _check_offsite(payload)
 
     changed: list[str] = []
     if payload.anthropic_api_key is not None:
@@ -102,6 +171,23 @@ async def update_settings(
             payload.notify_webhook_url.strip() or None, actor_id=user.id,
         )
         changed.append("notify_webhook_url")
+
+    # The offsite fields take no interpretation, so they are written by the same
+    # rule rather than five near-identical blocks: None leaves alone, empty
+    # clears. Validation already happened above.
+    for field, setting_key in (
+        ("aws_access_key_id", settings_store.AWS_ACCESS_KEY_ID),
+        ("aws_secret_access_key", settings_store.AWS_SECRET_ACCESS_KEY),
+        ("offsite_bucket", settings_store.OFFSITE_BUCKET),
+        ("offsite_region", settings_store.OFFSITE_REGION),
+        ("offsite_kms_key_id", settings_store.OFFSITE_KMS_KEY_ID),
+    ):
+        value = getattr(payload, field)
+        if value is not None:
+            await settings_store.set_(
+                session, setting_key, value.strip() or None, actor_id=user.id
+            )
+            changed.append(field)
 
     if changed:
         # The audit records *that* a secret changed, never its value.

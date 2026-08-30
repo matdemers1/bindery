@@ -529,6 +529,18 @@ class SettingsOut(BaseModel):
     notify_webhook_configured: bool = False
     notify_webhook_hint: str | None = None
 
+    # Offsite replication (REQ-159, ADR-010). The secret access key follows the
+    # same rule as everything else here — configured-or-not and four characters.
+    # The access key id, the bucket, the region and the KMS key id are returned
+    # in full: none is a credential, and every one of them is something you need
+    # to be able to read back during a restore or a rotation.
+    aws_access_key_id: str | None = None
+    aws_secret_configured: bool = False
+    aws_secret_hint: str | None = None
+    offsite_bucket: str | None = None
+    offsite_region: str | None = None
+    offsite_kms_key_id: str | None = None
+
 
 class SettingsUpdateIn(BaseModel):
     # None means "leave alone"; empty string means "clear it".
@@ -536,6 +548,11 @@ class SettingsUpdateIn(BaseModel):
     model: str | None = None
     prompt_version: str | None = None
     notify_webhook_url: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    offsite_bucket: str | None = None
+    offsite_region: str | None = None
+    offsite_kms_key_id: str | None = None
 
 
 class SettingsTestOut(BaseModel):

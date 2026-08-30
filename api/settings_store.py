@@ -32,9 +32,36 @@ PROMPT_VERSION = "bindery_prompt_version"
 # most push services put the credential in the URL itself.
 NOTIFY_WEBHOOK_URL = "notify_webhook_url"
 
-SECRET_KEYS = frozenset({ANTHROPIC_API_KEY, NOTIFY_WEBHOOK_URL})
+# Offsite replication (T-13.2, REQ-159, ADR-010). Only the secret access key is
+# actually a secret: an AWS access key id is an *identifier*, not a credential —
+# it appears in CloudTrail, in error messages, and in AWS's own console — and
+# rendering it in full is what makes "which credential is loaded?" answerable
+# during a rotation. Masking it would hide nothing and cost the one question the
+# field exists to answer.
+AWS_ACCESS_KEY_ID = "aws_access_key_id"
+AWS_SECRET_ACCESS_KEY = "aws_secret_access_key"
+OFFSITE_BUCKET = "offsite_bucket"
+OFFSITE_REGION = "offsite_region"
+# Deliberately not a secret, and deliberately stored in the clear. A restore has
+# to know which key to ask for, and if that answer were only inside the archive
+# it would be unreachable at exactly the moment it is needed.
+OFFSITE_KMS_KEY_ID = "offsite_kms_key_id"
+
+SECRET_KEYS = frozenset(
+    {ANTHROPIC_API_KEY, NOTIFY_WEBHOOK_URL, AWS_SECRET_ACCESS_KEY}
+)
 WRITABLE = frozenset(
-    {ANTHROPIC_API_KEY, BINDERY_MODEL, PROMPT_VERSION, NOTIFY_WEBHOOK_URL}
+    {
+        ANTHROPIC_API_KEY,
+        BINDERY_MODEL,
+        PROMPT_VERSION,
+        NOTIFY_WEBHOOK_URL,
+        AWS_ACCESS_KEY_ID,
+        AWS_SECRET_ACCESS_KEY,
+        OFFSITE_BUCKET,
+        OFFSITE_REGION,
+        OFFSITE_KMS_KEY_ID,
+    }
 )
 
 
@@ -70,6 +97,11 @@ async def get(session: AsyncSession, key: str) -> str | None:
         BINDERY_MODEL: environment.bindery_model,
         PROMPT_VERSION: environment.bindery_prompt_version,
         NOTIFY_WEBHOOK_URL: environment.notify_webhook_url,
+        AWS_ACCESS_KEY_ID: environment.aws_access_key_id,
+        AWS_SECRET_ACCESS_KEY: environment.aws_secret_access_key,
+        OFFSITE_BUCKET: environment.offsite_bucket,
+        OFFSITE_REGION: environment.offsite_region,
+        OFFSITE_KMS_KEY_ID: environment.offsite_kms_key_id,
     }.get(key) or None
 
 

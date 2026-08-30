@@ -163,6 +163,7 @@ export default function SettingsPage() {
       </div>
 
       <NotificationSettings settings={settings} onSaved={load} />
+      <OffsiteReplication settings={settings} onSaved={load} />
       <ApiTokens />
 
       <section className="mt-6">
@@ -385,6 +386,185 @@ const SCOPE_LABELS: Record<string, string> = {
  * stated plainly rather than implied — a person who closes this panel expecting
  * to copy the token later has lost it, and should have been told so first.
  */
+/**
+ * Offsite replication (T-13.2, REQ-159, ADR-010).
+ *
+ * The third copy of 3-2-1. Copies 1 and 2 are the RAID pool and the local
+ * backup target — both in the same building, on the same array, one fire from
+ * zero. This is the one that leaves.
+ *
+ * The secret access key follows the same rule as the Anthropic key: stored
+ * encrypted, never sent back, four characters shown so you can tell which
+ * credential is loaded. The other four fields are returned in full on purpose —
+ * none is a credential, and the KMS key id in particular has to be readable
+ * *outside* the archive, because a restore needs to know which key to ask for.
+ */
+function OffsiteReplication({
+  settings,
+  onSaved,
+}: {
+  settings: Settings;
+  onSaved: () => void;
+}) {
+  const [keyId, setKeyId] = useState(settings.aws_access_key_id ?? "");
+  const [secret, setSecret] = useState("");
+  const [bucket, setBucket] = useState(settings.offsite_bucket ?? "");
+  const [region, setRegion] = useState(settings.offsite_region ?? "us-east-1");
+  const [kms, setKms] = useState(settings.offsite_kms_key_id ?? "");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const configured =
+    settings.aws_secret_configured && !!settings.aws_access_key_id && !!settings.offsite_bucket;
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setNotice(null);
+    try {
+      await api.updateSettings({
+        aws_access_key_id: keyId.trim(),
+        // Empty means "leave the stored secret alone" — retyping a 40-character
+        // secret to change the region would be its own kind of hostile.
+        ...(secret.trim() ? { aws_secret_access_key: secret.trim() } : {}),
+        offsite_bucket: bucket.trim(),
+        offsite_region: region.trim(),
+        offsite_kms_key_id: kms.trim(),
+      });
+      setSecret("");
+      setNotice("Saved.");
+      onSaved();
+    } catch (error) {
+      // The server's message is the diagnosis here — it names the field and
+      // says what was wrong with it, including the swapped-fields case.
+      setNotice(error instanceof ApiError ? error.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const field = "w-full rounded-md border border-edge bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent";
+
+  return (
+    <section className="mt-6 rounded-lg border border-edge bg-surface p-5">
+      <h2 className="text-base font-medium">Offsite replication</h2>
+      <p className="mt-1 max-w-2xl text-sm text-muted">
+        A copy of the originals and the database, in S3, encrypted with a key you
+        control. RAID survives a dead disk; it does not survive the building.
+      </p>
+      <p className="mt-2 max-w-2xl text-sm text-muted">
+        The credentials are deliberately unable to delete anything. Rotation is
+        done by S3 itself, so a compromised server can add to this copy but never
+        erase it.
+      </p>
+
+      <div className="mt-4 flex items-center gap-2 text-sm">
+        <span
+          className={`h-2 w-2 rounded-full ${configured ? "bg-emerald-400" : "bg-muted"}`}
+        />
+        {configured ? (
+          <span>
+            Credentials saved{" "}
+            <span className="font-mono text-muted">{settings.aws_secret_hint}</span>
+          </span>
+        ) : (
+          <span className="text-muted">Not configured — nothing is leaving this machine</span>
+        )}
+      </div>
+
+      {/* Deliberately not the word "connected". Nothing here has talked to AWS
+          yet; all this reports is that four fields are non-empty, and a green
+          light that means less than it looks like is worse than no light. */}
+      {configured && (
+        <p className="mt-2 text-sm text-amber-400/90">
+          Saved, but never tested. Until the connection test lands, this says the
+          fields are filled in — not that a backup would succeed.
+        </p>
+      )}
+
+      <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={save}>
+        <label className="text-sm">
+          <span className="mb-1 block text-muted">Access key ID</span>
+          <input
+            value={keyId}
+            onChange={(event) => setKeyId(event.target.value)}
+            placeholder="AKIA…"
+            autoComplete="off"
+            spellCheck={false}
+            className={field}
+          />
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block text-muted">
+            Secret access key{" "}
+            {settings.aws_secret_configured && (
+              <span className="text-xs">— leave blank to keep the stored one</span>
+            )}
+          </span>
+          <input
+            type="password"
+            value={secret}
+            onChange={(event) => setSecret(event.target.value)}
+            placeholder={settings.aws_secret_configured ? "••••••••" : "40 characters"}
+            autoComplete="off"
+            spellCheck={false}
+            className={field}
+          />
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block text-muted">Bucket</span>
+          <input
+            value={bucket}
+            onChange={(event) => setBucket(event.target.value)}
+            placeholder="bindery-offsite-…"
+            autoComplete="off"
+            spellCheck={false}
+            className={field}
+          />
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block text-muted">Region</span>
+          <input
+            value={region}
+            onChange={(event) => setRegion(event.target.value)}
+            placeholder="us-east-1"
+            autoComplete="off"
+            spellCheck={false}
+            className={field}
+          />
+        </label>
+        <label className="text-sm sm:col-span-2">
+          <span className="mb-1 block text-muted">
+            KMS key ID{" "}
+            <span className="text-xs">
+              — write this down somewhere that is not this server. A restore needs it.
+            </span>
+          </span>
+          <input
+            value={kms}
+            onChange={(event) => setKms(event.target.value)}
+            placeholder="alias/bindery-offsite, or the key UUID"
+            autoComplete="off"
+            spellCheck={false}
+            className={field}
+          />
+        </label>
+
+        <div className="flex items-center gap-3 sm:col-span-2">
+          <button
+            type="submit"
+            disabled={busy}
+            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+          {notice && <span className="text-sm text-muted">{notice}</span>}
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function ApiTokens() {
   const [tokens, setTokens] = useState<ApiTokenRecord[]>([]);
   const [issued, setIssued] = useState<IssuedApiToken | null>(null);

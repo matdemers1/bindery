@@ -190,12 +190,22 @@ async def test_the_key_is_encrypted_at_rest(client, session, signed_in) -> None:
 async def test_the_audit_records_that_a_secret_changed_not_its_value(
     client, session, signed_in
 ) -> None:
-    await signed_in()
+    user, _ = await signed_in()
     await client.put("/api/settings", json={"anthropic_api_key": "sk-ant-secret-value-1234"})
 
+    # Scoped to this actor and ordered by `sequence`, which exists precisely
+    # because insertion order matters here. The original took `.first()` from
+    # every `update_settings` event ever written, with no ordering — which held
+    # only while this file was the sole test touching settings, and broke the
+    # day another one did.
     event = (
         await session.execute(
-            sa.select(AuditEvent).where(AuditEvent.action == "update_settings")
+            sa.select(AuditEvent)
+            .where(
+                AuditEvent.action == "update_settings",
+                AuditEvent.actor_id == user.id,
+            )
+            .order_by(AuditEvent.sequence.desc())
         )
     ).scalars().first()
     assert event.after == {"changed": ["anthropic_api_key"]}

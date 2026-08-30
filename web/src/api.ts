@@ -310,6 +310,17 @@ export interface Settings {
   prompt_version: string;
   notify_webhook_configured: boolean;
   notify_webhook_hint: string | null;
+  /**
+   * Offsite replication (ADR-010). Only the secret is withheld — the key id,
+   * bucket, region and KMS key are returned in full, because each is something
+   * you need to read back during a restore or a credential rotation.
+   */
+  aws_access_key_id: string | null;
+  aws_secret_configured: boolean;
+  aws_secret_hint: string | null;
+  offsite_bucket: string | null;
+  offsite_region: string | null;
+  offsite_kms_key_id: string | null;
 }
 
 export interface SettingsTest {
@@ -521,7 +532,18 @@ export const api = {
   settings: () => request<Settings>("/settings"),
   updateSettings: (
     body: Partial<
-      Record<"anthropic_api_key" | "model" | "prompt_version" | "notify_webhook_url", string>
+      Record<
+        | "anthropic_api_key"
+        | "model"
+        | "prompt_version"
+        | "notify_webhook_url"
+        | "aws_access_key_id"
+        | "aws_secret_access_key"
+        | "offsite_bucket"
+        | "offsite_region"
+        | "offsite_kms_key_id",
+        string
+      >
     >,
   ) =>
     request<Settings>("/settings", {

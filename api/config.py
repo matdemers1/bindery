@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     # notifications are off, which is a supported configuration, not an error.
     notify_webhook_url: str = ""
 
+    # Offsite replication (ADR-010). All five are overridable in Settings; the
+    # environment is only the fallback, so a fresh host needs no compose edit.
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    offsite_bucket: str = ""
+    offsite_region: str = "us-east-1"
+    offsite_kms_key_id: str = ""
+
     @property
     def blob_root(self) -> Path:
         """Content-addressed originals. Write-once; never modified (invariant 1)."""
