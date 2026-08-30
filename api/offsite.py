@@ -13,13 +13,19 @@ cannot clean it up.
 """
 
 import asyncio
+import base64
 import logging
 import secrets
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
 
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import settings_store
+from api.db.models import OffsiteObject
 
 log = logging.getLogger("bindery.offsite")
 
@@ -218,7 +224,8 @@ def _probe(config: Config, client) -> ProbeResult:
     # the resolved key ARN, and a non-existent alias fails the put outright with
     # KMS.NotFoundException. So a typo in an alias cannot slip through here.
     configured = config.kms_key_id.rsplit("/", 1)[-1].strip()
-    if configured and kms_arn and configured not in kms_arn and not config.kms_key_id.startswith("alias/"):
+    is_alias = config.kms_key_id.startswith("alias/")
+    if configured and kms_arn and not is_alias and configured not in kms_arn:
         return ProbeResult(
             ok=False,
             detail=(
@@ -258,3 +265,273 @@ async def probe(config: Config, *, client_factory=make_client) -> ProbeResult:
     except Exception as error:  # a malformed region reaches boto3 as a ValueError
         return ProbeResult(ok=False, detail=f"{type(error).__name__}: {str(error)[:200]}")
     return await asyncio.to_thread(_probe, config, client)
+
+
+# ---------------------------------------------------------------------------
+# Blob replication (T-13.4, REQ-161)
+# ---------------------------------------------------------------------------
+
+BLOB_PREFIX = "blobs/"
+
+# S3 accepts a single PUT up to 5 GB. The largest blob in the real archive is
+# 29 MB, so multipart is not needed and is not written — but a file that would
+# silently fail at the API boundary should say so here instead, in a sentence
+# that names multipart as the fix.
+MAX_SINGLE_PUT = 4_500_000_000
+
+
+def object_key_for_blob(sha256: str) -> str:
+    """Mirror the on-disk layout exactly.
+
+    `api/storage/blobs.py` fans out two levels — `<aa>/<bb>/<sha>` — and not
+    one. Getting this wrong is not a cosmetic difference: the local path and
+    the object key have to be derivable from each other in both directions, or
+    a restore cannot find the blob a dump refers to.
+    """
+    return f"{BLOB_PREFIX}{sha256[:2]}/{sha256[2:4]}/{sha256}"
+
+
+def sha256_from_object_key(key: str) -> str | None:
+    """The inverse, used by the reconcile to read the bucket back."""
+    if not key.startswith(BLOB_PREFIX):
+        return None
+    tail = key[len(BLOB_PREFIX):].split("/")
+    if len(tail) != 3 or len(tail[2]) != 64:
+        return None
+    return tail[2]
+
+
+def _checksum_header(sha256_hex: str) -> str:
+    """S3 wants the digest base64-encoded, not hex."""
+    return base64.b64encode(bytes.fromhex(sha256_hex)).decode()
+
+
+def upload_blob(client, config: Config, path: Path, sha256: str) -> int:
+    """Put one blob, with S3 verifying the bytes against the hash we already have.
+
+    `ChecksumSHA256` is the point of this function. The archive already knows
+    every blob's hash, so handing it to S3 turns the upload into a checked
+    transfer: a truncated or corrupted body is refused with `BadDigest` rather
+    than stored. Verified against the live bucket — a deliberately wrong digest
+    is rejected.
+
+    ETag would have been the obvious way to confirm the same thing and does not
+    work: **under SSE-KMS the ETag is not the MD5 of the object.** Measured, not
+    assumed. A verification built on it would never have matched.
+    """
+    size = path.stat().st_size
+    if size > MAX_SINGLE_PUT:
+        raise RuntimeError(
+            f"{path.name} is {size} bytes, past the single-PUT limit. This needs "
+            "a multipart upload, which is not implemented — the largest blob in "
+            "the archive was 29 MB when this was written."
+        )
+    with path.open("rb") as handle:
+        client.put_object(
+            Bucket=config.bucket,
+            Key=object_key_for_blob(sha256),
+            Body=handle,
+            ServerSideEncryption="aws:kms",
+            SSEKMSKeyId=config.kms_key_id,
+            ChecksumAlgorithm="SHA256",
+            ChecksumSHA256=_checksum_header(sha256),
+        )
+    return size
+
+
+def stored_checksum(client, config: Config, key: str) -> str | None:
+    """The SHA-256 S3 holds for an object, base64-encoded as S3 spells it.
+
+    Always via `ChecksumMode="ENABLED"`, and that is the entire reason this
+    function exists rather than a bare `head_object` at each call site.
+    **Without the flag the field is simply absent** — not an error, not a
+    warning, just `None` — so a verification pass that forgot it would conclude
+    no checksum was ever stored and either skip the check or re-upload the
+    archive. Measured against the live bucket: same object, `None` without the
+    flag and the correct digest with it.
+    """
+    head = client.head_object(Bucket=config.bucket, Key=key, ChecksumMode="ENABLED")
+    return head.get("ChecksumSHA256")
+
+
+def checksum_matches(client, config: Config, key: str, sha256_hex: str) -> bool:
+    """Does the object S3 holds have the hash the archive says it should."""
+    return stored_checksum(client, config, key) == _checksum_header(sha256_hex)
+
+
+async def _already_shipped(session: AsyncSession) -> set[str]:
+    rows = await session.execute(
+        sa.select(OffsiteObject.object_key).where(
+            OffsiteObject.object_key.startswith(BLOB_PREFIX)
+        )
+    )
+    return set(rows.scalars().all())
+
+
+async def _record(session: AsyncSession, key: str, sha256: str | None, size: int) -> None:
+    """Idempotent, because the upload it records is idempotent.
+
+    A run killed between the put and the commit re-uploads on the next pass and
+    arrives here twice. `on_conflict_do_nothing` makes that a no-op rather than
+    a unique-violation that dead-letters an otherwise healthy sync.
+    """
+    await session.execute(
+        pg_insert(OffsiteObject)
+        .values(object_key=key, sha256=sha256, byte_size=size,
+                uploaded_at=datetime.now(UTC))
+        .on_conflict_do_nothing(index_elements=[OffsiteObject.object_key])
+    )
+
+
+@dataclass
+class SyncResult:
+    uploaded: int = 0
+    skipped: int = 0
+    bytes_sent: int = 0
+    failures: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.failures
+
+
+def local_blobs(blob_root: Path) -> list[tuple[str, Path]]:
+    """Every blob on disk, as (sha256, path).
+
+    A file whose name is not a 64-character hex digest is not a blob — it is
+    something that wandered into the directory — and is skipped rather than
+    uploaded under a key nothing can interpret.
+    """
+    found = []
+    for path in sorted(blob_root.rglob("*")):
+        if not path.is_file():
+            continue
+        name = path.name
+        if len(name) != 64:
+            log.warning("skipping %s: not a content address", path)
+            continue
+        try:
+            int(name, 16)
+        except ValueError:
+            log.warning("skipping %s: not a content address", path)
+            continue
+        found.append((name, path))
+    return found
+
+
+async def sync_blobs(
+    session: AsyncSession,
+    config: Config,
+    client,
+    *,
+    blob_root: Path,
+    commit: bool = True,
+) -> SyncResult:
+    """Upload every blob the ledger does not already account for.
+
+    Each object is recorded and committed as it lands, so a run interrupted at
+    object 300 resumes at 300 rather than starting again. That matters more
+    than it sounds: with versioning on and no delete permission, re-uploading
+    299 unchanged objects would leave 299 versions nothing can remove.
+
+    One failure does not stop the run. A single unreadable file should not
+    prevent the other 495 blobs from reaching the bucket — the failures are
+    collected and reported, and the next run retries them.
+    """
+    result = SyncResult()
+    shipped = await _already_shipped(session)
+
+    for sha256, path in local_blobs(blob_root):
+        key = object_key_for_blob(sha256)
+        if key in shipped:
+            result.skipped += 1
+            continue
+        try:
+            size = upload_blob(client, config, path, sha256)
+        except Exception as error:  # collected and reported, never swallowed
+            log.error("offsite upload failed for %s: %s", sha256[:12], error)
+            result.failures.append(f"{sha256[:12]}: {_explain(error, config)}")
+            continue
+        await _record(session, key, sha256, size)
+        if commit:
+            await session.commit()
+        result.uploaded += 1
+        result.bytes_sent += size
+
+    if commit:
+        await session.commit()
+    return result
+
+
+@dataclass
+class ReconcileResult:
+    in_bucket: int = 0
+    confirmed: int = 0
+    missing_from_bucket: int = 0
+    unrecorded: int = 0
+
+
+async def reconcile(
+    session: AsyncSession, config: Config, client, *, commit: bool = True
+) -> ReconcileResult:
+    """Compare the ledger against the bucket, and believe the bucket.
+
+    The ledger is an optimisation and optimisations can be wrong: an object
+    removed from the console, a lifecycle rule that matched more than intended,
+    a restore of the database to an older snapshot. None of those are visible
+    from the ledger, which will happily report everything shipped.
+
+    A row whose object is gone has `verified_at` cleared rather than being
+    deleted, so the next sync re-uploads it. Nothing here removes a row —
+    nothing in Bindery removes rows on its own (REQ-090), and a ledger that
+    forgets is a ledger that cannot be audited.
+    """
+    result = ReconcileResult()
+    seen: set[str] = set()
+
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=config.bucket, Prefix=BLOB_PREFIX):
+        for entry in page.get("Contents", []):
+            seen.add(entry["Key"])
+    result.in_bucket = len(seen)
+
+    rows = (
+        await session.execute(
+            sa.select(OffsiteObject).where(
+                OffsiteObject.object_key.startswith(BLOB_PREFIX)
+            )
+        )
+    ).scalars().all()
+
+    now = datetime.now(UTC)
+    recorded = set()
+    for row in rows:
+        recorded.add(row.object_key)
+        if row.object_key in seen:
+            row.verified_at = now
+            result.confirmed += 1
+        else:
+            # It was shipped once and is not there now. Clearing this is what
+            # makes the next sync pick it up again.
+            row.verified_at = None
+            result.missing_from_bucket += 1
+            log.warning(
+                "offsite object recorded but absent from bucket: %s", row.object_key
+            )
+
+    # Objects in the bucket the ledger never knew about — a database restored
+    # from an older snapshot, or a run that died between the put and the
+    # commit. Recording them prevents a pointless re-upload.
+    for key in seen - recorded:
+        sha = sha256_from_object_key(key)
+        await _record(session, key, sha, 0)
+        result.unrecorded += 1
+
+    if commit:
+        await session.commit()
+    if result.missing_from_bucket:
+        log.error(
+            "%s objects the ledger claimed are not in the bucket — they will be "
+            "re-uploaded on the next sync", result.missing_from_bucket,
+        )
+    return result

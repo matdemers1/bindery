@@ -20,6 +20,7 @@ from api.db.models.job import Job
 from api.db.models.known_form import KnownForm
 from api.db.models.library import Library
 from api.db.models.membership import Membership
+from api.db.models.offsite_object import OffsiteObject
 from api.db.models.page import Page
 from api.db.models.setting import Setting
 from api.db.models.source_file import SourceFile
@@ -57,6 +58,7 @@ __all__ = [
     "Library",
     "LoginAttempt",
     "Membership",
+    "OffsiteObject",
     "Page",
     "PasswordResetCode",
     "RecoveryCode",

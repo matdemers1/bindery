@@ -109,7 +109,8 @@ async def test_the_put_names_the_configured_key_explicitly():
 
 async def test_a_wrong_key_id_fails_rather_than_passes():
     """The object came back under a key that is not the configured one."""
-    fake = FakeS3(kms_arn="arn:aws:kms:us-east-1:150056528345:key/00000000-dead-beef-0000-000000000000")
+    other = "arn:aws:kms:us-east-1:150056528345:key/00000000-dead-beef-0000-000000000000"
+    fake = FakeS3(kms_arn=other)
     result = await probe_with(fake)
     assert not result.ok
     assert "not the key you configured" in result.detail
