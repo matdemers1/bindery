@@ -340,3 +340,91 @@ def test_every_stage_has_a_lease() -> None:
     assert set(queue.STAGE_LEASES) == set(JobStage), (
         "a new stage needs a lease sized to what it actually takes"
     )
+
+
+async def test_replaying_resets_the_existing_job_rather_than_adding_one(
+    session,
+) -> None:
+    """Uniqueness includes `prompt_version`, so a replay that did not name one
+    used to slip past the constraint and add a *second* job.
+
+    The dead-lettered original stayed exactly where it was, so a document could
+    classify successfully and still sit on the failures screen — which is the
+    one screen whose whole purpose is that nothing fails silently.
+    """
+    from api import queue
+
+    source_file = await _source_file(session, "d0" * 32)
+    session.add(
+        Job(
+            source_file_id=source_file.id, stage=JobStage.NORMALIZE,
+            state=JobState.DEAD_LETTER, attempts=5, prompt_version="v1",
+            last_error="gave up",
+        )
+    )
+    await session.commit()
+
+    assert await queue.requeue_stage(
+        session, JobStage.NORMALIZE, source_file_id=source_file.id
+    )
+    await session.commit()
+
+    jobs = (
+        await session.execute(
+            sa.select(Job).where(Job.source_file_id == source_file.id)
+        )
+    ).scalars().all()
+    assert len(jobs) == 1, "one job, reset — not two"
+    assert jobs[0].state == JobState.QUEUED.value
+    assert jobs[0].attempts == 0
+    assert jobs[0].last_error is None
+    assert jobs[0].prompt_version == "v1", "the version it was recorded under"
+
+
+async def test_naming_a_prompt_version_still_targets_only_that_one(session) -> None:
+    """"Reprocess everything still on v2" (REQ-113) needs the narrow behaviour."""
+    from api import queue
+
+    source_file = await _source_file(session, "d1" * 32)
+    session.add(
+        Job(
+            source_file_id=source_file.id, stage=JobStage.NORMALIZE,
+            state=JobState.SUCCEEDED, prompt_version="v1",
+        )
+    )
+    await session.commit()
+
+    await queue.requeue_stage(
+        session, JobStage.NORMALIZE, source_file_id=source_file.id, prompt_version="v2"
+    )
+    await session.commit()
+
+    jobs = (
+        await session.execute(
+            sa.select(Job).where(Job.source_file_id == source_file.id)
+        )
+    ).scalars().all()
+    versions = {job.prompt_version: job.state for job in jobs}
+    assert versions["v1"] == JobState.SUCCEEDED.value, "untouched"
+    assert versions["v2"] == JobState.QUEUED.value, "a new one for the new version"
+
+
+async def test_a_first_run_still_enqueues(session) -> None:
+    from api import queue
+
+    source_file = await _source_file(session, "d2" * 32)
+    await session.commit()
+
+    assert await queue.requeue_stage(
+        session, JobStage.NORMALIZE, source_file_id=source_file.id
+    )
+    await session.commit()
+
+    count = (
+        await session.execute(
+            sa.select(sa.func.count()).select_from(Job).where(
+                Job.source_file_id == source_file.id
+            )
+        )
+    ).scalar_one()
+    assert count == 1

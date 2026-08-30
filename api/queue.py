@@ -140,28 +140,36 @@ async def requeue_stage(
     document_id: uuid.UUID | None = None,
     prompt_version: str | None = None,
 ) -> bool:
-    """Enqueue a stage, or reset an existing job so it runs again.
+    """Reset an existing job so it runs again, or enqueue one if there is none.
 
     `enqueue` deliberately refuses to disturb existing work, which is right for
     the pipeline and wrong for a deliberate replay — a stage that has already
     succeeded once would otherwise never run again.
+
+    **Reset first, enqueue second.** The other order left duplicates: uniqueness
+    includes `prompt_version`, so replaying a document whose job was recorded
+    under `v1` did not collide, and `enqueue` cheerfully added a *second* job.
+    The dead-lettered original stayed exactly where it was, so a document could
+    be classified successfully and still appear on the failures screen — which
+    is precisely the screen whose purpose is that nothing fails silently.
+
+    When no `prompt_version` is asked for, any job for this stage and target is
+    the one being replayed, whatever version it was recorded under. Asking for a
+    specific version keeps the narrow behaviour, which is what "reprocess
+    everything still on v2" (REQ-113) needs.
     """
-    if await enqueue(
-        session, stage,
-        source_file_id=source_file_id, document_id=document_id,
-        prompt_version=prompt_version,
-    ):
-        return True
+    conditions = [
+        Job.stage == stage.value,
+        Job.source_file_id.is_not_distinct_from(source_file_id),
+        Job.document_id.is_not_distinct_from(document_id),
+        Job.state != JobState.RUNNING.value,
+    ]
+    if prompt_version is not None:
+        conditions.append(Job.prompt_version.is_not_distinct_from(prompt_version))
 
     result = await session.execute(
         sa.update(Job)
-        .where(
-            Job.stage == stage.value,
-            Job.source_file_id.is_not_distinct_from(source_file_id),
-            Job.document_id.is_not_distinct_from(document_id),
-            Job.prompt_version.is_not_distinct_from(prompt_version),
-            Job.state != JobState.RUNNING.value,
-        )
+        .where(sa.and_(*conditions))
         .values(
             state=JobState.QUEUED.value,
             attempts=0,
@@ -172,7 +180,18 @@ async def requeue_stage(
             updated_at=_now(),
         )
     )
-    return bool(result.rowcount)
+    if result.rowcount:
+        return True
+
+    # Nothing to reset — either a first run, or the only job for this target is
+    # currently RUNNING, in which case it is already doing what was asked.
+    return bool(
+        await enqueue(
+            session, stage,
+            source_file_id=source_file_id, document_id=document_id,
+            prompt_version=prompt_version,
+        )
+    )
 
 
 async def claim(
