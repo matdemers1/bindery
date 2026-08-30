@@ -10,3 +10,15 @@ RUN npm run build
 FROM nginx:alpine AS runtime
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY infra/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Stamped at the end of the *runtime* stage, on purpose. These change on every
+# commit, so an ARG consumed earlier would invalidate every layer built after
+# it — and the shipped stage is `runtime`, so stamping the file's last stage
+# would have put `unknown` in every image CI publishes (REQ-152).
+ARG BINDERY_COMMIT=unknown
+ARG BINDERY_BUILT_AT=unknown
+ARG BINDERY_REF=unknown
+ENV BINDERY_COMMIT=$BINDERY_COMMIT \
+    BINDERY_BUILT_AT=$BINDERY_BUILT_AT \
+    BINDERY_REF=$BINDERY_REF
+

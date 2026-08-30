@@ -349,6 +349,7 @@ NOT_LIBRARY_SCOPED = {
     "/api/shelves": "already covered through /api/archive",
     "/api/openapi.json": "the schema document; contains no data",
     "/api/account": "the caller's own account and its own storage total",
+    "/api/version": "build metadata; deliberately unauthenticated (REQ-152)",
     "/api/account/totp": "the caller's own two-factor state",
     # These two ARE cross-account, deliberately, and are covered by
     # test_an_administrator_sees_accounts_and_no_documents below — which is the

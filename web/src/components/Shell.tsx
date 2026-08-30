@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { api, type Library, type User } from "../api";
+import VersionBadge from "./VersionBadge";
 import { useLiveQuery } from "../live/LiveProvider";
 import { Wordmark } from "./brand/Logo";
 
@@ -262,6 +263,8 @@ export default function Shell({
               </>
             )}
           </button>
+
+          <VersionBadge collapsed={collapsed} />
 
           <div
             className={`mt-2 flex items-center gap-1 ${

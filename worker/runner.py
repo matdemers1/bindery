@@ -18,7 +18,7 @@ import uuid
 
 import sqlalchemy as sa
 
-from api import eventlog, events, health_panel, notify, queue, settings_store
+from api import eventlog, events, health_panel, notify, queue, settings_store, version
 from api.config import get_settings
 from api.db.enums import JobStage
 from api.db.models import Document, SourceFile
@@ -263,6 +263,12 @@ async def _health_monitor(stopping: asyncio.Event) -> None:
                     logging.ERROR if alert.severity == "critical" else logging.WARNING,
                     "health: %s", alert.message,
                 )
+            # Piggy-backed on the health pass rather than given its own timer:
+            # the two answer the same question — is the worker alive, and which
+            # worker is it (REQ-153).
+            async with SessionFactory() as session:
+                await version.announce(session, "worker")
+                await session.commit()
         except Exception:
             log.exception("health pass failed")
         with contextlib.suppress(TimeoutError):
@@ -283,10 +289,16 @@ async def main() -> None:
     settings = get_settings()
     worker_id = f"{os.uname().nodename}:{os.getpid()}"
     slots = max(settings.worker_concurrency, 1)
+    build = version.build_of_this_process()
     log.info(
-        "worker %s starting; slots=%s stages=%s",
-        worker_id, slots, ",".join(stage.value for stage in STAGES),
+        "worker %s starting at %s; slots=%s stages=%s",
+        worker_id, build.short, slots, ",".join(stage.value for stage in STAGES),
     )
+    # Announced before any work is claimed, so a worker that dies during its
+    # first job has still said which build it was.
+    async with SessionFactory() as session:
+        await version.announce(session, "worker")
+        await session.commit()
 
     stopping = asyncio.Event()
     in_flight: set[uuid.UUID] = set()

@@ -1215,3 +1215,23 @@ export const accountsApi = {
   grantAdmin: (userId: string) =>
     request<void>(`/admin/accounts/${userId}/admin`, { method: "POST" }),
 };
+
+
+export interface ServiceBuild {
+  commit: string;
+  short: string;
+  built_at: string;
+  ref: string;
+  last_seen_at: string;
+  stale: boolean;
+}
+
+export interface VersionReport {
+  services: Record<string, ServiceBuild>;
+  mismatch: boolean;
+  schema: { applied: string | null; expected: string | null; in_sync: boolean | null };
+}
+
+export const versionApi = {
+  report: () => request<VersionReport>("/version"),
+};

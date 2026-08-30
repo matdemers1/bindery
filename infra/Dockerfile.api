@@ -37,10 +37,23 @@ COPY alembic.ini ./
 # console script: it would resolve `api` from site-packages instead.
 CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
+# Stamped at the end of the *runtime* stage, on purpose. These change on every
+# commit, so an ARG consumed earlier would invalidate every layer built after
+# it — and the shipped stage is `runtime`, so stamping the file's last stage
+# would have put `unknown` in every image CI publishes (REQ-152).
+ARG BINDERY_COMMIT=unknown
+ARG BINDERY_BUILT_AT=unknown
+ARG BINDERY_REF=unknown
+ENV BINDERY_COMMIT=$BINDERY_COMMIT \
+    BINDERY_BUILT_AT=$BINDERY_BUILT_AT \
+    BINDERY_REF=$BINDERY_REF
+
 # ---------------------------------------------------------------------------
 # dev — same deps plus the test toolchain and the full tree. Used by the `test`
 # compose service; never deployed.
 # ---------------------------------------------------------------------------
+
+
 FROM base AS dev
 COPY pyproject.toml infra/extract-deps.py ./
 RUN python extract-deps.py dev > /tmp/dev-requirements.txt \
@@ -48,3 +61,4 @@ RUN python extract-deps.py dev > /tmp/dev-requirements.txt \
  && rm extract-deps.py
 COPY . .
 CMD ["python", "-m", "pytest"]
+

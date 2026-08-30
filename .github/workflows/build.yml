@@ -79,6 +79,14 @@ jobs:
           # what stops the api and worker images shipping their `dev` stage,
           # which carries the test harness and the whole source tree.
           target: runtime
+          # Derived from the build, never hand-maintained (REQ-152). A version
+          # somebody has to remember to bump is a version that is wrong, and
+          # "which code is actually running" is the first question of every
+          # production problem.
+          build-args: |
+            BINDERY_COMMIT=${{ github.sha }}
+            BINDERY_BUILT_AT=${{ github.event.repository.updated_at }}
+            BINDERY_REF=${{ github.ref_name }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

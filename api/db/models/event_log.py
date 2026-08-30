@@ -72,3 +72,24 @@ class EventLog(Base):
         JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
     )
     created_at: Mapped[datetime] = created_at()
+
+
+class ServiceHeartbeat(Base):
+    """What each service is running, and when it last said so (REQ-153).
+
+    One row per service, upserted. The api can report its own build from its own
+    environment; the worker is a separate image, pulled separately, and can be a
+    different commit without anything looking wrong — the queue drains, the
+    screens render, and a stage quietly behaves like last week.
+    """
+
+    __tablename__ = "service_heartbeat"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    service: Mapped[str] = mapped_column(sa.Text, nullable=False, unique=True)
+    commit: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    built_at: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    ref: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )

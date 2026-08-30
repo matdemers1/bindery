@@ -11,7 +11,7 @@ from api.db.models.entities import (
     DuplicatePair,
     SavedSearch,
 )
-from api.db.models.event_log import EventLog
+from api.db.models.event_log import EventLog, ServiceHeartbeat
 from api.db.models.importing import (
     BatchRequest,
     BatchSubmission,
@@ -67,6 +67,7 @@ __all__ = [
     "RefreshToken",
     "Rule",
     "SavedSearch",
+    "ServiceHeartbeat",
     "Setting",
     "SourceFile",
     "Tag",

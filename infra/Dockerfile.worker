@@ -38,11 +38,24 @@ COPY api/ ./api/
 COPY worker/ ./worker/
 CMD ["python", "-m", "worker.runner"]
 
+# Stamped at the end of the *runtime* stage, on purpose. These change on every
+# commit, so an ARG consumed earlier would invalidate every layer built after
+# it — and the shipped stage is `runtime`, so stamping the file's last stage
+# would have put `unknown` in every image CI publishes (REQ-152).
+ARG BINDERY_COMMIT=unknown
+ARG BINDERY_BUILT_AT=unknown
+ARG BINDERY_REF=unknown
+ENV BINDERY_COMMIT=$BINDERY_COMMIT \
+    BINDERY_BUILT_AT=$BINDERY_BUILT_AT \
+    BINDERY_REF=$BINDERY_REF
+
 # ---------------------------------------------------------------------------
 # dev — the OCR toolchain plus the test harness. Used by the `test-worker`
 # compose service for the pipeline and golden-corpus suites, which need real
 # Tesseract and cannot run in the api test image. Never deployed.
 # ---------------------------------------------------------------------------
+
+
 FROM base AS dev
 COPY pyproject.toml infra/extract-deps.py ./
 RUN python extract-deps.py dev > /tmp/dev-requirements.txt \
@@ -50,3 +63,4 @@ RUN python extract-deps.py dev > /tmp/dev-requirements.txt \
  && rm extract-deps.py
 COPY . .
 CMD ["python", "-m", "pytest", "-m", "slow"]
+
