@@ -178,7 +178,9 @@ async def test_one_bad_blob_does_not_strand_the_other_four(session, blob_root):
     result = await offsite.sync_blobs(session, CONFIG, fake, blob_root=blob_root)
     assert result.uploaded == 4
     assert not result.ok
-    assert any(doomed[:12] in failure for failure in result.failures)
+    # The reason, never the content address: this list reaches a screen every
+    # household member can open, and a hash there is an existence oracle.
+    assert result.failures and all(doomed[:12] not in f for f in result.failures)
 
     # And the next run retries only the one that failed.
     fake.fail_on = set()
@@ -293,3 +295,23 @@ async def test_the_stored_checksum_is_read_with_checksum_mode_enabled(session, b
     assert offsite.stored_checksum(fake, CONFIG, key) == offsite._checksum_header(digest)
     assert offsite.checksum_matches(fake, CONFIG, key, digest)
     assert not offsite.checksum_matches(fake, CONFIG, key, "0" * 64)
+
+
+async def test_a_failure_reason_never_carries_a_content_address(session, blob_root):
+    """Migration 0017 closed cross-tenant blob-existence leaking through dedup.
+    A hash on the Trust screen would reopen it through a different door: anyone
+    holding a copy of a file could confirm that someone here holds it too."""
+    fake = FakeS3(fail_on={hashlib.sha256(b"blob number 0").hexdigest()})
+    result = await offsite.sync_blobs(session, CONFIG, fake, blob_root=blob_root)
+
+    for failure in result.failures + result.summarised():
+        assert not any(len(word) >= 12 and all(c in "0123456789abcdef" for c in word)
+                       for word in failure.replace(":", " ").split()), failure
+
+
+async def test_identical_failures_are_summarised_with_a_count(session, blob_root):
+    fake = FakeS3(fail_on={
+        hashlib.sha256(f"blob number {i}".encode()).hexdigest() for i in range(3)
+    })
+    result = await offsite.sync_blobs(session, CONFIG, fake, blob_root=blob_root)
+    assert result.summarised() == ["3 blobs: RuntimeError: simulated transfer failure"]

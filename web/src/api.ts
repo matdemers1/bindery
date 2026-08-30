@@ -323,6 +323,34 @@ export interface Settings {
   offsite_kms_key_id: string | null;
 }
 
+export interface OffsiteRun {
+  id: string;
+  kind: string;
+  state: string;
+  trigger: string;
+  started_at: string;
+  finished_at: string | null;
+  detail: string | null;
+  dump_key: string | null;
+  dump_bytes: number;
+  blobs_uploaded: number;
+  blobs_skipped: number;
+  bytes_sent: number;
+  failures: string[] | null;
+}
+
+export interface OffsiteStatus {
+  configured: boolean;
+  /** Null when nothing has ever succeeded — which reads as stale, not as new. */
+  last_success_at: string | null;
+  last_success_age_seconds: number | null;
+  stale: boolean;
+  in_flight: string | null;
+  last_daily_at: string | null;
+  last_weekly_at: string | null;
+  runs: OffsiteRun[];
+}
+
 export interface OffsiteTest {
   ok: boolean;
   detail: string;
@@ -719,6 +747,9 @@ export const api = {
     }),
 
   integrityCheck: () => request<IntegrityReport>("/integrity/check", { method: "POST" }),
+  offsiteStatus: () => request<OffsiteStatus>("/offsite"),
+  offsiteReplicate: (kind: "daily" | "weekly" = "daily") =>
+    request<OffsiteStatus>(`/offsite/replicate?kind=${kind}`, { method: "POST" }),
   rebuildMirror: () => request<MirrorResult>("/mirror/rebuild", { method: "POST" }),
   runBackup: (force = false) =>
     request<BackupResult>(`/backup/run${force ? "?force=true" : ""}`, { method: "POST" }),

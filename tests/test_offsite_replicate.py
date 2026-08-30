@@ -264,3 +264,23 @@ async def test_a_failed_dump_upload_leaves_no_ledger_row(session, blob_root, fak
         )
     ).scalars().all()
     assert rows == []
+
+
+def test_sizes_are_written_for_someone_reading_a_screen():
+    """The Trust screen renders this string verbatim. "4402188 byte dump" is
+    technically complete and nobody can tell at a glance that it is fine."""
+    assert offsite.human_bytes(0) == "0 bytes"
+    assert offsite.human_bytes(900) == "900 bytes"
+    assert offsite.human_bytes(4_402_188) == "4.2 MB"
+    assert offsite.human_bytes(333_000_000) == "317.6 MB"
+    assert offsite.human_bytes(5_000_000_000) == "4.7 GB"
+
+
+async def test_the_detail_line_reads_as_a_sentence(session, blob_root, fake_dump):
+    fake = RecordingS3()
+    result = await offsite.replicate(
+        session, CONFIG, fake, kind=offsite.Kind.DAILY,
+        blob_root=blob_root, integrity_report=healthy(), stamp=STAMP,
+    )
+    assert "byte dump" not in result.detail
+    assert "bytes dump" in result.detail or "KB dump" in result.detail

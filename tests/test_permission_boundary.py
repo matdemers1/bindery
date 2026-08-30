@@ -356,6 +356,11 @@ NOT_LIBRARY_SCOPED = {
     # stronger check, because it asserts what they may *not* contain.
     "/api/admin/accounts": "admin: account metadata only, asserted separately (ADR-009)",
     "/api/admin/invitations": "admin: invitations only, no library data",
+    # Archive-wide operational state: when a copy last reached S3, and why one
+    # failed. No document, page, title or content address appears in it — which
+    # is asserted separately below rather than assumed, because the version of
+    # this that shipped first *did* carry blob hashes in its failure strings.
+    "/api/offsite": "replication state; asserted to contain no archive data (ADR-009)",
 }
 
 
@@ -751,3 +756,43 @@ async def test_the_same_file_twice_in_one_library_is_still_deduplicated(
     assert second.status_code == 200
     assert second.json()["duplicate"] is True
     assert second.json()["source_file"]["id"] == first.json()["source_file"]["id"]
+
+
+async def test_the_offsite_panel_reveals_nothing_about_the_archive(
+    client, session, signed_in
+) -> None:
+    """Every household member can open the Trust screen, so this one is shared.
+
+    Which makes a content address on it an existence oracle: anyone holding a
+    copy of a file could confirm that somebody here holds it too. That is the
+    cross-tenant leak migration 0017 closed through per-library dedup, and the
+    first version of this panel reopened it through a different door by putting
+    blob hashes in its failure strings.
+    """
+    import re
+
+    from api.db.models import OffsiteRun
+
+    await signed_in()
+    session.add(
+        OffsiteRun(
+            kind="daily", state="failed", trigger="schedule",
+            detail="2 blob(s) failed to upload — the dump was not sent",
+            failures=["2 blobs: Denied."],
+        )
+    )
+    await session.commit()
+
+    body = (await client.get("/api/offsite")).text
+    assert "Denied" in body, "the reason must survive; it is the diagnosis"
+
+    # Row ids are UUIDs and are fine — they are synthetic, not derived from any
+    # document. They also contain 12-character hex runs, which is exactly the
+    # length a sha256 prefix was, so they have to be removed before looking or
+    # this assertion fires on its own identifiers.
+    without_uuids = re.sub(
+        r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", "", body
+    )
+    assert not re.search(r"\b[0-9a-f]{12,}\b", without_uuids), (
+        "a content address reached the shared Trust screen"
+    )

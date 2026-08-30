@@ -393,11 +393,31 @@ class SyncResult:
     uploaded: int = 0
     skipped: int = 0
     bytes_sent: int = 0
+    # Reasons, deliberately **without** the blob hash. The hash goes to the log,
+    # which is library-scoped and redacted (migration 0018); this list is shown
+    # on a screen every household member can open. A content address is a
+    # existence oracle — "does anyone here hold this exact file?" — which is the
+    # cross-tenant leak migration 0017 was written to close, and putting hashes
+    # back on a shared screen would reopen it through a different door.
     failures: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return not self.failures
+
+    def summarised(self) -> list[str]:
+        """Distinct reasons with counts.
+
+        Twelve identical "Denied." lines say the same thing once; "12 blobs:
+        Denied." says it in a way that names the scale of the problem.
+        """
+        counts: dict[str, int] = {}
+        for reason in self.failures:
+            counts[reason] = counts.get(reason, 0) + 1
+        return [
+            reason if count == 1 else f"{count} blobs: {reason}"
+            for reason, count in counts.items()
+        ]
 
 
 def local_blobs(blob_root: Path) -> list[tuple[str, Path]]:
@@ -454,8 +474,10 @@ async def sync_blobs(
         try:
             size = upload_blob(client, config, path, sha256)
         except Exception as error:  # collected and reported, never swallowed
+            # The hash goes here, to the log, and not into `failures` — see the
+            # note on SyncResult.
             log.error("offsite upload failed for %s: %s", sha256[:12], error)
-            result.failures.append(f"{sha256[:12]}: {_explain(error, config)}")
+            result.failures.append(_explain(error, config))
             continue
         await _record(session, key, sha256, size)
         if commit:
@@ -626,6 +648,23 @@ def upload_dump(client, config: Config, path: Path, key: str) -> tuple[str, int]
     return digest, size
 
 
+def human_bytes(count: int) -> str:
+    """Sizes for a sentence someone reads, not for a log line.
+
+    "4402188 byte dump" is technically complete and nobody can see at a glance
+    that it is fine. "4.2 MB" is the same fact in a form that answers the
+    question being asked.
+    """
+    size = float(count)
+    for unit in ("bytes", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            if unit == "bytes":
+                return f"{int(size)} bytes"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
 @dataclass
 class ReplicationResult:
     kind: Kind
@@ -700,7 +739,7 @@ async def replicate(
         result.blobs_uploaded = sync.uploaded
         result.blobs_skipped = sync.skipped
         result.bytes_sent = sync.bytes_sent
-        result.failures.extend(sync.failures)
+        result.failures.extend(sync.summarised())
 
         if sync.failures:
             # Deliberately no dump. A dump in the bucket is a promise that its
@@ -757,8 +796,8 @@ async def replicate(
     result.dump_key = dump_key
     result.dump_bytes = size
     result.detail = (
-        f"{kind.value}: {size} byte dump, {sync.uploaded} new blob(s), "
-        f"{sync.skipped} already present"
+        f"{human_bytes(size)} dump, {sync.uploaded} new blob(s) "
+        f"({human_bytes(sync.bytes_sent)}), {sync.skipped} already present"
     )
     return result
 

@@ -563,6 +563,44 @@ class SettingsTestOut(BaseModel):
     output_tokens: int | None = None
 
 
+class OffsiteRunOut(BaseModel):
+    """One replication attempt, successful or not (REQ-164)."""
+
+    id: uuid.UUID
+    kind: str
+    state: str
+    trigger: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    detail: str | None = None
+    dump_key: str | None = None
+    dump_bytes: int = 0
+    blobs_uploaded: int = 0
+    blobs_skipped: int = 0
+    bytes_sent: int = 0
+    failures: list[str] | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OffsiteStatusOut(BaseModel):
+    """What the Trust screen needs to say whether the archive has left the building.
+
+    The age rather than a tick: "last succeeded 3 days ago" is a fact someone
+    can act on, and a green tick is a claim that stops being checked.
+    """
+
+    configured: bool
+    # None when nothing has ever succeeded — which reads as stale, not as new.
+    last_success_at: datetime | None = None
+    last_success_age_seconds: int | None = None
+    stale: bool = True
+    in_flight: str | None = None
+    last_daily_at: datetime | None = None
+    last_weekly_at: datetime | None = None
+    runs: list[OffsiteRunOut] = []
+
+
 class OffsiteTestOut(BaseModel):
     """The result of a real round trip, not a reachability check (REQ-160)."""
 
@@ -618,6 +656,8 @@ __all__ = [
     "MergeIn",
     "MergePreviewOut",
     "MirrorOut",
+    "OffsiteRunOut",
+    "OffsiteStatusOut",
     "OffsiteTestOut",
     "PageHitOut",
     "PageOut",

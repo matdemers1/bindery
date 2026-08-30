@@ -22,6 +22,7 @@ import {
   type HealthPanel,
   type IntegrityReport,
   type MirrorResult,
+  type OffsiteStatus,
 } from "../../api";
 
 /**
@@ -74,7 +75,10 @@ export default function TrustPage() {
       {tab === "health" ? (
         <HealthPanelView />
       ) : tab === "resilience" ? (
-        <ResiliencePanel />
+        <>
+          <ResiliencePanel />
+          <OffsitePanel />
+        </>
       ) : (
         <AuditPanel />
       )}
@@ -315,6 +319,151 @@ function Action({
     >
       {busy ? "Working…" : label}
     </button>
+  );
+}
+
+// --------------------------------------------------------------------------
+// Offsite replication (T-13.7, REQ-164)
+// --------------------------------------------------------------------------
+
+/** "3 days ago", not a tick. A tick is a claim that stops being checked. */
+function describeAge(seconds: number | null): string {
+  if (seconds === null) return "never";
+  if (seconds < 90) return "just now";
+  if (seconds < 5400) return `${Math.round(seconds / 60)} minutes ago`;
+  if (seconds < 172800) return `${Math.round(seconds / 3600)} hours ago`;
+  return `${Math.round(seconds / 86400)} days ago`;
+}
+
+function OffsitePanel() {
+  const [status, setStatus] = useState<OffsiteStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(
+    () => api.offsiteStatus().then(setStatus).catch(() => {}),
+    [],
+  );
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // While a run is queued or in flight the worker owns it, so the only way to
+  // learn it finished is to ask again.
+  useEffect(() => {
+    if (!status?.in_flight) return;
+    const timer = setInterval(() => void load(), 5000);
+    return () => clearInterval(timer);
+  }, [status?.in_flight, load]);
+
+  async function replicate() {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await api.offsiteReplicate());
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!status) return null;
+
+  return (
+    <Card
+      title="Offsite copy"
+      blurb="The third copy, in S3, encrypted with a key you control. The other two are
+        in this building on the same array — they survive a dead disk, not a fire."
+    >
+      {!status.configured ? (
+        <p className="text-sm text-amber-400">
+          Not configured. Nothing is leaving this machine — add the credentials in
+          Settings.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-baseline gap-2 text-sm">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                status.stale ? "bg-red-400" : "bg-emerald-400"
+              }`}
+            />
+            <span className={status.stale ? "text-red-300" : ""}>
+              Last successful copy {describeAge(status.last_success_age_seconds)}
+            </span>
+            {status.in_flight && (
+              <span className="text-muted">· {status.in_flight} now</span>
+            )}
+          </div>
+
+          {status.stale && (
+            <p className="mt-1 text-sm text-red-300">
+              {status.last_success_at
+                ? "Two days is longer than the schedule allows — something is failing."
+                : "No copy has ever left this machine."}
+            </p>
+          )}
+
+          <div className="mt-3">
+            <Action
+              busy={busy}
+              disabled={!!status.in_flight}
+              label={status.in_flight ? "Queued" : "Replicate now"}
+              onClick={() => void replicate()}
+            />
+          </div>
+        </>
+      )}
+
+      {error && <p className="mt-2 text-sm text-red-300">{error}</p>}
+
+      {status.runs.length > 0 && (
+        <table className="mt-4 w-full text-left text-sm">
+          <thead className="text-xs uppercase tracking-wide text-muted">
+            <tr>
+              <th className="py-1 font-medium">When</th>
+              <th className="py-1 font-medium">Kind</th>
+              <th className="py-1 font-medium">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {status.runs.map((run) => (
+              <tr key={run.id} className="border-t border-edge/60 align-top">
+                <td className="whitespace-nowrap py-1.5 pr-3 text-muted">
+                  {new Date(run.started_at).toLocaleString()}
+                </td>
+                <td className="py-1.5 pr-3 text-muted">
+                  {run.kind}
+                  {run.trigger === "manual" && " · asked for"}
+                </td>
+                <td className="py-1.5">
+                  <span
+                    className={
+                      run.state === "succeeded"
+                        ? "text-emerald-400"
+                        : run.state === "failed"
+                          ? "text-red-400"
+                          : "text-muted"
+                    }
+                  >
+                    {run.state}
+                  </span>
+                  {/* The reason, not just the verdict — a failure nobody can
+                      diagnose from the screen sends you to the host logs. */}
+                  {run.detail && <span className="text-muted"> — {run.detail}</span>}
+                  {run.failures?.map((failure) => (
+                    <div key={failure} className="text-xs text-red-300/80">
+                      {failure}
+                    </div>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
   );
 }
 

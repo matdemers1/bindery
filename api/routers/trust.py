@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import ai_ask, ask, health_panel, settings_store
+from api import ai_ask, ask, health_panel, offsite, offsite_runs, settings_store
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -42,6 +42,8 @@ from api.schemas import (
     HealthPanelOut,
     IntegrityOut,
     MirrorOut,
+    OffsiteRunOut,
+    OffsiteStatusOut,
 )
 from api.segments import live
 
@@ -256,6 +258,77 @@ async def backup_run(
         manifest=result.manifest,
     )
 
+
+
+# --------------------------------------------------------------------------
+# Offsite replication (T-13.7, REQ-164, ADR-010)
+# --------------------------------------------------------------------------
+
+
+@router.get("/offsite", response_model=OffsiteStatusOut)
+async def offsite_status(
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> OffsiteStatusOut:
+    """Whether a copy has actually left the building, and when.
+
+    The **age** of the last success rather than a tick. A tick is a claim that
+    stops being checked; "last succeeded 3 days ago" is a fact somebody can act
+    on. And with nothing ever succeeded the answer is stale, not new — an empty
+    history is the most alarming state this can be in, not the most neutral.
+    """
+    await _visible(session, user)
+    config = await offsite.config_from_settings(session)
+    state = await offsite_runs.status(session)
+    return OffsiteStatusOut(
+        configured=config.complete,
+        runs=[OffsiteRunOut.model_validate(run) for run in await offsite_runs.recent(session)],
+        **state,
+    )
+
+
+@router.post("/offsite/replicate", response_model=OffsiteStatusOut)
+async def offsite_replicate_now(
+    kind: str = Query("daily", pattern="^(daily|weekly)$"),
+    session: AsyncSession = Depends(get_session),
+    user: AppUser = Depends(current_user),
+) -> OffsiteStatusOut:
+    """Ask for a run. The worker does it; this only records the request.
+
+    Deliberately not a synchronous upload. A few hundred megabytes inside a
+    request handler holds a connection open for minutes and dies with the
+    request — and a half-finished replication is exactly the state the ordering
+    rules in `offsite.replicate` exist to avoid.
+    """
+    await _visible(session, user)
+    config = await offsite.config_from_settings(session)
+    if not config.complete:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Offsite replication is not configured — missing the "
+            + ", ".join(config.missing()) + ".",
+        )
+
+    run = await offsite_runs.request(session, offsite.Kind(kind), requested_by=user.id)
+    if run is None:
+        # 409 rather than an error: the request is valid, the state is not.
+        # Two presses must not become two uploads — with versioning on and no
+        # delete permission, a duplicate object version is permanent.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "A replication run is already queued or in progress."
+        )
+
+    await record(
+        session,
+        entity_type="offsite_run",
+        entity_id=run.id,
+        action="offsite_replicate_requested",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+        after={"kind": kind},
+    )
+    await session.commit()
+    return await offsite_status(session=session, user=user)
 
 # --------------------------------------------------------------------------
 # Audit log viewer (T-6.8, REQ-069)
