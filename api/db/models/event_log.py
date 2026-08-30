@@ -30,6 +30,14 @@ class EventLog(Base):
     **`library_id` is set whenever a log line concerns a file.** Log messages
     routinely contain filenames, so the same boundary that governs documents has
     to govern their diagnostics.
+
+    **`user_id` is set whenever a log line came from somebody's request.** Some
+    lines legitimately have no library — an import scan naming a folder, an
+    auth failure — and those were globally visible, which is a leak of a
+    different shape: not a document, but a path, an address, or a question
+    somebody typed. An unbound line is now shown to the person who caused it,
+    or, when nothing caused it, only if its logger is on the operational
+    allowlist (REQ-144).
     """
 
     __tablename__ = "event_log"
@@ -43,6 +51,9 @@ class EventLog(Base):
     # cannot order two rows written in the same instant.
     sequence: Mapped[int] = mapped_column(
         sa.BigInteger, sa.Identity(always=False), nullable=False, unique=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("app_user.id"), index=True
     )
     level: Mapped[str] = mapped_column(sa.Text, nullable=False)
     logger: Mapped[str] = mapped_column(sa.Text, nullable=False)

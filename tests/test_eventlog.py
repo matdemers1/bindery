@@ -381,3 +381,106 @@ async def test_a_healthy_queued_job_is_not_flagged(client, session, signed_in) -
 
     body = (await client.get("/api/pipeline")).json()
     assert body["attention"] == []
+
+
+# --------------------------------------------------------------------------
+# An unscoped log line is not a public one (T-10.14, REQ-144)
+# --------------------------------------------------------------------------
+
+
+async def test_a_line_with_no_library_is_not_visible_to_everyone(
+    session, client, signed_in
+) -> None:
+    """The NULL branch was a leak of a different shape from a document.
+
+    On the deployed archive it held import folder paths, login addresses, and
+    the text of other people's Q&A questions — all readable by any signed-in
+    user.
+    """
+    from api.db.models import EventLog
+
+    _me, _library = await signed_in()
+    session.add_all([
+        EventLog(
+            level="info", logger="bindery.import", message="scanned /data/inbox/someone",
+        ),
+        EventLog(
+            level="info", logger="bindery.worker", message="office converter ready",
+        ),
+    ])
+    await session.commit()
+
+    body = (await client.get("/api/logs")).json()
+    messages = [entry["message"] for entry in body["entries"]]
+
+    assert "office converter ready" in messages, "machinery is still diagnosable"
+    assert not any("someone" in message for message in messages)
+
+
+async def test_your_own_unscoped_lines_are_visible_to_you(
+    session, client, signed_in
+) -> None:
+    from api.db.models import EventLog
+
+    me, _library = await signed_in()
+    session.add(
+        EventLog(
+            level="info", logger="bindery.import", user_id=me.id,
+            message="scanned /data/inbox/mine: 13 files",
+        )
+    )
+    await session.commit()
+
+    body = (await client.get("/api/logs")).json()
+    assert any("mine" in entry["message"] for entry in body["entries"])
+
+
+async def test_another_person_s_unscoped_lines_are_not(
+    session, client, signed_in, user_factory
+) -> None:
+    from api.db.models import EventLog
+
+    await signed_in()
+    other, _ = await user_factory()
+    session.add(
+        EventLog(
+            level="info", logger="bindery.import", user_id=other.id,
+            message="scanned /data/inbox/theirs: 13 files",
+        )
+    )
+    await session.commit()
+
+    body = (await client.get("/api/logs")).json()
+    assert not any("theirs" in entry["message"] for entry in body["entries"])
+
+
+def test_the_answer_log_line_does_not_carry_the_question() -> None:
+    """A Q&A query is among the most revealing things a person types."""
+    import inspect
+
+    from api import ai_ask
+
+    source = inspect.getsource(ai_ask.ClaudeAnswerer.answer)
+    assert "request.question[:60]" not in source
+    assert "len(request.question)" in source
+
+
+def test_the_auth_log_lines_do_not_carry_the_address() -> None:
+    """`login_attempt` holds it and is admin-scoped; these lines are not."""
+    import inspect
+
+    from api.auth import throttle
+
+    source = inspect.getsource(throttle.record)
+    assert "login failed from %s" in source
+    assert "login failed for %s" not in source
+
+
+def test_the_operational_allowlist_is_an_allowlist() -> None:
+    """A logger added next year and forgotten should become invisible — a
+    diagnostic gap — rather than public, which would be a disclosure."""
+    from api.routers.logs import OPERATIONAL_LOGGERS
+
+    for handles_documents in ("bindery.ask", "bindery.import", "bindery.auth",
+                              "bindery.accounts", "bindery.search"):
+        assert handles_documents not in OPERATIONAL_LOGGERS

@@ -3,6 +3,7 @@
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import eventlog
 from api import tokens as api_tokens
 from api.auth.cookies import ACCESS_COOKIE
 from api.auth.tokens import TokenError, decode_access_token
@@ -53,6 +54,11 @@ async def current_user(
     user = await session.get(AppUser, user_id)
     if user is None or not user.is_active:
         raise _UNAUTHENTICATED
+
+    # Everything this request logs is tagged with who caused it. Some log lines
+    # legitimately have no library — an import scan naming a folder, a failed
+    # login — and those used to be visible to every signed-in user (REQ-144).
+    eventlog.bind_for_request(user_id=user.id)
     return user
 
 

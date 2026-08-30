@@ -138,12 +138,14 @@ async def record(
     if succeeded:
         if user is not None and user.locked_until:
             user.locked_until = None
-        log.info("login succeeded for %s from %s", email, ip or "unknown address")
+        # Not the address. `login_attempt` holds it and is reachable only by an
+        # administrator; this line is globally visible (REQ-144).
+        log.info("login succeeded from %s", ip or "an unknown address")
         return
 
     # Logged at warning, not error: a mistyped password is not an incident, and
     # an error filter full of them is an error filter nobody reads.
-    log.warning("login failed for %s from %s", email, ip or "unknown address")
+    log.warning("login failed from %s", ip or "an unknown address")
 
     if user is None:
         return
@@ -165,6 +167,6 @@ async def record(
     if failures + 1 >= ACCOUNT_MAX_ATTEMPTS:
         user.locked_until = _now() + ACCOUNT_LOCKOUT
         log.error(
-            "locked %s until %s after %s failed attempts",
-            email, user.locked_until.isoformat(timespec="seconds"), failures + 1,
+            "an account was locked until %s after %s failed attempts",
+            user.locked_until.isoformat(timespec="seconds"), failures + 1,
         )

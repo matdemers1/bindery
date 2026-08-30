@@ -36,6 +36,25 @@ from api.schemas import (
 
 router = APIRouter(tags=["logs"])
 
+# Loggers whose lines are about the machine rather than about anybody's
+# documents: the queue, the socket, the converter, the notifier. These are the
+# only ones shown to everyone when a line has neither a library nor a caller.
+#
+# An allowlist rather than a denylist, deliberately. A logger added next year
+# and forgotten becomes invisible, which is a diagnostic gap; the other way
+# round it becomes a disclosure.
+OPERATIONAL_LOGGERS = (
+    "bindery.worker",
+    "bindery.worker.inbox",
+    "bindery.worker.convert",
+    "bindery.events",
+    "bindery.live",
+    "bindery.eventlog",
+    "bindery.queue",
+    "bindery.notify",
+    "bindery.smoke",
+)
+
 # The order a file moves through, which is what the visual pipeline draws.
 # `duplicate` and `failed` are ends rather than steps, so they are not here.
 STAGE_ORDER = [
@@ -69,8 +88,23 @@ async def read_logs(
     if not library_ids:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "no visible libraries")
 
+    # Three ways a line can be yours to read, and the third is the interesting
+    # one. A line about a file is scoped by its library, as everything is. A
+    # line from your own request is yours. Everything else — a line with no
+    # library and no caller — is only shown when its logger is one that deals
+    # in machinery rather than in people's material, because the unscoped
+    # bucket used to carry import folder paths, login addresses and, worst,
+    # the text of other people's questions (REQ-144).
     conditions: list[sa.ColumnElement[bool]] = [
-        sa.or_(EventLog.library_id.in_(library_ids), EventLog.library_id.is_(None))
+        sa.or_(
+            EventLog.library_id.in_(library_ids),
+            EventLog.user_id == user.id,
+            sa.and_(
+                EventLog.library_id.is_(None),
+                EventLog.user_id.is_(None),
+                EventLog.logger.in_(OPERATIONAL_LOGGERS),
+            ),
+        )
     ]
     if source_file_id is not None:
         conditions.append(EventLog.source_file_id == source_file_id)

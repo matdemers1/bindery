@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { Link } from "react-router";
 import { Users, UserPlus, Copy, Check, Lock, Ban, RotateCcw } from "lucide-react";
 
 import { ApiError, type AdminAccount, type AdminInvitation, accountsApi } from "../../api";
@@ -61,6 +62,22 @@ export default function AdminPage() {
         what is inside anyone's documents — including yours, which live in the
         archive like everyone else's.
       </PageHeader>
+
+      {accounts.some((a) => a.is_admin && !a.totp_enabled) && (
+        <p className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3 text-sm text-amber-200">
+          <strong className="font-medium">
+            An administrator here has no two-factor authentication.
+          </strong>{" "}
+          Granting administrator rights now requires it (REQ-156), but the
+          account that existed before this shipped was made an administrator by
+          the migration — it had to be, or nobody could reach this screen. Set it
+          up on{" "}
+          <Link to="/account" className="underline">
+            your account
+          </Link>
+          . This account can issue a password reset for every other one.
+        </p>
+      )}
 
       {error && (
         <p role="alert" className="rounded border border-red-900 bg-red-950/40 p-2.5 text-sm text-red-300">

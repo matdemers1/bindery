@@ -226,9 +226,13 @@ class ClaudeAnswerer:
                 )
 
         usage = response.usage.model_dump() if hasattr(response.usage, "model_dump") else {}
+        # Deliberately not the question. A search or a Q&A query is among the
+        # most revealing things a person types — "what is my policy number",
+        # "when was my diagnosis" — and this line was globally visible in the
+        # event log (REQ-144). The shape is enough to debug retrieval.
         log.info(
-            "answered %r with %s citations from %s pages",
-            request.question[:60], len(citations), len(request.sources),
+            "answered a %s-character question with %s citations from %s pages",
+            len(request.question), len(citations), len(request.sources),
         )
         return AskResponse(
             answer="".join(text_parts).strip(),

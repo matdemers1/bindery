@@ -71,6 +71,18 @@ def bind(**fields: Any) -> Iterator[None]:
         _context.reset(token)
 
 
+def bind_for_request(**fields: Any) -> None:
+    """Tag the rest of this request, with no matching unbind.
+
+    `bind` is a context manager and a FastAPI dependency has no block to hold
+    open. Setting the contextvar without resetting is safe here because Starlette
+    runs each request in its own task and contextvars are copied per task — the
+    value cannot escape into the next request.
+    """
+    current = _context.get() or {}
+    _context.set({**current, **{k: v for k, v in fields.items() if v is not None}})
+
+
 def context() -> dict[str, Any]:
     return dict(_context.get() or {})
 
@@ -95,6 +107,7 @@ class DatabaseLogHandler(logging.Handler):
                 "message": record.getMessage()[:8000],
                 "detail": self.format_exception(record),
                 "library_id": _as_uuid(bound.get("library_id")),
+                "user_id": _as_uuid(bound.get("user_id")),
                 "source_file_id": _as_uuid(bound.get("source_file_id")),
                 "document_id": _as_uuid(bound.get("document_id")),
                 "job_id": _as_uuid(bound.get("job_id")),
@@ -103,7 +116,8 @@ class DatabaseLogHandler(logging.Handler):
                     key: str(value)
                     for key, value in bound.items()
                     if key not in {
-                        "library_id", "source_file_id", "document_id", "job_id", "stage"
+                        "library_id", "user_id", "source_file_id", "document_id",
+                        "job_id", "stage",
                     }
                 },
             }
@@ -167,7 +181,7 @@ async def drain_once(session_factory) -> int:
                 f"{lost} log record(s) were dropped: they arrived faster than they "
                 "could be written. The pipeline was not affected."
             ),
-            "detail": None, "library_id": None, "source_file_id": None,
+            "detail": None, "library_id": None, "user_id": None, "source_file_id": None,
             "document_id": None, "job_id": None, "stage": None, "context": {},
         })
 
