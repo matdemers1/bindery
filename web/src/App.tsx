@@ -25,6 +25,7 @@ import Login from "./pages/Login";
 import AccountPage from "./features/accounts/AccountPage";
 import AdminPage from "./features/accounts/AdminPage";
 import JoinPage from "./features/accounts/JoinPage";
+import HelpPage from "./features/help/HelpPage";
 
 type State = { status: "loading" } | { status: "out" } | { status: "in"; user: User };
 
@@ -137,6 +138,7 @@ export default function App() {
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/account" element={<AccountPage />} />
+          <Route path="/help" element={<HelpPage />} />
           <Route path="/people" element={<AdminPage />} />
           {/* Someone already signed in who opens an invitation link should end
               up somewhere sensible rather than at a form they cannot use. */}

@@ -1,0 +1,150 @@
+"""Documentation that cannot quietly rot (T-11.3, T-11.9, REQ-150).
+
+The operator's requirement was *"going forward, we'll have to update that with
+every feature that we change"* — which is precisely the thing nobody does.
+Documentation rots silently: nothing fails, the guide is simply a year out of
+date and quietly misleading, which is worse than no guide at all.
+
+So the things that can be checked are checked here, and the build fails on them:
+a screen with no guide, a guide for a screen that no longer exists, a screenshot
+that is missing, and a screenshot older than the code it depicts.
+
+What cannot be checked is whether the prose is *true*. Nothing here pretends to.
+"""
+
+import json
+import re
+import subprocess
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parent.parent
+GUIDES_FILE = REPO / "web" / "public" / "help" / "guides.json"
+SCREENS = REPO / "web" / "public" / "help" / "screens"
+APP = REPO / "web" / "src" / "App.tsx"
+
+# Routes a person never navigates to on purpose, or that are a detail view of
+# something already documented. Each needs a reason, so that "add it to the
+# exemptions" is a decision rather than a reflex.
+UNDOCUMENTED_ON_PURPOSE = {
+    "/ask": "a redirect kept so old links still work",
+    "*": "the catch-all",
+    "/join/*": "an invitation link, and the join page explains itself",
+    "/document/:documentId": "redirects into the viewer",
+    "/document/:documentId/page/:pageNumber": "the viewer, reached from a result",
+    "/file/:fileId": "redirects into the viewer",
+    "/file/:fileId/page/:pageNumber": "the viewer, reached from a result",
+    "/file/:fileId/segments": "reached from the viewer, and explained there",
+    "/help": "the guides themselves",
+    "/libraries": "a household feature; documented when households are",
+}
+
+
+def _guides() -> dict:
+    return json.loads(GUIDES_FILE.read_text())
+
+
+def _routes_in_app() -> set[str]:
+    """Every `<Route path="…">` the application declares."""
+    return set(re.findall(r'<Route\s+path="([^"]+)"', APP.read_text()))
+
+
+def test_every_screen_has_a_guide() -> None:
+    """Adding a route without documenting it fails the build (REQ-150)."""
+    documented = {guide["route"] for guide in _guides()["guides"]}
+    missing = sorted(
+        route
+        for route in _routes_in_app()
+        if route not in documented and route not in UNDOCUMENTED_ON_PURPOSE
+    )
+    assert not missing, (
+        "these screens have no guide in docs/help/guides.json. Write one, or add "
+        "it to UNDOCUMENTED_ON_PURPOSE with a reason:\n  " + "\n  ".join(missing)
+    )
+
+
+def test_no_guide_describes_a_screen_that_is_gone() -> None:
+    """The other direction, which rots more quietly: a guide for a screen that
+    was removed reads as current until somebody follows the link."""
+    routes = _routes_in_app()
+    stale = sorted(
+        guide["route"] for guide in _guides()["guides"] if guide["route"] not in routes
+    )
+    assert not stale, f"guides describe screens that no longer exist: {stale}"
+
+
+def test_the_exemptions_are_all_still_real_routes() -> None:
+    """An exemption for a route that no longer exists hides the next screen that
+    happens to be named the same thing."""
+    routes = _routes_in_app()
+    orphaned = sorted(route for route in UNDOCUMENTED_ON_PURPOSE if route not in routes)
+    assert not orphaned, f"exempted routes that no longer exist: {orphaned}"
+
+
+def test_every_guide_has_a_screenshot_on_disk() -> None:
+    """A guide whose picture 404s is worse than one with no picture."""
+    missing = [
+        guide["screenshot"]
+        for guide in _guides()["guides"]
+        if not (SCREENS / guide["screenshot"]).is_file()
+    ]
+    assert not missing, (
+        "no screenshot for: " + ", ".join(missing) + "\nRun `make screenshots`."
+    )
+
+
+def test_no_screenshot_is_older_than_the_screen_it_shows() -> None:
+    """The check that makes this survive contact with the next six months.
+
+    A screenshot does not announce that it is out of date — it is simply a
+    picture of an application that no longer looks like that. Comparing the
+    commit that last touched a screen's source against the commit the screenshot
+    was captured at turns silent rot into a failing build.
+
+    Deliberately *not* a pixel comparison. Antialiasing, font hinting and
+    timestamps differ between machines, so that check would fail for reasons
+    that have nothing to do with the documentation and would be switched off
+    within a month.
+    """
+    manifest_file = SCREENS / "manifest.json"
+    if not manifest_file.is_file():
+        pytest.skip("no screenshots captured yet — run `make screenshots`")
+
+    manifest = json.loads(manifest_file.read_text())
+    stale = []
+    for entry in manifest["screens"]:
+        sources = entry.get("sources") or []
+        if not sources:
+            continue
+        newest = subprocess.run(
+            ["git", "log", "-1", "--format=%ct", "--", *sources],
+            cwd=REPO, capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        if not newest:
+            continue
+        if int(newest) > int(entry["captured_at"]):
+            stale.append(entry["screenshot"])
+
+    assert not stale, (
+        "these screenshots are older than the code they show:\n  "
+        + "\n  ".join(stale)
+        + "\nRun `make screenshots` and commit the result."
+    )
+
+
+def test_the_faq_answers_the_questions_that_matter_most() -> None:
+    """Not a style check. These are the promises the archive makes to people who
+    are handing over medical and financial records, and a FAQ that quietly stops
+    making one of them is a change worth noticing.
+    """
+    questions = " ".join(entry["question"].lower() for entry in _guides()["faq"])
+    answers = " ".join(entry["answer"].lower() for entry in _guides()["faq"])
+
+    assert "read my documents" in questions, "who can read my documents"
+    assert "deleted" in questions, "does anything get deleted"
+    assert "get my documents out" in questions, "can I leave"
+    assert "anthropic" in questions, "what leaves the machine"
+    # And the answers have to still say the right thing.
+    assert "no." in answers
+    assert "never modified" in answers

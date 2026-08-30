@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router";
 import {
   Activity,
+  BookOpen,
   ClipboardCheck,
   FolderTree,
   Images,
@@ -83,6 +84,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
       // Only rendered for administrators — see `visibleGroups` below.
       { to: "/people", label: "People", icon: UsersRound, adminOnly: true },
       { to: "/settings", label: "Settings", icon: Settings },
+      { to: "/help", label: "Guides", icon: BookOpen },
     ],
   },
 ];

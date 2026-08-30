@@ -71,3 +71,6 @@ reprocess:        ## re-classify documents left on an older prompt: make reproce
 
 create-user:      ## make create-user email=you@example.com library=Household
 	$(COMPOSE) exec api python -m api.cli create-user --email "$(email)" --library "$(library)"
+
+screenshots:      ## capture documentation screenshots from a running stack
+	@BINDERY_URL=$${BINDERY_URL:-http://localhost:8080} python3 scripts/capture-screens.py

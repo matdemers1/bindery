@@ -32,6 +32,12 @@ jobs:
       COOKIE_SECURE: "true"
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `test_docs.py` asks git when a screen last changed, to catch a
+          # documentation screenshot that is quietly out of date. A shallow
+          # clone has no history to ask, and the check would pass by knowing
+          # nothing — which is exactly the failure mode it exists to prevent.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

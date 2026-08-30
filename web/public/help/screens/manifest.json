@@ -1,0 +1,155 @@
+{
+  "screens": [
+    {
+      "route": "/",
+      "screenshot": "ask.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/ask",
+        "web/src/features/firstrun",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/search",
+      "screenshot": "search.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/search",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/add",
+      "screenshot": "add.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/add",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/files",
+      "screenshot": "files.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/files",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/review",
+      "screenshot": "review.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/review",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/archive",
+      "screenshot": "archive.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/archive",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/photos",
+      "screenshot": "photos.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/photos",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/organise",
+      "screenshot": "organise.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/organise",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/import",
+      "screenshot": "import.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/import",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/trust",
+      "screenshot": "trust.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/trust",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/pipeline",
+      "screenshot": "pipeline.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/pipeline",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/account",
+      "screenshot": "account.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/accounts/AccountPage.tsx",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/people",
+      "screenshot": "people.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/accounts/AdminPage.tsx",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/settings",
+      "screenshot": "settings.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/settings",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    },
+    {
+      "route": "/rules",
+      "screenshot": "rules.png",
+      "captured_at": 1788093897,
+      "sources": [
+        "web/src/features/rules",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ]
+    }
+  ]
+}

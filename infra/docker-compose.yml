@@ -86,6 +86,12 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}_test
       DATA_ROOT: /tmp/bindery-test-data
+      # `test_docs.py` runs `git log` to find a screenshot older than the screen
+      # it shows. Git refuses a repository it does not own, which a bind mount
+      # always is.
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /app
     # Without these, `make test` runs whatever source was baked into the image
     # at build time and reports a pass on code you have already changed. A
     # green suite that tested the previous commit is worse than a red one.
@@ -98,6 +104,14 @@ services:
       - ../pyproject.toml:/app/pyproject.toml:ro
       # test_trust_and_export.py asserts on the restore drill's own contents.
       - ../scripts:/app/scripts:ro
+      # test_docs.py reads the guides, the routes they must cover, and the
+      # screenshots. Only `web/src` and `web/public` — mounting all of `web`
+      # would drag node_modules in for two directories.
+      - ../web/src:/app/web/src:ro
+      - ../web/public:/app/web/public:ro
+      # Read-only, and only so the screenshot staleness check can ask git when
+      # a screen last changed. Nothing in the suite writes here.
+      - ../.git:/app/.git:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,6 +129,12 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}_test
       DATA_ROOT: /tmp/bindery-test-data
+      # `test_docs.py` runs `git log` to find a screenshot older than the screen
+      # it shows. Git refuses a repository it does not own, which a bind mount
+      # always is.
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /app
     # Same reason as `test`: the suite must run against the working tree.
     volumes:
       - ../api:/app/api:ro
@@ -129,5 +149,48 @@ services:
       postgres:
         condition: service_healthy
 
+  # Documentation screenshots (T-11.2, REQ-149):
+  #   docker compose --profile screenshots run --rm screenshots
+  #
+  # Inside the network rather than from the host, because there are no
+  # published ports (REQ-104) and there is not going to be one for this. It
+  # reaches `web` directly, which is also how CI runs it.
+  screenshots:
+    profiles: [screenshots]
+    image: mcr.microsoft.com/playwright/python:v1.62.0-noble
+    working_dir: /repo
+    # The browser shares the web container's network namespace, so the app is
+    # at `http://localhost`. That is not cosmetic: the session cookie is
+    # `Secure`, and a browser discards a Secure cookie delivered over plain
+    # HTTP — the login succeeded, the cookie was dropped, and every subsequent
+    # request came back 401 while the screen sat on the login form looking like
+    # a wrong password. `localhost` is the one origin Chrome treats as
+    # trustworthy without TLS.
+    network_mode: "service:web"
+    environment:
+      BINDERY_URL: http://localhost
+      BINDERY_EMAIL: ${BINDERY_EMAIL:-demo@example.com}
+      BINDERY_PASSWORD: ${BINDERY_PASSWORD:-}
+      # `git log` needs to trust a directory it does not own.
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /repo
+    volumes:
+      - ..:/repo
+    depends_on:
+      web:
+        condition: service_healthy
+    # The image ships the browsers under /ms-playwright but not the Python
+    # binding, so install it here — pinned to the image's own version, because
+    # a newer binding looks for a browser build the image does not have and
+    # fails with an executable-not-found several layers down.
+    command:
+      - sh
+      - -c
+      - |
+        pip install --quiet --break-system-packages playwright==1.62.0 \
+          && python scripts/capture-screens.py
+
 volumes:
   pgdata:
+

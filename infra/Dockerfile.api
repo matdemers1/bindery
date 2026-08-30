@@ -55,6 +55,13 @@ ENV BINDERY_COMMIT=$BINDERY_COMMIT \
 
 
 FROM base AS dev
+# git is here for one test: `test_docs.py` asks when a screen's source last
+# changed, to catch a documentation screenshot that is quietly out of date.
+# Skipping the check when git is missing would make it a check that silently
+# does not run, which is the thing it exists to prevent.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml infra/extract-deps.py ./
 RUN python extract-deps.py dev > /tmp/dev-requirements.txt \
  && pip install --no-cache-dir -r /tmp/dev-requirements.txt \

@@ -1,0 +1,358 @@
+{
+  "$comment": "Guides for every user-facing screen (T-11.1, T-11.3, REQ-148, REQ-150). JSON rather than markdown because two things read this file: the app, which renders it with no parser and no dependency, and tests/test_docs.py, which fails the build when a route has no guide or a screenshot has gone stale. A format only one of them could read would let the two drift.",
+  "guides": [
+    {
+      "route": "/",
+      "title": "Ask",
+      "blurb": "Ask a question in your own words and get an answer with the page it came from.",
+      "screenshot": "ask.png",
+      "sections": [
+        {
+          "heading": "What it does",
+          "body": [
+            "Type a question the way you would ask a person — *when did I last get the brakes done?* — and Bindery finds the pages that could answer it and reads them.",
+            "Every claim in the answer is linked to the page it came from. Click **Sources** to see them beside the answer."
+          ]
+        },
+        {
+          "heading": "When it says it cannot find something",
+          "body": [
+            "An answer with nothing to cite is thrown away rather than shown with a caveat. A caveat is read once; an answer is believed.",
+            "You still get the pages that mention what you asked about, which is what the search box would have given you — often that is enough to see the thing yourself."
+          ],
+          "callout": {
+            "kind": "note",
+            "text": "Ask needs an API key, set in Settings. Everything else — search, the viewer, the archive — works without one and without a network."
+          }
+        }
+      ]
+    },
+    {
+      "route": "/search",
+      "title": "Search",
+      "blurb": "Every page in the archive, by the words printed on it.",
+      "screenshot": "search.png",
+      "sections": [
+        {
+          "heading": "It searches pages, not files",
+          "body": [
+            "A result is *page 47 of a 100-page scan*, not *a 100-page scan*. Clicking it opens that page with your words highlighted.",
+            "This is the whole point of the archive: the DD-214 inside a bundle of everything else is findable without anyone having split the bundle up."
+          ]
+        },
+        {
+          "heading": "Narrowing it down",
+          "body": [
+            "The filters down the side narrow by library, by kind of document, and by known forms. Everything you pick is in the address bar, so a search is a link you can send or bookmark."
+          ]
+        },
+        {
+          "heading": "If a search finds nothing",
+          "body": [
+            "Check whether the words were ever read correctly. Open the file and use **See the extracted text** — handwriting and faint carbon copies are where OCR struggles, and seeing the raw text tells you whether to re-scan or search for something else."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/add",
+      "title": "Add files",
+      "blurb": "Drag documents in and watch them move through the pipeline.",
+      "screenshot": "add.png",
+      "sections": [
+        {
+          "heading": "What happens to a file",
+          "body": [
+            "The original is stored byte-for-byte and **never modified**. Everything Bindery does happens alongside it.",
+            "Then it is read: every page is OCR'd and indexed, which is what makes it findable. If a scan holds several documents, it is split by page range — again without touching the original."
+          ]
+        },
+        {
+          "heading": "Watching it happen",
+          "body": [
+            "The pipeline on this page shows each file moving from stage to stage. A file that fails stops somewhere visible and says why; nothing disappears quietly.",
+            "**Open the log** shows every line the application wrote about your files, which is usually enough to explain a failure without asking anyone."
+          ]
+        },
+        {
+          "heading": "What it accepts",
+          "body": [
+            "PDFs, photographs and scans (JPEG, PNG, TIFF, HEIC), and office documents — Word, Excel, PowerPoint, OpenDocument, RTF, CSV, plain text and HTML. Office files are converted to PDF and then travel the ordinary path; the original is kept and an export still hands back the .xlsx."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/files",
+      "title": "Files",
+      "blurb": "The folder tree, and every file the archive has ever been given.",
+      "screenshot": "files.png",
+      "sections": [
+        {
+          "heading": "Files and documents are different things",
+          "body": [
+            "A **file** is what you gave Bindery. A **document** is a range of pages within one — a twelve-page scan holding three documents is one file and three documents.",
+            "This screen is the file view: what arrived, when, from where, and what state it reached."
+          ]
+        },
+        {
+          "heading": "When something looks wrong",
+          "body": [
+            "**See the extracted text** shows exactly what OCR read, verbatim. A search finding nothing is ambiguous until you can see whether the word was ever read correctly.",
+            "If it was not, a rescan re-runs OCR with more aggressive settings — and re-runs everything downstream of it, so the corrected text ends up in search."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/review",
+      "title": "Review",
+      "blurb": "The documents Bindery was not confident enough to file on its own.",
+      "screenshot": "review.png",
+      "sections": [
+        {
+          "heading": "Why something is here",
+          "body": [
+            "Filing is decided on **structural facts**, not on how confident the model says it is: whether the document matched a known form, whether every tag it chose already existed, whether the date was quoted from a labelled field.",
+            "Model confidence is shown, because it is interesting, and is deliberately not part of the decision. It is not well calibrated, and a system that files on it files wrongly with conviction."
+          ]
+        },
+        {
+          "heading": "The why panel",
+          "body": [
+            "Every AI-written field points at the page and sentence that justified it. If a date looks wrong, you can see where it came from in one click.",
+            "Anything you change is recorded and can be undone — including un-filing something."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/archive",
+      "title": "Archive",
+      "blurb": "Browse everything, grouped the way you want to look at it.",
+      "screenshot": "archive.png",
+      "sections": [
+        {
+          "heading": "Grouping",
+          "body": [
+            "By year, by who it is from, by kind of document, or by known form. The grouping is a view — nothing is moved, and a document belongs to exactly one library regardless of how you are looking at it."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/photos",
+      "title": "Photos",
+      "blurb": "Everything you recognise by looking rather than by reading.",
+      "screenshot": "photos.png",
+      "sections": [
+        {
+          "heading": "Why pictures get their own screen",
+          "body": [
+            "A photograph carries no text, so OCR finds nothing on it and a list of filenames is a poor way to look for one. A grid is not.",
+            "**Nothing readable on these** finds the images OCR could not read. Bindery can look at those and describe them — that is what the button does, and it costs an API call each."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/organise",
+      "title": "Organise",
+      "blurb": "Tidy the folders, types and tags the archive has accumulated.",
+      "screenshot": "organise.png",
+      "sections": [
+        {
+          "heading": "Near-duplicates",
+          "body": [
+            "Twenty years of letterheads spell one organisation four ways. The near-duplicate list finds the ones that *look* alike, which is the right tool for a typo."
+          ]
+        },
+        {
+          "heading": "The unify pass",
+          "body": [
+            "Some duplicates do not look alike at all — `Unit Patch` and `Insignia` are the same kind of document and share no letters. **Look for duplicates** asks a model, sending only the list of names and never any document text.",
+            "Nothing merges until you press the button on a group, and every merge can be undone on its own."
+          ],
+          "callout": {
+            "kind": "warning",
+            "text": "Read each group before applying it. A general kind and a special case of it are different things — Receipt and Veterinary Receipt should stay apart — and the pass is deliberately cautious but not infallible."
+          }
+        }
+      ]
+    },
+    {
+      "route": "/import",
+      "title": "Import",
+      "blurb": "Bring in a folder tree you already have.",
+      "screenshot": "import.png",
+      "sections": [
+        {
+          "heading": "Two passes, on purpose",
+          "body": [
+            "A backlog arrives before the archive knows any of your vocabulary, so the first pass builds it and the second uses it. Between them you get to correct the taxonomy once instead of a thousand times.",
+            "Backlog documents never enter the daily review queue. They were unfindable before; anything is an improvement, and burying today's post under ten years of old paper is how people give up."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/trust",
+      "title": "Trust",
+      "blurb": "Backups, exports, integrity, and everything the system has done.",
+      "screenshot": "trust.png",
+      "sections": [
+        {
+          "heading": "The export is the important one",
+          "body": [
+            "It writes a folder tree plus a plain `index.html` that opens in any browser with Bindery switched off. No scripts, no external assets.",
+            "That is the promise: your documents are not hostage to this software continuing to exist."
+          ]
+        },
+        {
+          "heading": "Integrity",
+          "body": [
+            "Every original is content-addressed, so a changed byte is detectable. The integrity check re-hashes them and reports anything that no longer matches — bit rot found before a backup copies it."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/pipeline",
+      "title": "Pipeline",
+      "blurb": "Where every file is, and what went wrong with the ones that stopped.",
+      "screenshot": "pipeline.png",
+      "sections": [
+        {
+          "heading": "Nothing fails silently",
+          "body": [
+            "A file that cannot be processed lands in a visible state with the actual error, not a summary of it. Some failures are permanent and say so — a dynamic XFA form genuinely cannot be read by anything but Adobe.",
+            "Anything that gave up can be sent round again once whatever blocked it is fixed."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/account",
+      "title": "Your account",
+      "blurb": "Password, two-factor authentication, and how much space you are using.",
+      "screenshot": "account.png",
+      "sections": [
+        {
+          "heading": "Two-factor",
+          "body": [
+            "Optional for ordinary accounts, required for administrators. Turning it on means a stolen password is not enough on its own.",
+            "You are shown ten recovery codes once. Write them down — each works once and they are how you get in if you lose your phone."
+          ]
+        },
+        {
+          "heading": "Changing your password",
+          "body": [
+            "Every other signed-in device is signed out, which is usually the reason for changing it.",
+            "If you have forgotten it, there is no reset email — ask whoever runs the server for a one-time code."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/people",
+      "title": "People",
+      "blurb": "Invitations, accounts and storage. Administrators only.",
+      "screenshot": "people.png",
+      "sections": [
+        {
+          "heading": "What an administrator can and cannot do",
+          "body": [
+            "They can invite, suspend, set storage limits, clear a lockout and issue a one-time password reset code.",
+            "They **cannot read anyone else's documents**. There is no view-as, no override and no support path that involves looking — the permission boundary has no administrator branch, and a test asserts it on every route that returns anything."
+          ],
+          "callout": {
+            "kind": "note",
+            "text": "That is deliberate and it has a cost: diagnosing someone's problem means working from job states and error messages rather than from the document. The alternative is telling people you can read their medical records."
+          }
+        },
+        {
+          "heading": "Inviting someone",
+          "body": [
+            "There is no email service, so you get a link to send yourself — by text, or in person. It works once and expires in a fortnight.",
+            "A reset code works the same way: you read it out, and they choose their own new password. You never learn what it is."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/settings",
+      "title": "Settings",
+      "blurb": "The API key, the model, and how the archive behaves.",
+      "screenshot": "settings.png",
+      "sections": [
+        {
+          "heading": "Working without a key",
+          "body": [
+            "Ingest, OCR, search, the viewer and export all work with no API key and no network. Only classification and Ask defer.",
+            "Documents added before a key was configured are not lost or broken — they wait, and can be sent through review whenever you add one."
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/rules",
+      "title": "Rules",
+      "blurb": "Deterministic filing you wrote, which overrules the model.",
+      "screenshot": "rules.png",
+      "sections": [
+        {
+          "heading": "Rules run after classification",
+          "body": [
+            "The model proposes; a rule decides. If you know every statement from one bank is a bank statement, say so once and stop correcting it.",
+            "A rule's effects are recorded as coming from *your rule*, not from the model, so the why panel can tell you which of the two is responsible for a field."
+          ]
+        },
+        {
+          "heading": "Dry run first",
+          "body": [
+            "Every rule can be tested against the archive before it is switched on: it shows what would change, on which documents, without changing anything.",
+            "Worth doing. A rule is applied retroactively, so a wrong one is wrong across everything at once — recoverable, since it is all undoable, but tedious."
+          ]
+        }
+      ]
+    }
+  ],
+  "faq": [
+    {
+      "question": "Can the person running this server read my documents?",
+      "answer": "No. An administrator can see your account, how much space you are using, and whether a file failed to process. They cannot open a document, see a title, or read a page. This is enforced in the code — the permission boundary has no administrator branch — and a test sweeps every route that returns data to prove it stays that way."
+    },
+    {
+      "question": "What happens to my original files?",
+      "answer": "They are stored exactly as you gave them and never modified. Everything Bindery produces — the searchable text, the page images, the split into separate documents — lives alongside the original, never in place of it."
+    },
+    {
+      "question": "Does anything ever get deleted?",
+      "answer": "No, and nothing is designed to. Deleting is not automated anywhere: merges tombstone rather than remove, corrections are recorded rather than overwritten, and there is no retention policy quietly tidying up behind you."
+    },
+    {
+      "question": "I forgot my password.",
+      "answer": "There is no reset email, because there is no email service. Ask whoever runs the server for a one-time code; they generate it and read it to you, and you choose your own new password. They never learn what it is."
+    },
+    {
+      "question": "Why is a document waiting for review instead of being filed?",
+      "answer": "Because the evidence for filing it was thin. Bindery files on structural facts — a matched known form, tags that all already existed, a date quoted from a labelled field — and not on how confident the model claims to be. Something with none of those waits for you rather than guessing."
+    },
+    {
+      "question": "My search found nothing. Is the document missing?",
+      "answer": "Possibly not. Open the file and choose to see the extracted text: that shows exactly what OCR read. Handwriting and faint carbon copies are where it struggles, and seeing the raw text tells you whether to re-scan, or just to search for a different word."
+    },
+    {
+      "question": "How much space do I have?",
+      "answer": "Your account page shows what you have used and your limit, if one was set. Uploads are refused before the file is stored once you are at the limit, and the message says the numbers. Ask for more if you need it."
+    },
+    {
+      "question": "Can I get my documents out?",
+      "answer": "Yes, and this is worth testing rather than trusting. Trust → Export writes a folder tree plus a plain index.html that opens in any browser with Bindery switched off. Bundled scans stay as one file with the page ranges named, because splitting them would modify an original."
+    },
+    {
+      "question": "Does anything I do here go to Anthropic?",
+      "answer": "Only classification and Ask, and only when an API key is configured. Those send the text of the pages being classified or consulted. Search, OCR, the viewer, the archive and export never leave the machine. The folder-tidying pass sends only the list of folder names, never any document text."
+    }
+  ]
+}

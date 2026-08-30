@@ -421,6 +421,37 @@ harness.
 `infra/zimaos/bindery.zimaos.yaml` is the CasaOS custom-app manifest. It must
 never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
 
+## Documentation is part of the change
+
+`web/public/help/guides.json` is the user-facing documentation, and
+`tests/test_docs.py` is what keeps it true. Adding a screen without a guide
+fails the build; so does a guide for a screen that no longer exists, a missing
+screenshot, and a screenshot older than the code it shows.
+
+The staleness check is the one worth understanding. It compares the commit that
+last touched a screen's source against the commit its screenshot was captured
+at — deliberately **not** a pixel comparison, which differs between machines on
+antialiasing alone and would be switched off within a month.
+
+```bash
+make up                       # a local stack
+make screenshots              # captures from it, writes the manifest
+```
+
+Capture runs **inside the compose network**, sharing the web container's network
+namespace. Two reasons, both learned the hard way: there are no published ports
+(REQ-104), and the session cookie is `Secure`, so a browser reached over plain
+`http://web` silently discards it — the login succeeds, every later request
+401s, and the screen sits on the login form looking like a wrong password.
+`localhost` is the one origin Chrome treats as trustworthy without TLS.
+
+**Screenshots go in the repository, so they must never come from the real
+archive.** `scripts/seed-demo.py` generates four invented documents and ingests
+them; the cast on the People screen is Mum, Dad and Sister, and none of them
+exist. The PDFs are generated rather than committed — a handful of bytes of code
+beats four binaries nobody can diff, and they carry real selectable text, so
+OCR, the known-form matcher and search all have something true to do.
+
 ## ⚠️ Private repository
 
 `tests/corpus/` holds real personal documents (DD-214, VA medical records, financial statements) as the golden corpus. **This repository must never be made public.**

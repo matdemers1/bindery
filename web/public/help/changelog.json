@@ -1,0 +1,42 @@
+{
+  "$comment": "Rendered in the app at /help?view=changelog (REQ-155). The only copy — a markdown file in docs/ and a copy the app renders would be two files that drift.",
+  "intro": "What changed, in the order it changed, for the people using it rather than the person who wrote it. Versions are commits — see the badge in the sidebar for the one you are on.",
+  "releases": [
+    {
+      "version": "Unreleased",
+      "sections": [
+        {
+          "heading": "Accounts, and sharing the archive",
+          "changes": [
+            "**Invitations.** Accounts are created by invitation. There is no email service, so an invitation is a link the administrator sends you directly. It works once and expires in a fortnight.",
+            "**Two-factor authentication**, optional for ordinary accounts and required for administrators. You are shown ten recovery codes once; write them down.",
+            "**Password reset without email.** The administrator issues a one-time code and reads it out; you choose your own new password. They never learn it.",
+            "**Storage limits.** Your account page shows what you have used. An upload that would take you past the limit is refused before the file is stored, and the message says the numbers.",
+            "**An administrator cannot read your documents.** They administer accounts, storage and the pipeline. There is no view-as and no override — the permission boundary has no administrator branch, and a test asserts it on every route that returns data."
+          ]
+        },
+        {
+          "heading": "Signing in",
+          "changes": [
+            "**Bindery's own login page** replaces the Cloudflare Access screen that used to sit in front of it. One account, one password, one page.",
+            "Repeated wrong passwords are slowed down and eventually locked out for a quarter of an hour. A successful sign-in clears it, and an administrator can clear it sooner."
+          ]
+        },
+        {
+          "heading": "Guides and versions",
+          "changes": [
+            "**Guides** for every screen, and answers to the questions people actually ask, at *Guides* in the sidebar. Served from this machine; no part of it needs a network.",
+            "**The version** of what is running is in the corner of the sidebar, with a warning when the pieces disagree or a database migration has not been applied."
+          ]
+        },
+        {
+          "heading": "Finding things",
+          "changes": [
+            "**Photos** — every image in the archive as a wall of pictures rather than a list of filenames, with a filter for the ones nothing could be read from. Bindery can look at those and describe them.",
+            "**Folder tidying.** *Organise* proposes which folders, document types and tags are the same thing under different names. Only the names are sent for this — never any document text — and nothing merges until you agree to a group."
+          ]
+        }
+      ]
+    }
+  ]
+}
