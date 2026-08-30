@@ -276,12 +276,43 @@ A backup nobody has restored from is a hypothesis, and that applies to this copy
 exactly as it applied to the local one:
 
 ```bash
-scripts/restore-drill.sh --from-s3   # T-13.10 — not built yet
+scripts/restore-drill.sh --from-s3 [search-term]
 ```
 
-Restore into a clean container from the bucket alone and find the DD-214. The
-exit demo goes further and is worth doing once for real: a scratch machine, an
-AWS login out of the password manager, and no `.deploy/SECRETS.md` at all.
+Restores into a clean container from the bucket alone — no local backup
+directory, no blob pool, no live stack — and searches the result.
+
+It is a **stronger** check than the local drill, because the offsite copy makes
+it possible. The local version asks whether a blob is present in a directory.
+This one downloads every original the restored database references and
+re-hashes each against the content address that database asked for. A blob that
+is present but wrong is the failure a presence check cannot see, and it is the
+one that matters: a backup that restores cleanly and hands back different bytes
+is worse than one that fails loudly.
+
+Blobs are fetched *after* the restore, once the database has said which ones it
+needs. That is cheaper than pulling the whole pool, and it is what a real
+recovery does.
+
+### It can fail, which is the point
+
+Verified on 2026-08-30, against the live bucket:
+
+| Done to it | What the drill did |
+|---|---|
+| Searched for a term not in the archive | `DRILL FAILED — could not find it` |
+| Deleted one original from the bucket | Named the exact blob, refused, `it is not restorable` |
+| Ran `reconcile`, then a sync | Detected the one gap, re-uploaded **one** object, not 36 |
+| Re-ran the drill | Passed |
+
+That third row is the self-healing property, and it did not work when first
+written — see the note on `absent_at` below.
+
+### The exit demo
+
+Worth doing once for real, and it goes further than the drill: a scratch
+machine, an AWS login out of the password manager, and no `.deploy/SECRETS.md`
+at all.
 
 Then disable the KMS key and confirm the same restore becomes impossible — a
 stop-button that has never been tested is not a stop-button.

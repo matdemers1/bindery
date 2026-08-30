@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: up down build logs ps migrate revision test test-pipeline integrity backup export mirror drill lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
+.PHONY: up down build logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
 
 build:            ## build all images
 	$(COMPOSE) build
@@ -52,6 +52,9 @@ mirror:           ## rebuild the browsable folder tree (safe: it is derived, not
 
 drill:            ## THE deliverable: restore to a clean database and find the DD-214
 	scripts/restore-drill.sh $(b)
+
+drill-offsite:    ## the same, from S3 alone — no local backup, no blob pool, no live stack
+	scripts/restore-drill.sh --from-s3 $(term)
 
 ocr-report:       ## score OCR word accuracy on the golden corpus (REQ-018, the R-01 gate)
 	$(COMPOSE) --profile test run --rm test-worker \

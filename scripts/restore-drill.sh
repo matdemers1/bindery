@@ -17,11 +17,32 @@
 #
 # Usage:
 #   scripts/restore-drill.sh /path/to/backup/20260828-031500 [search-term]
+#   scripts/restore-drill.sh --from-s3 [search-term]
+#
+# --from-s3 is the offsite drill (T-13.10). It restores from the bucket and
+# nothing else: no local backup directory, no blob pool, no live stack. That is
+# the whole claim being tested — that losing this building costs nothing.
+#
+# It is also a stronger check than the local drill, because the offsite copy
+# makes it possible. The local version asks whether a blob is *present* in a
+# directory; this one downloads every original the restored database references
+# and re-hashes it against the content address that database asked for. A blob
+# that is present but wrong is the failure a presence check cannot see, and it
+# is the one that matters.
 
 set -euo pipefail
 
-BACKUP="${1:?usage: restore-drill.sh <backup-directory> [search-term]}"
-SEARCH_TERM="${2:-DD-214}"
+FROM_S3=0
+if [ "${1:-}" = "--from-s3" ]; then
+  FROM_S3=1
+  shift
+  SEARCH_TERM="${1:-DD-214}"
+  BACKUP="$(mktemp -d -t bindery-offsite-drill)"
+  # Cleaned up by the exit trap below, along with the scratch container.
+else
+  BACKUP="${1:?usage: restore-drill.sh <backup-directory> [search-term]  |  --from-s3 [search-term]}"
+  SEARCH_TERM="${2:-DD-214}"
+fi
 # Doubled for SQL string literals below.
 SEARCH_SQL="${SEARCH_TERM//\'/\'\'}"
 
@@ -36,18 +57,48 @@ step()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  # Only ever the directory this script created for itself. A local backup
+  # passed in as an argument is the user's and is never touched.
+  if [ "$FROM_S3" = "1" ] && [ -n "${BACKUP:-}" ] && [ -d "$BACKUP" ]; then
+    rm -rf "$BACKUP"
+  fi
 }
 trap cleanup EXIT
+
+COMPOSE="docker compose --env-file .env -f infra/docker-compose.yml"
+
+if [ "$FROM_S3" = "1" ]; then
+  step "Downloading the newest generation from the offsite bucket"
+  echo "  nothing local is used: not the backup directory, not the blob pool"
+  # Fetched inside the api container, which holds the credentials. They are
+  # never passed through this script's environment or its argv.
+  $COMPOSE exec -T api python -m api.cli offsite-fetch --into /tmp/offsite-drill \
+    || { red "could not fetch the offsite dump"; exit 1; }
+  $COMPOSE cp api:/tmp/offsite-drill/bindery.dump "$BACKUP/bindery.dump" >/dev/null
+  $COMPOSE cp api:/tmp/offsite-drill/manifest.json "$BACKUP/manifest.json" >/dev/null 2>&1 || true
+  mkdir -p "$BACKUP/blobs"
+  green "  dump retrieved from S3"
+fi
 
 step "Checking the backup is intact before trusting it"
 [ -d "$BACKUP" ]                 || { red "no such backup directory: $BACKUP"; exit 1; }
 [ -f "$BACKUP/bindery.dump" ]    || { red "no bindery.dump in $BACKUP"; exit 1; }
-[ -d "$BACKUP/blobs" ]           || { red "no blobs/ in $BACKUP"; exit 1; }
+if [ "$FROM_S3" = "0" ]; then
+  [ -d "$BACKUP/blobs" ]         || { red "no blobs/ in $BACKUP"; exit 1; }
+fi
 if [ -f "$BACKUP/manifest.json" ]; then
+  # Two shapes: the local backup's manifest and the offsite one, which records
+  # a schema revision and a build because a restore has to match them.
   python3 -c "
-import json,sys
+import json
 m=json.load(open('$BACKUP/manifest.json'))
-print(f\"  created {m['created_at']}, {m['blob_count']} blobs, {m['blob_bytes']} bytes\")
+if 'blob_count' in m:
+    print(f\"  created {m['created_at']}, {m['blob_count']} blobs, {m['blob_bytes']} bytes\")
+else:
+    b=m.get('blobs',{})
+    print(f\"  created {m['created_at']} ({m.get('kind','?')}), \"
+          f\"{b.get('total_in_ledger','?')} blobs offsite, \"
+          f\"schema {m.get('schema_revision','?')}, build {(m.get('build') or '?')[:7]}\")
 integrity=m.get('integrity')
 if integrity and not integrity.get('healthy', True):
     print('  WARNING: this backup was taken over a failing integrity check')
@@ -89,10 +140,26 @@ docker exec "$CONTAINER" pg_restore \
   --username=bindery --dbname=bindery --no-owner --exit-on-error /tmp/bindery.dump
 green "  restore completed without error"
 
-step "Verifying every original the restored database references is in the backup"
+step "Verifying every original the restored database references is retrievable"
 docker exec "$CONTAINER" psql -U bindery -d bindery -At \
   -c 'SELECT sha256 FROM source_file' > /tmp/drill-shas.txt
 TOTAL=$(wc -l < /tmp/drill-shas.txt | tr -d ' ')
+
+if [ "$FROM_S3" = "1" ]; then
+  # Asked of the bucket, after the restore has said what it needs — which is
+  # both cheaper than pulling the whole pool and what a real recovery does.
+  # Every object is re-hashed against the address the database asked for.
+  echo "  downloading $TOTAL originals from S3 and re-hashing each"
+  $COMPOSE cp /tmp/drill-shas.txt api:/tmp/drill-shas.txt >/dev/null
+  if ! $COMPOSE exec -T api python -m api.cli offsite-blobs \
+        --into /tmp/offsite-drill/blobs --from-file /tmp/drill-shas.txt; then
+    red "  the offsite copy cannot supply every original this database references"
+    red "  it is not restorable"
+    exit 1
+  fi
+  green "  all $TOTAL originals downloaded from S3 and hash-verified"
+  MISSING=0
+else
 MISSING=0
 while read -r sha; do
   [ -n "$sha" ] || continue
@@ -106,6 +173,7 @@ if [ "$MISSING" -gt 0 ]; then
   exit 1
 fi
 green "  all $TOTAL originals present"
+fi
 
 step "Searching the restored archive for: $SEARCH_TERM"
 # Deliberately the same full-text path the application uses, against the
@@ -148,5 +216,10 @@ fi
 echo
 sed 's/^/  /' /tmp/drill-hits.txt
 echo
-green "DRILL PASSED — restored to a clean database and found \"$SEARCH_TERM\" ($HITS matches)."
+if [ "$FROM_S3" = "1" ]; then
+  green "OFFSITE DRILL PASSED — restored from S3 alone and found \"$SEARCH_TERM\" ($HITS matches)."
+  echo "  Nothing local was used. Losing this building would have cost nothing."
+else
+  green "DRILL PASSED — restored to a clean database and found \"$SEARCH_TERM\" ($HITS matches)."
+fi
 echo "  Scratch container torn down. The live stack was never touched."

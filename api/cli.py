@@ -184,6 +184,84 @@ async def _lifecycle_check() -> int:
     return 0
 
 
+
+async def _offsite_fetch(into: str, kind: str | None) -> int:
+    """Pull the newest offsite generation's dump down for a restore drill.
+
+    Only the dump. The blobs come afterwards, once the restored database has
+    said which ones it actually references — which is both cheaper than pulling
+    the whole pool and closer to what a real recovery does.
+    """
+    from pathlib import Path as _Path
+
+    from api import offsite
+    from api.db.session import SessionFactory
+
+    async with SessionFactory() as session:
+        config = await offsite.config_from_settings(session)
+    if not config.complete:
+        print("offsite replication is not configured", file=sys.stderr)
+        return 1
+
+    client = offsite.make_client(config)
+    wanted = offsite.Kind(kind) if kind else None
+    key = await asyncio.to_thread(offsite.newest_dump, client, config, wanted)
+    if key is None:
+        print(f"no dump found in {config.bucket}", file=sys.stderr)
+        return 1
+
+    destination = _Path(into)
+    size = await asyncio.to_thread(
+        offsite.download, client, config, key, destination / "bindery.dump"
+    )
+    print(f"{key} -> {destination / 'bindery.dump'} ({size} bytes)")
+
+    manifest_key = offsite.manifest_object_key(key)
+    try:
+        await asyncio.to_thread(
+            offsite.download, client, config, manifest_key, destination / "manifest.json"
+        )
+        print(f"{manifest_key} -> manifest.json")
+    except Exception as error:
+        # The dump is what a restore needs; the manifest only describes it.
+        print(f"  (no manifest: {type(error).__name__})", file=sys.stderr)
+    return 0
+
+
+async def _offsite_blobs(into: str, sha_file: str) -> int:
+    """Fetch the named originals and verify each against its content address.
+
+    The local drill asks whether a file is present in the backup directory.
+    This asks the stronger question the offsite copy makes possible: does the
+    object come back, and are the bytes the ones the database asked for. A blob
+    that is present but wrong is the failure a presence check cannot see.
+    """
+    from pathlib import Path as _Path
+
+    from api import offsite
+    from api.db.session import SessionFactory
+
+    async with SessionFactory() as session:
+        config = await offsite.config_from_settings(session)
+    if not config.complete:
+        print("offsite replication is not configured", file=sys.stderr)
+        return 1
+
+    shas = [line.strip() for line in _Path(sha_file).read_text().splitlines() if line.strip()]
+    client = offsite.make_client(config)
+    result = await asyncio.to_thread(
+        offsite.fetch_blobs, client, config, shas, _Path(into)
+    )
+
+    print(f"  {result.fetched}/{len(shas)} originals downloaded and hash-verified "
+          f"({result.bytes_read} bytes)")
+    for sha in result.missing:
+        print(f"  MISSING FROM BUCKET {sha}", file=sys.stderr)
+    for sha in result.corrupt:
+        print(f"  CORRUPT IN BUCKET   {sha}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="api.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -196,6 +274,18 @@ def main() -> None:
                         choices=[k.value for k in LibraryKind])
 
     sub.add_parser("seed-forms", help="load api/forms/seed/*.yaml into the registry")
+    fetch = sub.add_parser(
+        "offsite-fetch", help="download the newest offsite dump for a restore drill"
+    )
+    fetch.add_argument("--into", required=True)
+    fetch.add_argument("--kind", choices=["daily", "weekly"])
+
+    blobs = sub.add_parser(
+        "offsite-blobs", help="download and hash-verify the named originals from S3"
+    )
+    blobs.add_argument("--into", required=True)
+    blobs.add_argument("--from-file", dest="sha_file", required=True)
+
     sub.add_parser(
         "lifecycle-check",
         help="audit the offsite bucket's lifecycle rules against what this build writes",
@@ -211,6 +301,10 @@ def main() -> None:
     reprocess.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
+    if args.command == "offsite-fetch":
+        raise SystemExit(asyncio.run(_offsite_fetch(args.into, args.kind)))
+    if args.command == "offsite-blobs":
+        raise SystemExit(asyncio.run(_offsite_blobs(args.into, args.sha_file)))
     if args.command == "lifecycle-check":
         raise SystemExit(asyncio.run(_lifecycle_check()))
     if args.command == "seed-forms":

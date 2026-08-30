@@ -29,3 +29,8 @@ class OffsiteObject(Base):
     byte_size: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     uploaded_at: Mapped[datetime] = created_at()
     verified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    # Set when a reconcile finds the bucket does not have this object, cleared
+    # when it comes back. Distinct from `verified_at IS NULL`, which is also the
+    # state of a row uploaded a moment ago and never yet reconciled — and the
+    # reason the first version of this silently never re-uploaded anything.
+    absent_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))

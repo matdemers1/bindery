@@ -365,25 +365,53 @@ def checksum_matches(client, config: Config, key: str, sha256_hex: str) -> bool:
 
 
 async def _already_shipped(session: AsyncSession) -> set[str]:
+    """Keys the ledger records **and** does not know to be missing.
+
+    The `absent_at` half is load-bearing. Without it a reconcile could find an
+    object gone from the bucket, say so, and the next sync would skip it anyway
+    — which is what this did until the offsite drill made it worth checking.
+    """
     rows = await session.execute(
         sa.select(OffsiteObject.object_key).where(
-            OffsiteObject.object_key.startswith(BLOB_PREFIX)
+            OffsiteObject.object_key.startswith(BLOB_PREFIX),
+            OffsiteObject.absent_at.is_(None),
         )
     )
     return set(rows.scalars().all())
 
 
 async def _record(session: AsyncSession, key: str, sha256: str | None, size: int) -> None:
-    """Idempotent, because the upload it records is idempotent.
+    """Record an object this process just uploaded.
 
-    A run killed between the put and the commit re-uploads on the next pass and
-    arrives here twice. `on_conflict_do_nothing` makes that a no-op rather than
-    a unique-violation that dead-letters an otherwise healthy sync.
+    Idempotent, because the upload it records is idempotent: a run killed
+    between the put and the commit re-uploads on the next pass and arrives here
+    twice. On conflict it refreshes rather than doing nothing, because the row
+    may be one a reconcile marked absent — and an upload is the most direct
+    possible evidence that it is not absent any more.
+    """
+    now = datetime.now(UTC)
+    await session.execute(
+        pg_insert(OffsiteObject)
+        .values(object_key=key, sha256=sha256, byte_size=size, uploaded_at=now)
+        .on_conflict_do_update(
+            index_elements=[OffsiteObject.object_key],
+            set_={"uploaded_at": now, "byte_size": size, "absent_at": None},
+        )
+    )
+
+
+async def _adopt(session: AsyncSession, key: str, sha256: str | None) -> None:
+    """Record an object found in the bucket that the ledger did not know about.
+
+    Separate from `_record` and deliberately `do_nothing`: the size is unknown
+    here, and this must never overwrite a real one with a placeholder. That is
+    not hypothetical — `_record` became an upsert to clear `absent_at`, and
+    reconcile calling it with `byte_size=0` would have quietly zeroed the size
+    of every object it adopted.
     """
     await session.execute(
         pg_insert(OffsiteObject)
-        .values(object_key=key, sha256=sha256, byte_size=size,
-                uploaded_at=datetime.now(UTC))
+        .values(object_key=key, sha256=sha256, byte_size=0, uploaded_at=datetime.now(UTC))
         .on_conflict_do_nothing(index_elements=[OffsiteObject.object_key])
     )
 
@@ -536,11 +564,17 @@ async def reconcile(
         recorded.add(row.object_key)
         if row.object_key in seen:
             row.verified_at = now
+            # It is back, or it never went. Either way this row no longer
+            # describes an absence.
+            row.absent_at = None
             result.confirmed += 1
         else:
-            # It was shipped once and is not there now. Clearing this is what
-            # makes the next sync pick it up again.
+            # It was shipped once and is not there now. Marking it absent is
+            # what makes the next sync ship it again — and it has to be its own
+            # column, because `verified_at IS NULL` also means "uploaded a
+            # moment ago and never reconciled".
             row.verified_at = None
+            row.absent_at = now
             result.missing_from_bucket += 1
             log.warning(
                 "offsite object recorded but absent from bucket: %s", row.object_key
@@ -551,7 +585,7 @@ async def reconcile(
     # commit. Recording them prevents a pointless re-upload.
     for key in seen - recorded:
         sha = sha256_from_object_key(key)
-        await _record(session, key, sha, 0)
+        await _adopt(session, key, sha)
         result.unrecorded += 1
 
     if commit:
@@ -940,3 +974,91 @@ def live_lifecycle_rules(client, config: Config) -> list[dict]:
             # reporting "nothing wrong" would be the wrong answer.
             return []
         raise
+
+
+# ---------------------------------------------------------------------------
+# Reading the archive back (T-13.10, REQ-097)
+# ---------------------------------------------------------------------------
+
+
+def newest_dump(client, config: Config, kind: Kind | None = None) -> str | None:
+    """The most recent dump key in the bucket, by key order.
+
+    Both key schemes sort correctly as strings — an ISO timestamp and an ISO
+    week both do — so "newest" is `max()` rather than a listing sorted by
+    LastModified. That matters: `LastModified` changes if an object is ever
+    rewritten, and the key is what says which generation this actually is.
+    """
+    prefixes = [f"{DUMP_PREFIX}{kind.value}/"] if kind else [
+        f"{DUMP_PREFIX}{k.value}/" for k in Kind
+    ]
+    newest: str | None = None
+    newest_stamp = None
+    paginator = client.get_paginator("list_objects_v2")
+    for prefix in prefixes:
+        for page in paginator.paginate(Bucket=config.bucket, Prefix=prefix):
+            for entry in page.get("Contents", []):
+                if not entry["Key"].endswith(".dump"):
+                    continue
+                # Across the two prefixes the key formats differ, so the only
+                # thing comparable between a daily and a weekly generation is
+                # when it was written.
+                if newest_stamp is None or entry["LastModified"] > newest_stamp:
+                    newest, newest_stamp = entry["Key"], entry["LastModified"]
+    return newest
+
+
+def download(client, config: Config, key: str, destination: Path) -> int:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    body = client.get_object(Bucket=config.bucket, Key=key)["Body"].read()
+    destination.write_bytes(body)
+    return len(body)
+
+
+@dataclass
+class FetchResult:
+    fetched: int = 0
+    bytes_read: int = 0
+    missing: list[str] = field(default_factory=list)
+    corrupt: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.missing and not self.corrupt
+
+
+def fetch_blobs(client, config: Config, shas: list[str], into: Path) -> FetchResult:
+    """Pull the named originals out of the bucket and check them as they arrive.
+
+    The local drill asks whether a file is *present* in the backup directory.
+    This asks something stronger, and the offsite copy makes it possible: it
+    re-hashes every object it downloads and compares against the content
+    address the restored database asked for.
+
+    A blob that is present but wrong is the failure a presence check cannot see,
+    and it is the one that matters — a backup that restores cleanly and hands
+    back different bytes is worse than one that fails loudly.
+    """
+    from botocore.exceptions import ClientError
+
+    result = FetchResult()
+    for sha in shas:
+        key = object_key_for_blob(sha)
+        path = into / sha[:2] / sha[2:4] / sha
+        try:
+            body = client.get_object(Bucket=config.bucket, Key=key)["Body"].read()
+        except ClientError as error:
+            code = error.response.get("Error", {}).get("Code", "")
+            if code in ("NoSuchKey", "404"):
+                result.missing.append(sha)
+                continue
+            raise
+        actual = hashlib.sha256(body).hexdigest()
+        if actual != sha:
+            result.corrupt.append(sha)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+        result.fetched += 1
+        result.bytes_read += len(body)
+    return result

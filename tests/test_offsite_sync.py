@@ -315,3 +315,68 @@ async def test_identical_failures_are_summarised_with_a_count(session, blob_root
     })
     result = await offsite.sync_blobs(session, CONFIG, fake, blob_root=blob_root)
     assert result.summarised() == ["3 blobs: RuntimeError: simulated transfer failure"]
+
+
+async def test_a_missing_object_is_actually_re_uploaded_by_the_next_sync(session, blob_root):
+    """The claim `reconcile` makes about itself, asserted rather than believed.
+
+    Its docstring says clearing `verified_at` "is what makes the next sync
+    re-upload it". That was not true: `_already_shipped` selected every ledger
+    row with a blob key regardless, so an object the reconcile had just found
+    missing was skipped by the very sync that was supposed to replace it. The
+    bucket stayed short, the ledger stayed confident, and nothing ever said so.
+    """
+    fake = FakeS3()
+    await offsite.sync_blobs(session, CONFIG, fake, blob_root=blob_root)
+    assert len(fake.objects) == 5
+
+    # Somebody empties the bucket from the console.
+    fake.objects.clear()
+    result = await offsite.reconcile(session, CONFIG, fake)
+    assert result.missing_from_bucket == 5
+
+    again = await offsite.sync_blobs(session, CONFIG, fake, blob_root=blob_root)
+    assert again.uploaded == 5, "the reconcile noticed the gap and nothing filled it"
+    assert len(fake.objects) == 5
+
+
+async def test_adopting_an_object_never_overwrites_a_known_size(session, blob_root):
+    """`_record` became an upsert so an upload could clear an absence marker.
+
+    Reconcile adopts objects with no size, and if it shared that upsert it would
+    quietly zero the size of everything it adopted — a silent corruption of the
+    ledger by the very pass that exists to repair it.
+    """
+    fake = FakeS3()
+    await offsite.sync_blobs(session, CONFIG, fake, blob_root=blob_root)
+
+    sizes_before = {
+        row.object_key: row.byte_size
+        for row in (await session.execute(sa.select(OffsiteObject))).scalars()
+    }
+    assert all(size > 0 for size in sizes_before.values())
+
+    await offsite.reconcile(session, CONFIG, fake)
+
+    sizes_after = {
+        row.object_key: row.byte_size
+        for row in (await session.execute(sa.select(OffsiteObject))).scalars()
+    }
+    assert sizes_after == sizes_before
+
+
+async def test_an_object_that_comes_back_stops_being_absent(session, blob_root):
+    """A reconcile that finds it again clears the marker, so it is not shipped
+    a second time for no reason."""
+    fake = FakeS3()
+    await offsite.sync_blobs(session, CONFIG, fake, blob_root=blob_root)
+    held = dict(fake.objects)
+
+    fake.objects.clear()
+    await offsite.reconcile(session, CONFIG, fake)
+    fake.objects.update(held)
+    await offsite.reconcile(session, CONFIG, fake)
+
+    again = await offsite.sync_blobs(session, CONFIG, fake, blob_root=blob_root)
+    assert again.uploaded == 0
+    assert again.skipped == 5
