@@ -10,6 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 class LoginRequest(BaseModel):
     email: str
     password: str
+    # A TOTP code or a recovery code, when the account has two-factor enrolled.
+    # Optional on the model so the first request can be answered with "and now
+    # the code", rather than the form having to know in advance — which it
+    # cannot, because knowing would tell an anonymous caller whether the account
+    # exists and whether it is protected.
+    code: str | None = None
 
 
 class UserOut(BaseModel):

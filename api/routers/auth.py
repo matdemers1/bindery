@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import accounts
 from api.audit import record
 from api.auth import service, throttle
 from api.auth.cookies import REFRESH_COOKIE, clear_auth_cookies, set_auth_cookies
@@ -61,6 +62,23 @@ async def login(
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED, "invalid credentials"
         ) from exc
+
+    # The password was right. A missing or wrong second factor is still a
+    # failed attempt as far as the throttle is concerned, or the code becomes
+    # the unthrottled half of the login.
+    if user.totp_enabled:
+        try:
+            await accounts.check_second_factor(session, user=user, code=payload.code or "")
+        except accounts.AccountError as exc:
+            await throttle.record(session, payload.email, ip, succeeded=False)
+            await session.commit()
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "second factor required",
+                # The only thing this reveals is revealed *after* the password
+                # was correct, to someone who therefore already has the account.
+                headers={"WWW-Authenticate": 'Bindery realm="totp"'},
+            ) from exc
 
     await throttle.record(session, payload.email, ip, succeeded=True)
 

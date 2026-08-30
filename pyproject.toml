@@ -27,7 +27,9 @@ dependencies = [
     "pyyaml",
     # Page extraction for segment export; also used by the pipeline.
     "pikepdf",
-    # Encrypts secrets held in the settings table.
+    # Encrypts secrets held in the settings table, and generates the TOTP
+    # secrets and one-time codes in api/auth/ — `secrets` for the randomness,
+    # this for the HMAC that turns it into a six-digit code.
     "cryptography",
     # The api needs it too: /api/settings/test-ai validates a key against the
     # live API, and Q&A (REQ-116) is a synchronous request, not a worker stage.

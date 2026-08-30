@@ -27,7 +27,14 @@ from api.db.models.setting import Setting
 from api.db.models.source_file import SourceFile
 from api.db.models.tag import DocumentTag, Tag, live_tag_links
 from api.db.models.taxonomy import Correspondent, DocumentType, Rule
-from api.db.models.user import AppUser, LoginAttempt, RefreshToken
+from api.db.models.user import (
+    AppUser,
+    Invitation,
+    LoginAttempt,
+    PasswordResetCode,
+    RecoveryCode,
+    RefreshToken,
+)
 
 __all__ = [
     "ApiToken",
@@ -48,12 +55,15 @@ __all__ = [
     "FieldProvenance",
     "ImportItem",
     "ImportSession",
+    "Invitation",
     "Job",
     "KnownForm",
     "Library",
     "LoginAttempt",
     "Membership",
     "Page",
+    "PasswordResetCode",
+    "RecoveryCode",
     "RefreshToken",
     "Rule",
     "SavedSearch",
