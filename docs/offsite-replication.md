@@ -92,6 +92,81 @@ Verified on the live bucket on 2026-08-30 by deploying a bucket-wide 90-day
 expiry to the (empty) bucket and confirming the audit reported it — the
 unfiltered rule, the blob pool, and both manifest kinds — then reverting.
 
+## Turning it on for the first time (the Zima)
+
+The host runs a standalone compose file at `/DATA/AppData/bindery` — no
+repository, no `.env`, container names `bindery-api` / `bindery-worker`. Every
+command below assumes that, and every one of them is deliberate: nothing about
+this deploy is automatic, because nothing that holds your passport should
+restart without you choosing the moment.
+
+**1. Back up before migrating.** R-10, and this deploy carries three
+migrations (0021–0023).
+
+```bash
+ssh root@192.168.1.231 /DATA/AppData/bindery/backup.sh
+```
+
+**2. Verify that backup rather than assuming it.** A backup nobody has
+restored from is a hypothesis, and that applies most on the day you are about
+to change the schema.
+
+```bash
+ssh root@192.168.1.231
+PG_IMAGE=pgvector/pgvector:pg16 /DATA/AppData/bindery/restore-drill.sh \
+  /media/Main-Storage/Backups/bindery
+```
+
+**3. Pull the new images.** `DOCKER_CONFIG` is not optional — the daemon reads
+`/root/.docker` and `docker login` wrote `/DATA/.docker`.
+
+```bash
+cd /DATA/AppData/bindery
+DOCKER_CONFIG=/DATA/.docker docker compose pull
+docker compose up -d
+```
+
+**4. Apply the migrations explicitly** (REQ-114 — never on boot).
+
+```bash
+docker exec bindery-api alembic upgrade head    # → 0023_offsite_object_absent
+```
+
+Then confirm the footer in the UI no longer says *migration pending*, and that
+api and worker report the same commit.
+
+**5. Copy the updated drill.** It is a file on the host, not part of an image,
+so a `docker compose pull` does not update it.
+
+```bash
+scp scripts/restore-drill.sh root@192.168.1.231:/DATA/AppData/bindery/
+```
+
+**6. Configure the credentials in the UI**, not on the host: Settings →
+Offsite replication. Bucket `bindery-offsite-d3cloud`, region `us-east-1`, KMS
+`alias/bindery-offsite`. Then **Test connection** — it writes and reads a real
+object and will say which key encrypted it.
+
+**7. Let the first run happen.** A weekly generation is due immediately on an
+archive that has never replicated, and the worker checks every ten minutes.
+Trust → Export & resilience shows it. The first run uploads the whole pool —
+318 MB across 496 objects at last measure — and every run after it uploads only
+what is new.
+
+**8. The drill, on the real archive.** This is the point of the phase.
+
+```bash
+API_CONTAINER=bindery-api PG_IMAGE=pgvector/pgvector:pg16 \
+  /DATA/AppData/bindery/restore-drill.sh --from-s3 "DD-214"
+```
+
+**9. Then check the audit is honest.** `make lifecycle-check` against the live
+bucket, and confirm the Trust screen's age is minutes rather than *never*.
+
+> The exit demo goes further than step 8 and is worth doing once: a scratch
+> machine, an AWS login out of the password manager, and no `.deploy/SECRETS.md`
+> and no Zima at all.
+
 ## Rebuilding it from nothing
 
 ```bash
