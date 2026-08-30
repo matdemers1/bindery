@@ -24,7 +24,7 @@ from api.db.enums import JobStage
 from api.db.models import Document, SourceFile
 from api.db.session import SessionFactory, engine
 from worker import convert
-from worker.ai.provider import ProviderUnavailableError
+from worker.ai.provider import ProviderRefusedError, ProviderUnavailableError
 from worker.ingest.watched_folder import watch_inbox
 from worker.stages import STAGES
 from worker.stages import normalize as normalize_stage
@@ -125,7 +125,12 @@ async def _run_one(job: queue.ClaimedJob) -> None:
                 await stage_fn(session, job)
                 await session.commit()
         except Exception as exc:  # every failure is recorded; none escape this loop
-            permanent = isinstance(exc, normalize_stage.PermanentFailure)
+            # Any stage may declare a failure permanent. This was an isinstance
+            # check against one module's exception, which meant a second stage
+            # needing the same thing had to import `normalize` to say so.
+            permanent = isinstance(
+                exc, normalize_stage.PermanentFailure | ProviderRefusedError
+            )
             # An unavailable provider is not a failed job. `ProviderUnavailable`
             # has always been documented as "retried with backoff indefinitely",
             # and was nonetheless being counted against MAX_ATTEMPTS like any

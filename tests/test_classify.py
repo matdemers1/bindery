@@ -9,6 +9,7 @@ would not survive the live contract fails here rather than passing quietly.
 
 import hashlib
 import os
+import typing
 import uuid
 
 import pytest
@@ -1004,3 +1005,137 @@ def test_the_prompt_says_what_the_counts_are_counted_over() -> None:
         candidates_ranked_by="the whole archive",
     )
     assert "the whole archive" in build_candidate_block(request)
+
+
+# --------------------------------------------------------------------------
+# A refusal is not an empty response (T-9.8)
+# --------------------------------------------------------------------------
+
+
+class _Refuses:
+    """A client that declines, the way the real API declines: HTTP 200,
+    `stop_reason="refusal"`, and no content at all."""
+
+    def __init__(self, refuse_for: set[str], category: str = "general_harms") -> None:
+        self.refuse_for = refuse_for
+        self.category = category
+        self.asked: list[str] = []
+
+    class _Details:
+        def __init__(self, category: str) -> None:
+            self.category = category
+
+    class _Usage:
+        @staticmethod
+        def model_dump() -> dict:
+            return {"input_tokens": 10, "output_tokens": 0}
+
+    class _Parsed:
+        title = "NewRez LLC - Security Deed"
+        summary = "A deed."
+        document_date = None
+        language = "en"
+        confidence: typing.ClassVar[dict] = {}
+        evidence: typing.ClassVar[list] = []
+        extracted_fields: typing.ClassVar[dict] = {}
+
+        def model_dump_json(self) -> str:
+            return '{"title": "NewRez LLC - Security Deed"}'
+
+    @property
+    def messages(self):
+        outer = self
+
+        class Messages:
+            @staticmethod
+            async def parse(*, model: str, **_kwargs):
+                outer.asked.append(model)
+
+                class Response:
+                    usage = outer._Usage()
+
+                if model in outer.refuse_for:
+                    Response.stop_reason = "refusal"
+                    Response.stop_details = outer._Details(outer.category)
+                    Response.parsed_output = None
+                else:
+                    Response.stop_reason = "end_turn"
+                    Response.stop_details = None
+                    from worker.ai.provider import TaxonomyChoice, TaxonomyChoices
+
+                    parsed = outer._Parsed()
+                    parsed.correspondent = TaxonomyChoice()
+                    parsed.document_type = TaxonomyChoice()
+                    parsed.tags = TaxonomyChoices()
+                    Response.parsed_output = parsed
+                return Response()
+
+        return Messages()
+
+
+async def test_a_refusal_escalates_once_to_a_more_capable_model() -> None:
+    """A safety classifier declining an ordinary mortgage deed is a false
+    positive, and it is not hypothetical: `general_harms` on a VA security deed
+    sent one document to dead-letter five times. Sonnet refuses it; Opus reads
+    it as a Uniform Residential Loan Application, which is what it is.
+    """
+    from worker.ai.claude import REFUSAL_FALLBACK_MODEL, ClaudeProvider
+    from worker.ai.provider import ClassificationRequest
+
+    client = _Refuses(refuse_for={"claude-sonnet-5"})
+    provider = ClaudeProvider("k", model="claude-sonnet-5", client=client)
+
+    response = await provider.classify(
+        ClassificationRequest(document_id="d", pages=[(1, "a deed" * 40)])
+    )
+
+    assert client.asked == ["claude-sonnet-5", REFUSAL_FALLBACK_MODEL]
+    assert response.model == REFUSAL_FALLBACK_MODEL, (
+        "spend is costed per model and provenance is displayed — recording the "
+        "model that was asked rather than the one that answered makes both wrong"
+    )
+
+
+async def test_a_refusal_by_both_models_is_permanent_and_says_why() -> None:
+    """Retrying a refusal is five attempts to reach one conclusion, and
+    "structured output was empty" is what sent this to `max_tokens` twice."""
+    from worker.ai.claude import ClaudeProvider
+    from worker.ai.provider import ClassificationRequest, ProviderRefusedError
+
+    client = _Refuses(refuse_for={"claude-sonnet-5", "claude-opus-5"})
+    provider = ClaudeProvider("k", model="claude-sonnet-5", client=client)
+
+    with pytest.raises(ProviderRefusedError) as raised:
+        await provider.classify(
+            ClassificationRequest(document_id="d", pages=[(1, "a deed" * 40)])
+        )
+
+    assert raised.value.category == "general_harms"
+    message = str(raised.value)
+    assert "safety refusal" in message
+    assert "searchable and unchanged" in message, "say what is *not* broken"
+
+
+def test_the_runner_treats_a_refusal_as_permanent() -> None:
+    """Otherwise it burns five attempts and half an hour on a settled question."""
+    import inspect
+
+    from worker import runner
+
+    source = inspect.getsource(runner._run_one)
+    assert "ProviderRefusedError" in source
+
+
+async def test_a_model_that_answers_is_never_second_guessed() -> None:
+    """The escalation must not fire on an ordinary success, or every
+    classification costs twice."""
+    from worker.ai.claude import ClaudeProvider
+    from worker.ai.provider import ClassificationRequest
+
+    client = _Refuses(refuse_for=set())
+    provider = ClaudeProvider("k", model="claude-sonnet-5", client=client)
+    await provider.classify(
+        ClassificationRequest(document_id="d", pages=[(1, "an ordinary letter" * 20)])
+    )
+
+    assert client.asked == ["claude-sonnet-5"]

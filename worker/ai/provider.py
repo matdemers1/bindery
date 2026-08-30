@@ -179,6 +179,24 @@ class AIProviderError(RuntimeError):
     """
 
 
+class ProviderRefusedError(AIProviderError):
+    """A safety classifier declined the request.
+
+    Permanent for this content and this model: the same document sent again
+    gets the same answer, so retrying is five attempts to reach one conclusion.
+
+    It is worth being specific about how this presented, because it cost two
+    wrong diagnoses. The API returns HTTP 200 with `stop_reason="refusal"` and
+    no content — which looked exactly like a malformed response, was reported as
+    "structured output was empty", and sent the investigation to `max_tokens`
+    twice. The refusal is now read before the content.
+    """
+
+    def __init__(self, message: str, *, category: str | None = None) -> None:
+        self.category = category
+        super().__init__(message)
+
+
 class ProviderUnavailableError(AIProviderError):
     """The provider is unreachable or unconfigured.
 

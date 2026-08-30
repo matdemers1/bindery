@@ -28,6 +28,7 @@ from worker.ai.provider import (
     ClassificationRequest,
     ClassificationResponse,
     ClassificationResult,
+    ProviderRefusedError,
     ProviderUnavailableError,
 )
 
@@ -39,6 +40,13 @@ PROMPT_DIR = Path(__file__).parent / "prompts"
 MAX_PAGES = 12
 MAX_CHARS_PER_PAGE = 6000
 MAX_TOKENS = 8000
+
+# Asked once when the configured model refuses. A safety classifier declining an
+# ordinary mortgage deed is a false positive, and Sonnet does exactly that to a
+# VA security deed that Opus reads without complaint. Sonnet 5 cannot use the
+# server-side `fallbacks` parameter — it is Opus/Fable only — so the escalation
+# is made here.
+REFUSAL_FALLBACK_MODEL = "claude-opus-5"
 # A seam only needs the pages either side of it, trimmed — the decision is made
 # on letterheads and headings, not on body text.
 BOUNDARY_CHARS_PER_PAGE = 1500
@@ -194,9 +202,90 @@ class ClaudeProvider:
                 },
             ]
 
+        response, effective_model = await self._parse_with_fallback(
+            system=system, user_content=user_content, document_id=request.document_id
+        )
+
+        result = getattr(response, "parsed_output", None)
+        if result is None:
+            # Structured output guarantees this. A refusal is handled above and
+            # is the only known way to get here with a 200, so if it ever
+            # happens the correct response is to fail rather than guess.
+            raise AIProviderError("structured output was empty")
+
+        usage = response.usage.model_dump() if hasattr(response.usage, "model_dump") else {}
+        cache_read = usage.get("cache_read_input_tokens") or 0
+        log.info(
+            "classified %s on %s: %s input / %s output tokens, %s read from cache",
+            request.document_id, effective_model,
+            usage.get("input_tokens"), usage.get("output_tokens"), cache_read,
+        )
+
+        return ClassificationResponse(
+            result=result,
+            # The model that actually answered, not the one that was asked.
+            # Spend is costed per model and provenance is displayed, so a
+            # fallback that reported the configured model would make both wrong.
+            model=effective_model,
+            prompt_version=self.prompt_version,
+            usage=usage,
+            raw_request={
+                "system": system,
+                "user": user_content,
+                "model": effective_model,
+                "prompt_version": self.prompt_version,
+            },
+            raw_response=json.loads(result.model_dump_json()),
+        )
+
+    async def _parse_with_fallback(self, *, system, user_content, document_id):
+        """Ask the configured model; on a refusal, ask a more capable one once.
+
+        A safety classifier declining an ordinary mortgage deed is a false
+        positive, and it is not hypothetical — `general_harms` on a VA security
+        deed is what sent this document to dead-letter five times. Sonnet
+        refuses it; Opus classifies it as a Uniform Residential Loan
+        Application, which is what it is.
+
+        One escalation, not a ladder. If the more capable model declines too,
+        that is an answer rather than a reason to keep asking.
+        """
+        attempts = [self.model]
+        if REFUSAL_FALLBACK_MODEL != self.model:
+            attempts.append(REFUSAL_FALLBACK_MODEL)
+
+        last_refusal = None
+        for index, model in enumerate(attempts):
+            response = await self._parse_once(
+                model=model, system=system, user_content=user_content
+            )
+            if getattr(response, "stop_reason", None) != "refusal":
+                if index:
+                    log.warning(
+                        "document %s was refused by %s and accepted by %s",
+                        document_id, attempts[0], model,
+                    )
+                return response, model
+
+            details = getattr(response, "stop_details", None)
+            last_refusal = getattr(details, "category", None) or "unspecified"
+            log.warning(
+                "%s refused document %s (%s)", model, document_id, last_refusal
+            )
+
+        raise ProviderRefusedError(
+            f"the model declined to classify this document ({last_refusal}). "
+            "This is a safety refusal, not a problem with the file — the "
+            "document is stored, searchable and unchanged; only the automatic "
+            "title and tags are missing. Classify it by hand from the review "
+            "screen.",
+            category=last_refusal,
+        )
+
+    async def _parse_once(self, *, model: str, system, user_content):
         try:
-            response = await self._client.messages.parse(
-                model=self.model,
+            return await self._client.messages.parse(
+                model=model,
                 max_tokens=MAX_TOKENS,
                 system=system,
                 thinking={"type": "adaptive"},
@@ -224,33 +313,6 @@ class ClaudeProvider:
             raise AIProviderError(f"API rejected the request ({exc.status_code}): {exc}") from exc
         except ValidationError as exc:
             raise AIProviderError(f"response did not match the schema: {exc}") from exc
-
-        result = getattr(response, "parsed_output", None)
-        if result is None:
-            # Structured output guarantees this; if it is ever absent the
-            # correct response is to fail, not to guess at the content.
-            raise AIProviderError("structured output was empty")
-
-        usage = response.usage.model_dump() if hasattr(response.usage, "model_dump") else {}
-        cache_read = usage.get("cache_read_input_tokens") or 0
-        log.info(
-            "classified %s: %s input / %s output tokens, %s read from cache",
-            request.document_id, usage.get("input_tokens"), usage.get("output_tokens"), cache_read,
-        )
-
-        return ClassificationResponse(
-            result=result,
-            model=self.model,
-            prompt_version=self.prompt_version,
-            usage=usage,
-            raw_request={
-                "system": system,
-                "user": user_content,
-                "model": self.model,
-                "prompt_version": self.prompt_version,
-            },
-            raw_response=json.loads(result.model_dump_json()),
-        )
 
     async def confirm_boundaries(self, request: BoundaryRequest) -> BoundaryConfirmation:
         """Rule on the seams the heuristics could not settle (REQ-035).
