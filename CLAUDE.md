@@ -32,12 +32,15 @@ Breaking any of these is a bug, not a tradeoff:
 6. **Reused taxonomy resolves by ID and never passes through normalization or translation.** `existing_ids` and `new_names` are separate response fields.
 7. **Retrieval never depends on the Claude API.** A document ingested during an outage is OCR'd, paged, and fully searchable — only classification defers.
 8. **Nothing fails silently.** Every failed document surfaces somewhere a human will see it.
-9. **No published host ports.** Ingress is Cloudflare Tunnel only.
+9. **No published host ports.** Ingress is Cloudflare Tunnel only. Since
+   2026-08-30 the tunnel is the *only* thing in front of the app — Cloudflare
+   Access is gone, so Bindery's own login page faces the open internet and
+   `api/auth/throttle.py` is load-bearing rather than defence in depth.
 10. **Migrations are applied explicitly**, never on container boot.
 
 ## Stack
 
-Python 3.13 · FastAPI · SQLAlchemy 2.0 (async) · Alembic · PostgreSQL 16 (`pg_trgm`, `pgvector`) · OCRmyPDF 17 + Tesseract 5 · React 19 + Vite + Tailwind v4 (dark-first) · Docker Compose · Cloudflare Tunnel + Access · Claude Opus 5 behind an `AIProvider` adapter.
+Python 3.13 · FastAPI · SQLAlchemy 2.0 (async) · Alembic · PostgreSQL 16 (`pg_trgm`, `pgvector`) · OCRmyPDF 17 + Tesseract 5 · React 19 + Vite + Tailwind v4 (dark-first) · Docker Compose · Cloudflare Tunnel (Access removed 2026-08-30, ADR-008) · Claude Opus 5 behind an `AIProvider` adapter.
 
 **No Redis.** The job queue is Postgres `SELECT … FOR UPDATE SKIP LOCKED`, and the `job` table is the observability surface.
 

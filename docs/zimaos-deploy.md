@@ -274,6 +274,15 @@ a blob by re-running the pipeline. Losing it costs CPU, not data.
 
 ---
 
+> [!warning] Cloudflare Access was removed from this hostname on 2026-08-30
+> The tunnel still carries every request and there are still no published host
+> ports (REQ-104) — only the Access *policy* in front of the origin went away.
+> `bindery.d3cloud.io` now answers the open internet with Bindery's own login
+> page, which is why `api/auth/throttle.py`, the password policy and the nginx
+> security headers exist. See ADR-008. The service token in
+> `.deploy/cloudflare.json` is dead; programmatic access uses Bindery's own
+> scoped API tokens (REQ-107).
+
 ## Deploying a change afterwards
 
 Push to `main`, wait for the build, then on the Zima:
