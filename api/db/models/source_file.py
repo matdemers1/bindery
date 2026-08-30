@@ -12,11 +12,21 @@ from api.db.enums import IngestSource, SourceFileState
 class SourceFile(Base):
     """An immutable original (invariant 1, ADR-001).
 
-    Bytes live at /data/blobs/<aa>/<bb>/<sha256> and are never modified. The
-    unique constraint on sha256 is what makes exact deduplication free.
+    Bytes live at /data/blobs/<aa>/<bb>/<sha256> and are never modified, and
+    identical bytes are one file on disk however many libraries record holding
+    them — that is what content-addressing buys.
+
+    The uniqueness is on **(library_id, sha256)**, not on sha256 alone. Global
+    uniqueness was right while there was one account and became a cross-tenant
+    leak the moment there could be two: an upload would match another
+    household's row, hand back their filename in the response, and quietly not
+    file your copy in your own library.
     """
 
     __tablename__ = "source_file"
+    __table_args__ = (
+        sa.UniqueConstraint("library_id", "sha256", name="uq_source_file_library_sha256"),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     # The library this file was ingested into; documents sliced from it inherit
@@ -26,7 +36,7 @@ class SourceFile(Base):
     library_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), sa.ForeignKey("library.id"), nullable=False, index=True
     )
-    sha256: Mapped[str] = mapped_column(sa.Text, nullable=False, unique=True)
+    sha256: Mapped[str] = mapped_column(sa.Text, nullable=False, index=True)
     byte_size: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     mime_type: Mapped[str | None] = mapped_column(sa.Text)
     original_filename: Mapped[str | None] = mapped_column(sa.Text)

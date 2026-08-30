@@ -44,7 +44,9 @@ async def register(
     Does not commit — the caller owns the transaction, so the source-file row,
     its audit event, and its normalize job land together or not at all.
     """
-    existing = await repository.get_source_file_by_hash(session, blob.sha256)
+    existing = await repository.get_source_file_by_hash(
+        session, blob.sha256, library_id
+    )
     if existing is not None:
         return IngestResult(source_file=existing, duplicate=True)
 

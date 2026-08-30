@@ -103,10 +103,26 @@ async def list_source_files(
 
 
 async def get_source_file_by_hash(
-    session: AsyncSession, sha256: str
+    session: AsyncSession, sha256: str, library_id: uuid.UUID
 ) -> SourceFile | None:
-    """Hash lookup is global on purpose — the unique constraint is global."""
-    result = await session.execute(sa.select(SourceFile).where(SourceFile.sha256 == sha256))
+    """Find an identical file **within one library**.
+
+    Scoped, and it has to be. The lookup was global, matching the global unique
+    constraint on `sha256`, and that was correct while there was one account.
+    With several it is a cross-tenant leak in two directions at once: uploading
+    a file would tell you whether another household already had it, hand back
+    *their* filename and library id in the response, and silently not put your
+    copy in your own library.
+
+    The blob on disk is still shared — storage stays content-addressed, and one
+    copy of identical bytes is the point of it. What is per-library is the
+    *record* of holding them.
+    """
+    result = await session.execute(
+        sa.select(SourceFile).where(
+            SourceFile.sha256 == sha256, SourceFile.library_id == library_id
+        )
+    )
     return result.scalar_one_or_none()
 
 

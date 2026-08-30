@@ -1004,3 +1004,99 @@ class UnifyApplyIn(BaseModel):
     # Named explicitly so what gets applied is what was shown on screen, not
     # whatever the model would say if it were asked a second time.
     member_ids: list[uuid.UUID]
+
+
+# --------------------------------------------------------------------------
+# Accounts (Phase 10)
+# --------------------------------------------------------------------------
+
+
+class QuotaOut(BaseModel):
+    used_bytes: int
+    quota_bytes: int | None
+    files: int
+
+
+class AccountOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    display_name: str | None
+    is_admin: bool
+    totp_enabled: bool
+    storage: QuotaOut
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class TotpStatusOut(BaseModel):
+    enabled: bool
+    # True for administrators, who cannot turn it off (REQ-156).
+    required: bool
+
+
+class TotpEnrolOut(BaseModel):
+    secret: str
+    uri: str
+
+
+class TotpConfirmIn(BaseModel):
+    code: str
+
+
+class InviteIn(BaseModel):
+    email: str
+    library_name: str = "Documents"
+    storage_quota_bytes: int | None = None
+    note: str | None = None
+
+
+class InviteOut(BaseModel):
+    """What an invitation link is for, shown before the account exists."""
+
+    email: str
+    library_name: str
+    expires_at: datetime
+    note: str | None
+    storage_quota_bytes: int | None
+
+
+class AcceptInviteIn(BaseModel):
+    password: str
+    display_name: str | None = None
+
+
+class ResetCodeOut(BaseModel):
+    """Shown once. The administrator reads it out; nothing stores it."""
+
+    code: str
+    email: str
+    expires_in_hours: int
+
+
+class RedeemResetIn(BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+
+class AdminAccountOut(BaseModel):
+    """One account, as an administrator sees it.
+
+    Counts, states and timestamps. No title, no filename, no page — an
+    administrator administers accounts, not documents (ADR-009, REQ-143).
+    """
+
+    id: uuid.UUID
+    email: str
+    display_name: str | None
+    is_admin: bool
+    is_active: bool
+    suspended_at: datetime | None
+    locked_until: datetime | None
+    totp_enabled: bool
+    storage_quota_bytes: int | None
+    used_bytes: int
+    created_at: datetime

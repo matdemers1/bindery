@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import events, ingest
+from api import events, ingest, quota
 from api.auth.dependencies import current_user
 from api.db import repository
 from api.db.enums import ActorType, IngestSource
@@ -34,6 +34,18 @@ async def upload(
         # Same answer whether the library is missing or merely not the caller's:
         # membership is not a thing to probe for.
         raise HTTPException(status.HTTP_403_FORBIDDEN, "no write access to that library")
+
+    # Before the bytes are stored, not after. Content-addressed storage never
+    # deletes, so a refusal issued after writing would cost exactly the space
+    # it was refusing (REQ-141).
+    declared = getattr(file, "size", None)
+    if declared:
+        try:
+            await quota.check(session, user, declared)
+        except quota.QuotaExceeded as full:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, str(full)
+            ) from full
 
     blob = await store_stream(_chunks(file))
     result = await ingest.register(

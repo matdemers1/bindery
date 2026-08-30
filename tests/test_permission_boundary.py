@@ -348,6 +348,13 @@ NOT_LIBRARY_SCOPED = {
     "/api/forms": "the known-form registry is global, not per library",
     "/api/shelves": "already covered through /api/archive",
     "/api/openapi.json": "the schema document; contains no data",
+    "/api/account": "the caller's own account and its own storage total",
+    "/api/account/totp": "the caller's own two-factor state",
+    # These two ARE cross-account, deliberately, and are covered by
+    # test_an_administrator_sees_accounts_and_no_documents below — which is the
+    # stronger check, because it asserts what they may *not* contain.
+    "/api/admin/accounts": "admin: account metadata only, asserted separately (ADR-009)",
+    "/api/admin/invitations": "admin: invitations only, no library data",
 }
 
 
@@ -605,3 +612,141 @@ async def test_candidate_taxonomy_never_crosses_a_library(session, household) ->
     }
     assert "Dana-Farber Cancer Institute" not in names
     assert "oncology" not in names
+
+
+
+# --------------------------------------------------------------------------
+# ADR-009: an administrator administers accounts, not documents
+# --------------------------------------------------------------------------
+
+
+async def test_an_administrator_cannot_read_another_library(
+    session, client, user_factory, signed_in
+) -> None:
+    """REQ-143. The promise that makes this shareable with family is that the
+    operator cannot read what they are given. It has to be a test, not a
+    sentence: an admin read path added "just to help" is how this ends badly.
+    """
+    admin, _own = await signed_in()
+    admin.is_admin = True
+    await session.commit()
+
+    for _label, path in EVERY_READ_PATH:
+        if path.split("?")[0] in NOT_LIBRARY_SCOPED:
+            continue
+        response = await client.get(path)
+        body = response.text
+        assert SECRET not in body, (
+            f"{path} leaked another library's document to an administrator"
+        )
+
+
+async def test_visible_library_ids_has_no_admin_branch() -> None:
+    """The boundary is one function, and the failure mode is someone adding a
+    kindly `if user.is_admin` to it. Nothing else in the codebase would notice.
+    """
+    import inspect
+
+    from api.db import repository
+
+    source = inspect.getsource(repository.visible_library_ids)
+    assert "is_admin" not in source
+    assert "admin" not in source.lower(), (
+        "ADR-009: administration is about accounts, and this function is about "
+        "documents. If that is changing, the ADR changes first."
+    )
+
+
+async def test_the_admin_account_list_carries_no_document_data(
+    session, client, signed_in
+) -> None:
+    """Counts, states and timestamps. Never a title, never a filename."""
+    admin, _ = await signed_in()
+    admin.is_admin = True
+    await session.commit()
+
+    response = await client.get("/api/admin/accounts")
+    assert response.status_code == 200
+    body = response.text
+    assert SECRET not in body
+    for field in ("title", "original_filename", "summary", "snippet"):
+        assert f'"{field}"' not in body
+
+
+async def test_a_non_admin_gets_404_from_the_admin_routes(client, signed_in) -> None:
+    """404 rather than 403: a 403 confirms the route exists and that somebody
+    somewhere is an administrator."""
+    await signed_in()
+    for path in ("/api/admin/accounts", "/api/admin/invitations"):
+        response = await client.get(path)
+        assert response.status_code == 404, path
+
+
+async def test_uploading_a_file_someone_else_holds_does_not_reveal_them(
+    session, client, signed_in, user_factory
+) -> None:
+    """A cross-tenant leak found before there was a second account to leak to.
+
+    `sha256` was globally unique and the dedup lookup matched globally, so
+    uploading bytes another household already held returned *their*
+    `source_file` — filename, library id and all. Two failures in one: it
+    answered "does anyone else have this document", and your own copy was never
+    filed in your own library while the response said it worked.
+    """
+    import io
+
+    from api.db.enums import IngestSource
+    from api.db.models import SourceFile
+
+    _other_user, other_library = await user_factory()
+    shared_bytes = b"%PDF-1.4\nthe same bytes in two households\n"
+    import hashlib
+
+    sha = hashlib.sha256(shared_bytes).hexdigest()
+    session.add(
+        SourceFile(
+            library_id=other_library.id, sha256=sha, byte_size=len(shared_bytes),
+            original_filename="their-private-name.pdf",
+            ingest_source=IngestSource.WEB_UPLOAD,
+        )
+    )
+    await session.commit()
+
+    _me, my_library = await signed_in()
+    response = await client.post(
+        "/api/upload",
+        data={"library_id": str(my_library.id)},
+        files={"file": ("mine.pdf", io.BytesIO(shared_bytes), "application/pdf")},
+    )
+
+    assert response.status_code == 201, "my upload is filed, not swallowed"
+    body = response.json()
+    assert "their-private-name.pdf" not in response.text
+    assert body["source_file"]["library_id"] == str(my_library.id)
+    assert body["duplicate"] is False
+
+
+async def test_the_same_file_twice_in_one_library_is_still_deduplicated(
+    session, client, signed_in
+) -> None:
+    """Scoping the lookup must not cost the deduplication it was there for."""
+    import io
+
+    _me, my_library = await signed_in()
+    payload = b"%PDF-1.4\nuploaded twice by the same person\n"
+
+    first = await client.post(
+        "/api/upload",
+        data={"library_id": str(my_library.id)},
+        files={"file": ("a.pdf", io.BytesIO(payload), "application/pdf")},
+    )
+    second = await client.post(
+        "/api/upload",
+        data={"library_id": str(my_library.id)},
+        files={"file": ("a-again.pdf", io.BytesIO(payload), "application/pdf")},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.json()["duplicate"] is True
+    assert second.json()["source_file"]["id"] == first.json()["source_file"]["id"]

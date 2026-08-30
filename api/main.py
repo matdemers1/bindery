@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from api import eventlog, events
 from api.config import get_settings
 from api.db.session import SessionFactory
+from api.routers import accounts as accounts_router
 from api.routers import (
     auth,
     documents,
@@ -79,6 +80,7 @@ app = FastAPI(
 
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(accounts_router.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
 app.include_router(library.router, prefix="/api")
