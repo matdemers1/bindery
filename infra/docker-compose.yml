@@ -99,6 +99,12 @@ services:
       - ../api:/app/api:ro
       - ../worker:/app/worker:ro
       - ../tests:/app/tests:ro
+      # infra/ for the same reason as the three above. A test that reads a
+      # Dockerfile or a lifecycle rule would otherwise be reading the copy baked
+      # into this image and reporting on a version of the repository that no
+      # longer exists — which is exactly what happened to the guard asserting
+      # the worker image can run pg_dump.
+      - ../infra:/app/infra:ro
       - ../alembic:/app/alembic:ro
       # ruff and pytest read their config from here.
       - ../pyproject.toml:/app/pyproject.toml:ro
@@ -140,6 +146,12 @@ services:
       - ../api:/app/api:ro
       - ../worker:/app/worker:ro
       - ../tests:/app/tests:ro
+      # infra/ for the same reason as the three above. A test that reads a
+      # Dockerfile or a lifecycle rule would otherwise be reading the copy baked
+      # into this image and reporting on a version of the repository that no
+      # longer exists — which is exactly what happened to the guard asserting
+      # the worker image can run pg_dump.
+      - ../infra:/app/infra:ro
       - ../alembic:/app/alembic:ro
       # ruff and pytest read their config from here.
       - ../pyproject.toml:/app/pyproject.toml:ro

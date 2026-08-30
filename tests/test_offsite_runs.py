@@ -274,3 +274,25 @@ def test_the_replication_loop_does_not_use_the_job_queue():
     assert not {a for a in attributes if a.startswith("queue.")}, (
         "the replication loop reaches into the job queue"
     )
+
+
+def test_both_images_can_take_a_dump():
+    """Replication runs in the worker, and it shells out to pg_dump.
+
+    The api image has carried the client since Phase 6, when backups ran from
+    the api and only from the api. The first real replication run failed with
+    "pg_dump is not installed in this image" — a clear message, correctly
+    recorded as a failed run, and invisible to every test in this suite, which
+    executes in the api image where the binary has always been present.
+
+    Pinned to 16 in both: a 17 client dumps a 16 server perfectly and writes an
+    archive format pg_restore 16 refuses, which is a failure that appears only
+    when you try to restore.
+    """
+    root = Path(__file__).resolve().parent.parent
+    for image in ("Dockerfile.api", "Dockerfile.worker"):
+        text = (root / "infra" / image).read_text()
+        assert "postgresql-client-16" in text, (
+            f"{image} cannot run pg_dump — a backup taken from it would fail at "
+            "the moment it is needed"
+        )

@@ -27,6 +27,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fonts-liberation2 \
     && rm -rf /var/lib/apt/lists/*
 
+# pg_dump, because offsite replication runs in the worker (T-13.6).
+#
+# The api image has carried this since Phase 6, when backups ran from the api
+# and only from the api. Replication is a scheduled job, so it lives in the
+# worker — and the first real run failed with "pg_dump is not installed in this
+# image". Found by running it, not by reading it: nothing in the test suite
+# exercises the worker's PATH.
+#
+# Pinned to 16 from PGDG for the same reason the api pins it. Debian trixie
+# ships 17, which dumps a 16 server perfectly and writes an archive format
+# pg_restore 16 refuses — a failure that appears only when you try to restore,
+# which is precisely the moment it must not appear.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+ && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-client-16 \
+ && apt-get purge -y curl gnupg && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY pyproject.toml infra/extract-deps.py ./
 RUN python extract-deps.py worker > /tmp/requirements.txt \
