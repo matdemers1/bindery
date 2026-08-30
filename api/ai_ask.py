@@ -31,6 +31,7 @@ ASK_EFFORT = {"effort": "low"}
 
 # For structured list work — see `ClaudeAnswerer.complete`.
 NO_THINKING = {"type": "disabled"}
+LOW_EFFORT = {"effort": "low"}
 
 ASK_SYSTEM = """You answer questions about a person's own document archive.
 
@@ -133,7 +134,12 @@ class ClaudeAnswerer:
         return self._client is not None
 
     async def complete(
-        self, prompt: str, *, max_tokens: int = 4000, thinking: dict | None = None
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 4000,
+        thinking: dict | None = None,
+        effort: dict | None = None,
     ) -> str:
         """A plain completion, for asking about the archive's own structure.
 
@@ -168,6 +174,11 @@ class ClaudeAnswerer:
             model=self.model,
             max_tokens=max_tokens,
             thinking=thinking or NO_THINKING,
+            # Bounded even though the default turns thinking off entirely: a
+            # caller that passes `thinking` and finds no ceiling has rediscovered
+            # the bug this parameter exists to prevent. Adaptive thinking expands
+            # to fill `max_tokens`.
+            output_config=effort or LOW_EFFORT,
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(

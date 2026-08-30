@@ -1184,3 +1184,45 @@ def test_the_classify_budget_leaves_room_after_the_reasoning() -> None:
     from worker.ai.claude import MAX_TOKENS
 
     assert MAX_TOKENS >= 16000
+
+
+def test_every_model_call_bounds_its_thinking() -> None:
+    """The guard that stops this happening a fourth time.
+
+    `max_tokens` is not a ceiling on thinking — adaptive thinking expands to
+    fill whatever it is given. Measured on a forty-page deed: with no effort
+    set, 16,000 tokens of reasoning and nothing returned; at `effort: medium`,
+    1,528 tokens of reasoning and a correct title.
+
+    The same omission produced three separate failures — the unify pass
+    returning zero characters, `/api/ask` discarding answers it never got, and
+    a document dead-lettered five times. Every call site sets an effort.
+    """
+    import ast
+    import inspect
+
+    from api import ai_ask
+    from worker.ai import claude
+
+    for module in (claude, ai_ask):
+        tree = ast.parse(inspect.getsource(module))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            attribute = node.func
+            if not isinstance(attribute, ast.Attribute):
+                continue
+            if attribute.attr not in {"parse", "create"}:
+                continue
+            # Only calls on `.messages`.
+            owner = attribute.value
+            if not (isinstance(owner, ast.Attribute) and owner.attr == "messages"):
+                continue
+            keywords = {kw.arg for kw in node.keywords}
+            if "thinking" not in keywords:
+                continue
+            assert "output_config" in keywords, (
+                f"{module.__name__} line {node.lineno}: a call with adaptive "
+                "thinking and no `output_config` effort. Thinking will expand "
+                "to fill max_tokens and the answer will be empty."
+            )

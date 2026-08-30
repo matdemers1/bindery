@@ -41,9 +41,22 @@ MAX_PAGES = 12
 MAX_CHARS_PER_PAGE = 6000
 # Adaptive thinking expands to fill this, so it has to leave room for an answer
 # after the reasoning. At 8,000 the fallback model would think its way through
-# the whole budget on a long document and return nothing — reported, unhelpfully,
-# as "structured output was empty".
+# the whole budget on a long document and return nothing.
 MAX_TOKENS = 16000
+
+# The actual ceiling on thinking. `max_tokens` is not one: adaptive thinking
+# expands to fill whatever it is given, which on a forty-page deed meant
+# 16,000 tokens of reasoning and zero of answer. Measured on that document:
+#
+#   no effort set   16,000 thinking   nothing returned
+#   effort low         848 thinking   a correct title
+#   effort medium    1,528 thinking   a correct title
+#
+# Medium for classification, which is the quality-sensitive path and cheap at
+# this size. This is the third place the same mistake appeared — see the unify
+# pass and `/api/ask` — which is why `tests/test_classify.py` now asserts that
+# every model call in this file sets one.
+CLASSIFY_EFFORT = {"effort": "medium"}
 
 # Asked once when the configured model refuses. A safety classifier declining an
 # ordinary mortgage deed is a false positive, and Sonnet does exactly that to a
@@ -303,6 +316,7 @@ class ClaudeProvider:
                 max_tokens=MAX_TOKENS,
                 system=system,
                 thinking={"type": "adaptive"},
+                output_config=CLASSIFY_EFFORT,
                 messages=[{"role": "user", "content": user_content}],
                 output_format=ClassificationResult,
             )
@@ -360,6 +374,7 @@ class ClaudeProvider:
             response = await self._client.messages.parse(
                 model=self.model,
                 max_tokens=MAX_TOKENS,
+                output_config=CLASSIFY_EFFORT,
                 system=[
                     {
                         "type": "text",
