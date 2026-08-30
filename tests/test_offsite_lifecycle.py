@@ -36,7 +36,8 @@ def test_the_configuration_that_gets_deployed_is_safe():
 
 def test_a_bucket_wide_expiry_is_caught():
     """The catastrophic one. Silent, total, and invisible to the application."""
-    rules = checked_in_rules() + [
+    rules = [
+        *checked_in_rules(),
         {"ID": "tidy-up", "Status": "Enabled", "Filter": {"Prefix": ""},
          "Expiration": {"Days": 30}}
     ]
@@ -47,7 +48,8 @@ def test_a_bucket_wide_expiry_is_caught():
 
 def test_a_rule_with_no_filter_at_all_is_caught():
     """`Filter` is optional in the S3 API, and its absence means "everything"."""
-    rules = checked_in_rules() + [
+    rules = [
+        *checked_in_rules(),
         {"ID": "legacy", "Status": "Enabled", "Expiration": {"Days": 30}}
     ]
     assert any("no prefix filter" in f for f in offsite.audit_lifecycle(rules))
@@ -55,7 +57,8 @@ def test_a_rule_with_no_filter_at_all_is_caught():
 
 def test_a_rule_aimed_at_the_blob_prefix_is_caught():
     """Prefixed, so the first check passes — and still deletes the archive."""
-    rules = checked_in_rules() + [
+    rules = [
+        *checked_in_rules(),
         {"ID": "prune-blobs", "Status": "Enabled", "Filter": {"Prefix": "blobs/"},
          "Expiration": {"Days": 365}}
     ]
@@ -66,7 +69,8 @@ def test_a_rule_aimed_at_the_blob_prefix_is_caught():
 def test_a_noncurrent_version_expiry_counts_as_expiry():
     """Versioning is on. A rule that expires only noncurrent versions still
     removes real objects — every version but the newest."""
-    rules = checked_in_rules() + [
+    rules = [
+        *checked_in_rules(),
         {"ID": "prune-old-versions", "Status": "Enabled", "Filter": {"Prefix": ""},
          "NoncurrentVersionExpiration": {"NoncurrentDays": 7}}
     ]
@@ -85,7 +89,8 @@ def test_aborting_incomplete_uploads_is_allowed_to_be_bucket_wide():
 
 
 def test_a_disabled_rule_is_not_a_finding():
-    rules = checked_in_rules() + [
+    rules = [
+        *checked_in_rules(),
         {"ID": "someday", "Status": "Disabled", "Filter": {"Prefix": ""},
          "Expiration": {"Days": 1}}
     ]
