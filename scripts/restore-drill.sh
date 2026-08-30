@@ -65,17 +65,34 @@ cleanup() {
 }
 trap cleanup EXIT
 
-COMPOSE="docker compose --env-file .env -f infra/docker-compose.yml"
+# The api container, by name, rather than through docker compose. This script
+# is copied to the ZimaOS host, where the stack is a standalone compose file at
+# /DATA/AppData/bindery with no repository, no .env and different container
+# names — so `docker compose -f infra/...` works only on a development
+# checkout. The drill that matters is the one run on the host holding the real
+# archive, so it must not depend on the developer's layout.
+find_api() {
+  if [ -n "${API_CONTAINER:-}" ]; then echo "$API_CONTAINER"; return; fi
+  for candidate in bindery-api infra-api-1; do
+    if docker ps --format '{{.Names}}' | grep -qx "$candidate"; then
+      echo "$candidate"; return
+    fi
+  done
+  docker ps --format '{{.Names}}' | grep -m1 -- '-api' || true
+}
 
 if [ "$FROM_S3" = "1" ]; then
+  API="$(find_api)"
+  [ -n "$API" ] || { red "no running api container found — set API_CONTAINER"; exit 1; }
+  echo "  using api container: $API"
   step "Downloading the newest generation from the offsite bucket"
   echo "  nothing local is used: not the backup directory, not the blob pool"
   # Fetched inside the api container, which holds the credentials. They are
   # never passed through this script's environment or its argv.
-  $COMPOSE exec -T api python -m api.cli offsite-fetch --into /tmp/offsite-drill \
+  docker exec "$API" python -m api.cli offsite-fetch --into /tmp/offsite-drill \
     || { red "could not fetch the offsite dump"; exit 1; }
-  $COMPOSE cp api:/tmp/offsite-drill/bindery.dump "$BACKUP/bindery.dump" >/dev/null
-  $COMPOSE cp api:/tmp/offsite-drill/manifest.json "$BACKUP/manifest.json" >/dev/null 2>&1 || true
+  docker cp "$API:/tmp/offsite-drill/bindery.dump" "$BACKUP/bindery.dump" >/dev/null
+  docker cp "$API:/tmp/offsite-drill/manifest.json" "$BACKUP/manifest.json" >/dev/null 2>&1 || true
   mkdir -p "$BACKUP/blobs"
   green "  dump retrieved from S3"
 fi
@@ -150,8 +167,8 @@ if [ "$FROM_S3" = "1" ]; then
   # both cheaper than pulling the whole pool and what a real recovery does.
   # Every object is re-hashed against the address the database asked for.
   echo "  downloading $TOTAL originals from S3 and re-hashing each"
-  $COMPOSE cp /tmp/drill-shas.txt api:/tmp/drill-shas.txt >/dev/null
-  if ! $COMPOSE exec -T api python -m api.cli offsite-blobs \
+  docker cp /tmp/drill-shas.txt "$API:/tmp/drill-shas.txt" >/dev/null
+  if ! docker exec "$API" python -m api.cli offsite-blobs \
         --into /tmp/offsite-drill/blobs --from-file /tmp/drill-shas.txt; then
     red "  the offsite copy cannot supply every original this database references"
     red "  it is not restorable"
