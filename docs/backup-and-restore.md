@@ -97,7 +97,19 @@ that is not this machine. A lost passphrase is a lost go-bag.
 |------|-------|---------|
 | 1 | Live RAID-5 pool, `/media/Main-Storage/bindery/data` | the running stack |
 | 2 | Local backup target, `BINDERY_BACKUP_ROOT` | `make backup` |
-| 3 | Offsite, encrypted | `encrypt_for_offsite()`, verified with `verify_encrypted()` |
+| 3 | Offsite, encrypted | **Not built yet — see below** |
+
+> **Copy 3 does not exist yet.** `encrypt_for_offsite()` and `verify_encrypted()`
+> are implemented and tested, but the only callers are in
+> `tests/test_trust_and_export.py` — no route, no CLI verb, no Makefile target.
+> `encrypt_for_offsite()` writes ciphertext to a *local* path and returns;
+> nothing ships it anywhere. **Both existing copies are in the same building on
+> the same array**, so today this scheme survives a dead disk and not a fire.
+>
+> Phase 13 builds the missing leg: replication to S3 under a KMS key, with a
+> restore drill that pulls from the bucket. See `docs/offsite-replication.md`
+> once it lands, and ADR-010 in the vault for why the offsite copy is
+> server-side rather than client-side encrypted.
 
 The offsite copy is encrypted because it is, by definition, somewhere you do not
 control. `verify_encrypted` is cheap and catches the failure that matters: an
