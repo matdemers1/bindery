@@ -310,17 +310,26 @@ async def fail(
     # by anything but Adobe. Retrying those five times over half an hour holds
     # a worker slot to reach the same answer, and buries the real message under
     # four identical ones.
-    exhausted = permanent or attempts >= MAX_ATTEMPTS
-    state = JobState.DEAD_LETTER if exhausted else JobState.FAILED
+    # A refusal and an exhausted retry budget are both terminal and mean
+    # opposite things. `permanent` says the pipeline reached a correct answer
+    # about an unsuitable input; `attempts >= MAX_ATTEMPTS` says it never
+    # reached an answer at all. Only the second is a fault (ADR-011).
+    if permanent:
+        state = JobState.DECLINED
+    elif attempts >= MAX_ATTEMPTS:
+        state = JobState.DEAD_LETTER
+    else:
+        state = JobState.FAILED
+    terminal = state in (JobState.DECLINED, JobState.DEAD_LETTER)
     backoff = min(BASE_BACKOFF * (2 ** max(attempts - 1, 0)), MAX_BACKOFF)
 
     await session.execute(
         sa.update(Job)
         .where(Job.id == job_id)
         .values(
-            # A dead-lettered job is not rescheduled; a failed one goes back on
-            # the queue once its backoff elapses.
-            state=(JobState.DEAD_LETTER if exhausted else JobState.QUEUED).value,
+            # A terminal job is not rescheduled; a failed one goes back on the
+            # queue once its backoff elapses.
+            state=(state if terminal else JobState.QUEUED).value,
             last_error=error[:4000],
             scheduled_for=_now() + backoff,
             locked_at=None,

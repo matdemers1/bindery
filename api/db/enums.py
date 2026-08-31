@@ -81,6 +81,13 @@ class JobState(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     DEAD_LETTER = "dead_letter"
+    # An input the pipeline correctly refused: a 10x5 pixel image is not a
+    # page, and a dynamic XFA form is readable by nothing but Acrobat.
+    # Terminal like `dead_letter` and deliberately *not* a failure — the
+    # distinction already existed as `PermanentFailure` and used to be thrown
+    # away one line later, which lit a warning nobody could ever clear
+    # (ADR-011).
+    DECLINED = "declined"
 
 
 class ActorType(StrEnum):

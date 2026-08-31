@@ -3,6 +3,7 @@ import { NavLink } from "react-router";
 import {
   Activity,
   BookOpen,
+  ChevronUp,
   ClipboardCheck,
   FolderTree,
   Images,
@@ -40,10 +41,23 @@ import { Wordmark } from "./brand/Logo";
  * something*, *look after the archive*. Most days only the first group is
  * touched, which is why it is at the top and why Ask is the landing screen.
  *
+ * **Keep holds only what changes on its own** — Trust and Pipeline. Libraries,
+ * People, Your account, Settings and Guides moved into the account menu at the
+ * bottom, because they are things you set up once and then stop thinking about,
+ * and they were making a list of sixteen out of a list of eleven. Nothing was
+ * removed; everything is still one click away.
+ *
  * Colour is load-bearing here, not decoration. The only coloured things in the
- * navigation are counts of work waiting for you and a warning when the pipeline
- * is unhealthy — so a spot of colour in the sidebar always means "something
+ * navigation are counts of work waiting for you and a warning when something
+ * needs doing — so a spot of colour in the sidebar always means "something
  * changed that you might care about", and never "this is a button".
+ *
+ * That claim stopped being true for a while and this is the repair. The Trust
+ * badge ran off `healthy`, which was false while three files sat in
+ * `dead_letter` — a 10x5 pixel image, a 1500x10 pixel image and an XFA form,
+ * all correctly refused, none of them fixable. A warning that is always on is
+ * not a warning. Those are `declined` now and the badge counts only work
+ * somebody can still act on (ADR-011).
  */
 type Item = {
   to: string;
@@ -79,14 +93,24 @@ const GROUPS: { title: string; items: Item[] }[] = [
     items: [
       { to: "/trust", label: "Trust", icon: ShieldCheck, badge: "health" },
       { to: "/pipeline", label: "Pipeline", icon: Activity },
-      { to: "/libraries", label: "Libraries", icon: Users },
-      { to: "/account", label: "Your account", icon: UserCircle },
-      // Only rendered for administrators — see `visibleGroups` below.
-      { to: "/people", label: "People", icon: UsersRound, adminOnly: true },
-      { to: "/settings", label: "Settings", icon: Settings },
-      { to: "/help", label: "Guides", icon: BookOpen },
     ],
   },
+];
+
+/**
+ * Set up once, then forgotten — so they live in the account menu rather than
+ * occupying five of sixteen rows in a navigation you read every day.
+ *
+ * Reachable in one click, and `tests/test_shell_navigation` asserts every route
+ * still has a link somewhere in the shell. Tidying a sidebar by quietly
+ * stranding a screen is not tidying.
+ */
+const ACCOUNT_ITEMS: Item[] = [
+  { to: "/account", label: "Your account", icon: UserCircle },
+  { to: "/libraries", label: "Libraries", icon: Users },
+  { to: "/people", label: "People", icon: UsersRound, adminOnly: true },
+  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/help", label: "Guides", icon: BookOpen },
 ];
 
 const COLLAPSED_KEY = "bindery.sidebar.collapsed";
@@ -128,6 +152,7 @@ export default function Shell({
   );
   const [reviewCount, setReviewCount] = useState(0);
   const [unhealthy, setUnhealthy] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -268,27 +293,63 @@ export default function Shell({
 
           <VersionBadge collapsed={collapsed} />
 
+          {/* Set-up screens, one click away and out of the daily list. Opened
+              upwards because the trigger is at the bottom of the viewport. */}
+          {accountOpen && (
+            <ul className="mt-2 space-y-0.5 border-t border-edge pt-2">
+              {ACCOUNT_ITEMS.filter(
+                (item) => !item.adminOnly || user.is_admin,
+              ).map((item) => (
+                <li key={item.to}>
+                  <Tab item={item} collapsed={collapsed} badge={null} />
+                </li>
+              ))}
+            </ul>
+          )}
+
           <div
             className={`mt-2 flex items-center gap-1 ${
               collapsed ? "flex-col" : "justify-between"
             }`}
           >
             <button
-              onClick={() => setCollapsed((value) => !value)}
-              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="rounded p-1.5 text-muted hover:text-neutral-100"
+              onClick={() => setAccountOpen((open) => !open)}
+              title={user.email}
+              aria-expanded={accountOpen}
+              aria-label="Account and setup"
+              className={`flex min-w-0 items-center gap-2 rounded p-1.5 text-sm ${
+                accountOpen ? "text-neutral-100" : "text-muted hover:text-neutral-100"
+              }`}
             >
-              {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+              <UserCircle size={16} className="shrink-0" />
+              {!collapsed && (
+                <>
+                  <span className="truncate">{user.email.split("@")[0]}</span>
+                  <ChevronUp
+                    size={14}
+                    className={`shrink-0 transition-transform ${accountOpen ? "" : "rotate-180"}`}
+                  />
+                </>
+              )}
             </button>
-            <button
-              onClick={onSignedOut}
-              title={`Sign out (${user.email})`}
-              aria-label="Sign out"
-              className="rounded p-1.5 text-muted hover:text-neutral-100"
-            >
-              <LogOut size={16} />
-            </button>
+            <div className={`flex items-center gap-1 ${collapsed ? "flex-col" : ""}`}>
+              <button
+                onClick={() => setCollapsed((value) => !value)}
+                title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                className="rounded p-1.5 text-muted hover:text-neutral-100"
+              >
+                {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+              </button>
+              <button
+                onClick={onSignedOut}
+                title={`Sign out (${user.email})`}
+                aria-label="Sign out"
+                className="rounded p-1.5 text-muted hover:text-neutral-100"
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
           </div>
         </div>
       </aside>

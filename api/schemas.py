@@ -306,6 +306,9 @@ class JobOut(BaseModel):
     # reads as "fine".
     scheduled_for: datetime
     updated_at: datetime
+    # Set when someone has seen a dead letter and accepted it. Never means
+    # deleted, retried or hidden — only "stop counting this as outstanding".
+    acknowledged_at: datetime | None = None
 
 
 class StageCount(BaseModel):
@@ -319,6 +322,8 @@ class PipelineStatusOut(BaseModel):
     # Jobs a human is expected to look at — failed and dead-lettered.
     attention: list[JobOut]
     in_flight: list[JobOut]
+    # Correctly refused inputs. Listed, never alarmed on.
+    declined: list[JobOut] = []
 
 
 class ArchiveEntryOut(BaseModel):

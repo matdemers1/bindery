@@ -192,13 +192,23 @@ async def test_requeue_resets_a_dead_lettered_job(session) -> None:
     assert job.last_error is None
 
 
-async def test_a_permanent_failure_gives_up_immediately(session) -> None:
-    """Some inputs cannot be retried into success.
+async def test_a_permanent_failure_is_declined_not_dead_lettered(session) -> None:
+    """Some inputs cannot be retried into success — and are not failures.
 
     A 10x5 pixel image will never hold a document and a dynamic XFA form will
     never be readable outside Adobe. Spending five attempts over half an hour
     to reach that conclusion holds a worker slot and buries the one useful
     message under four identical ones.
+
+    It lands in `declined` rather than `dead_letter` because the two mean
+    opposite things: `dead_letter` is work that never reached an answer, and
+    `declined` is the pipeline reaching a correct one about something that is
+    not a document. Both are terminal; only the first is a fault.
+
+    This test asserted `DEAD_LETTER` until ADR-011. The distinction existed at
+    the point of failure — `permanent=True` is what short-circuits the retry
+    budget — and was thrown away one line later, which left a red badge on the
+    sidebar that nothing could ever clear.
     """
     source_file = await _source_file(session, uuid.uuid4().hex * 2)
     job_id = await queue.enqueue(session, JobStage.NORMALIZE, source_file_id=source_file.id)
@@ -211,10 +221,11 @@ async def test_a_permanent_failure_gives_up_immediately(session) -> None:
     )
     await session.commit()
 
-    assert state is JobState.DEAD_LETTER
+    assert state is JobState.DECLINED
     job = await session.get(Job, job_id)
-    assert job.state is JobState.DEAD_LETTER
+    assert job.state is JobState.DECLINED
     assert job.attempts == 1, "it gave up on the first attempt, not the fifth"
+    assert job.scheduled_for is not None, "still a row, not a deletion"
 
 
 async def test_an_ordinary_failure_still_retries(session) -> None:

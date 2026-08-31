@@ -62,6 +62,7 @@ class HealthPanel:
     running: int
     failed_24h: int
     dead_letter: int
+    declined: int
     stuck_jobs: list[dict]
     oldest_queued_seconds: float | None
     stalled: bool
@@ -82,6 +83,7 @@ class HealthPanel:
             "running": self.running,
             "failed_24h": self.failed_24h,
             "dead_letter": self.dead_letter,
+            "declined": self.declined,
             "stuck_jobs": self.stuck_jobs,
             "oldest_queued_seconds": self.oldest_queued_seconds,
             "stalled": self.stalled,
@@ -230,11 +232,27 @@ async def collect(
             .where(Job.state == JobState.FAILED, Job.updated_at >= now - timedelta(days=1))
         )
     ) or 0
+    # Unacknowledged only. Acknowledging deletes nothing and hides nothing —
+    # the job stays on the Pipeline screen with its error — it just stops
+    # counting toward "things still demanding attention" (ADR-011, REQ-169).
     dead_letter = (
         await session.scalar(
             sa.select(sa.func.count())
             .select_from(Job)
-            .where(Job.state == JobState.DEAD_LETTER)
+            .where(
+                Job.state == JobState.DEAD_LETTER,
+                Job.acknowledged_at.is_(None),
+            )
+        )
+    ) or 0
+    # Counted and reported, never alerted on. A declined input is the pipeline
+    # having reached a correct answer about something that is not a document
+    # (REQ-168).
+    declined = (
+        await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Job)
+            .where(Job.state == JobState.DECLINED)
         )
     ) or 0
 
@@ -310,7 +328,8 @@ async def collect(
         alerts.append(
             Alert(
                 "critical", "dead_letter",
-                f"{dead_letter} documents gave up and will not retry on their own.",
+                f"{dead_letter} documents gave up and will not retry on their own. "
+                "Fix or acknowledge them.",
                 {"count": dead_letter},
             )
         )
@@ -357,6 +376,7 @@ async def collect(
         running=running,
         failed_24h=failed_24h,
         dead_letter=dead_letter,
+        declined=declined,
         stuck_jobs=stuck_jobs,
         oldest_queued_seconds=oldest_seconds,
         stalled=stalled,

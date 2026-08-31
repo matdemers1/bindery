@@ -51,6 +51,11 @@ class Job(Base):
 
     attempts: Mapped[int] = mapped_column(sa.Integer, nullable=False, server_default="0")
     last_error: Mapped[str | None] = mapped_column(sa.Text)
+
+    # Set when a person says "I have seen this". It does not retry, hide or
+    # remove the job — the row and its error stay on the Pipeline screen — it
+    # only stops the job counting as work still demanding attention (ADR-011).
+    acknowledged_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     scheduled_for: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )

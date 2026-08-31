@@ -493,11 +493,15 @@ export interface Job {
   last_error: string | null;
   scheduled_for: string;
   updated_at: string;
+  /** Set when someone has seen a dead letter. Never deleted, retried or hidden. */
+  acknowledged_at?: string | null;
 }
 
 export interface PipelineStatus {
   counts: { stage: string; state: string; count: number }[];
   attention: Job[];
+  /** Correctly refused inputs — listed, never alarmed on. */
+  declined: Job[];
   in_flight: Job[];
 }
 
@@ -709,6 +713,10 @@ export const api = {
     request<RuleDryRun>(`/rules/${ruleId}/dry-run`, { method: "POST" }),
   setRuleEnabled: (ruleId: string, enabled: boolean) =>
     request<RuleRecord>(`/rules/${ruleId}/${enabled ? "enable" : "disable"}`, {
+      method: "POST",
+    }),
+  acknowledgeJob: (jobId: string, undo = false) =>
+    request<Job>(`/pipeline/jobs/${jobId}/acknowledge${undo ? "?undo=true" : ""}`, {
       method: "POST",
     }),
   retryJob: (id: string) => request<Job>(`/pipeline/jobs/${id}/retry`, { method: "POST" }),

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { Activity, Loader, RotateCw, ScrollText } from "lucide-react";
+import { Activity, Check, Loader, RotateCw, ScrollText } from "lucide-react";
 
 import { api, type FileProgress, type Job, type PipelineStatus } from "../../api";
 import LogViewer from "../../components/LogViewer";
@@ -52,6 +52,16 @@ export default function PipelinePage() {
       (job.source_file_id && names.get(job.source_file_id)) || null;
   }, [files]);
 
+  async function acknowledge(jobId: string, undo: boolean) {
+    setBusy(jobId);
+    try {
+      await api.acknowledgeJob(jobId, undo);
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function retry(jobId: string) {
     setBusy(jobId);
     try {
@@ -86,6 +96,7 @@ export default function PipelinePage() {
           nameOf={nameOf}
           busy={busy}
           onRetry={retry}
+          onAcknowledge={acknowledge}
         />
       )}
 
@@ -95,6 +106,18 @@ export default function PipelinePage() {
           title="Retrying"
           blurb="These failed and are backing off before another attempt. They still read as queued in the database, which is why this screen used to call them healthy."
           jobs={retrying}
+          nameOf={nameOf}
+          busy={busy}
+          onRetry={retry}
+        />
+      )}
+
+      {(status?.declined.length ?? 0) > 0 && (
+        <JobList
+          tone="quiet"
+          title="Refused"
+          blurb="Not documents, and the pipeline said so on the first look — an image a few pixels across, a form only Acrobat can open. Nothing was lost: the originals are stored, and these are listed rather than alerted on because there is nothing to fix."
+          jobs={status?.declined ?? []}
           nameOf={nameOf}
           busy={busy}
           onRetry={retry}
@@ -181,26 +204,33 @@ function JobList({
   nameOf,
   busy,
   onRetry,
+  onAcknowledge,
 }: {
-  tone: "bad" | "warn";
+  tone: "bad" | "warn" | "quiet";
   title: string;
   blurb: string;
   jobs: Job[];
   nameOf: (job: Job) => string | null;
   busy: string | null;
   onRetry: (jobId: string) => void;
+  onAcknowledge?: (jobId: string, undo: boolean) => void;
 }) {
   const bad = tone === "bad";
+  const quiet = tone === "quiet";
   return (
     <section
       className={`rounded-xl border ${
-        bad ? "border-red-900/70 bg-red-950/20" : "border-amber-900/70 bg-amber-950/15"
+        quiet
+          ? "border-edge bg-surface"
+          : bad
+            ? "border-red-900/70 bg-red-950/20"
+            : "border-amber-900/70 bg-amber-950/15"
       }`}
     >
       <header className="px-4 pb-2 pt-3">
         <h2
           className={`flex items-center gap-2 text-sm font-medium ${
-            bad ? "text-red-300" : "text-amber-300"
+            quiet ? "" : bad ? "text-red-300" : "text-amber-300"
           }`}
         >
           {title}
@@ -218,28 +248,56 @@ function JobList({
                   {job.stage}
                 </span>
                 <span className="text-xs text-muted">
-                  {job.attempts} of 5 attempts
+                  {quiet ? "refused on the first look" : `${job.attempts} of 5 attempts`}
                   {job.state === "queued" && job.scheduled_for
                     ? ` · next ${new Date(job.scheduled_for).toLocaleTimeString()}`
                     : ""}
                 </span>
+                {job.acknowledged_at && (
+                  <span className="text-xs text-muted">· acknowledged</span>
+                )}
               </p>
               {job.last_error && (
                 // Verbatim and wrapped rather than truncated: the specific
                 // message is the whole diagnosis.
-                <p className="mt-1.5 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded bg-black/30 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-red-300/90">
+                <p
+                  className={`mt-1.5 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded bg-black/30 px-2 py-1.5 font-mono text-[11px] leading-relaxed ${
+                    quiet ? "text-muted" : "text-red-300/90"
+                  }`}
+                >
                   {job.last_error}
                 </p>
               )}
             </div>
-            <button
-              onClick={() => onRetry(job.id)}
-              disabled={busy === job.id}
-              className="flex shrink-0 items-center gap-1.5 rounded-md border border-edge px-2.5 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
-            >
-              <RotateCw size={12} className={busy === job.id ? "animate-spin" : ""} />
-              {busy === job.id ? "Retrying…" : "Retry now"}
-            </button>
+            <div className="flex shrink-0 flex-col gap-1.5">
+              <button
+                onClick={() => onRetry(job.id)}
+                disabled={busy === job.id}
+                className="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+              >
+                <RotateCw size={12} className={busy === job.id ? "animate-spin" : ""} />
+                {busy === job.id ? "Retrying…" : "Retry now"}
+              </button>
+              {/* The weakest action available, and deliberately so: it does not
+                  retry, hide or remove anything. It only stops the job counting
+                  toward the badge, so a warning that is still lit means there is
+                  still something to do. */}
+              {onAcknowledge && (
+                <button
+                  onClick={() => onAcknowledge(job.id, !!job.acknowledged_at)}
+                  disabled={busy === job.id}
+                  title={
+                    job.acknowledged_at
+                      ? "Count this as outstanding again"
+                      : "Stop counting this toward the badge. It stays here, with its error."
+                  }
+                  className="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1.5 text-xs text-muted hover:text-neutral-100 disabled:opacity-40"
+                >
+                  <Check size={12} />
+                  {job.acknowledged_at ? "Undo" : "Acknowledge"}
+                </button>
+              )}
+            </div>
           </li>
         ))}
       </ul>

@@ -8,9 +8,10 @@ appears here, and every dead-lettered job can be retried from here.
 """
 
 import uuid
+from datetime import UTC, datetime
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import events, queue, reclassify
@@ -41,6 +42,12 @@ router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 # is labelled as retrying rather than as broken.
 ATTENTION_STATES = (JobState.DEAD_LETTER, JobState.FAILED)
 
+# Shown, and shown apart. A declined input is not work waiting for anyone: the
+# pipeline reached a correct answer about something that is not a document. It
+# stays listed because "why did that file never appear?" has to remain
+# answerable — but it is not an alarm and never counted as one (ADR-011).
+DECLINED_STATES = (JobState.DECLINED,)
+
 
 @router.get("", response_model=PipelineStatusOut)
 async def status_(
@@ -61,6 +68,19 @@ async def status_(
             .order_by(visible.c.stage, visible.c.state)
         )
     ).all()
+
+    declined = (
+        (
+            await session.execute(
+                repository.visible_jobs(library_ids)
+                .where(Job.state == JobState.DECLINED.value)
+                .order_by(Job.updated_at.desc())
+                .limit(50)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     attention = (
         await session.execute(
@@ -95,6 +115,7 @@ async def status_(
             for stage, state, count in counts
         ],
         attention=[JobOut.model_validate(job) for job in attention],
+        declined=[JobOut.model_validate(job) for job in declined],
         in_flight=[JobOut.model_validate(job) for job in in_flight],
     )
 
@@ -132,6 +153,59 @@ async def retry(
     )
     await session.commit()
 
+    await session.refresh(job)
+    return JobOut.model_validate(job)
+
+
+@router.post("/jobs/{job_id}/acknowledge", response_model=JobOut)
+async def acknowledge(
+    job_id: uuid.UUID,
+    undo: bool = Query(False, description="take the acknowledgement back"),
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> JobOut:
+    """Say "I have seen this" about a dead letter (T-14.3, REQ-169).
+
+    Deliberately the weakest possible action. It does not retry the job, hide
+    it, or remove it: the row keeps its error and stays on this screen for
+    good. All it changes is whether the job counts toward the badge — which is
+    the difference between a warning you can answer and one you learn to ignore
+    (ADR-011).
+
+    Reversible, because an acknowledgement made in haste should not be
+    permanent when the underlying job is.
+    """
+    library_ids = await repository.writable_library_ids(session, user.id)
+    if not library_ids:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "no writable libraries")
+
+    job = (
+        await session.execute(repository.visible_jobs(library_ids).where(Job.id == job_id))
+    ).scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    if job.state is not JobState.DEAD_LETTER:
+        # Declined work is not a failure and has nothing to acknowledge;
+        # anything else is still in flight. Refusing here keeps the count
+        # honest rather than letting a queued job be silenced.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"only a dead-lettered job can be acknowledged; this one is {job.state.value}",
+        )
+
+    before = {"acknowledged_at": job.acknowledged_at.isoformat() if job.acknowledged_at else None}
+    job.acknowledged_at = None if undo else datetime.now(UTC)
+    await record(
+        session,
+        entity_type="job",
+        entity_id=job_id,
+        action="acknowledge_job" if not undo else "unacknowledge_job",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+        before=before,
+        after={"acknowledged_at": job.acknowledged_at.isoformat() if job.acknowledged_at else None},
+    )
+    await session.commit()
     await session.refresh(job)
     return JobOut.model_validate(job)
 
