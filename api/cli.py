@@ -162,7 +162,22 @@ async def _lifecycle_check() -> int:
         return 0
 
     client = offsite.make_client(config)
-    rules = await asyncio.to_thread(offsite.live_lifecycle_rules, client, config)
+    try:
+        rules = await asyncio.to_thread(offsite.live_lifecycle_rules, client, config)
+    except Exception as error:
+        # Most likely the credential lacks s3:GetLifecycleConfiguration. That is
+        # a read, and denying it only hides the rules from the audit written to
+        # check them — but a stack trace is a poor way to say so.
+        code = getattr(error, "response", {}).get("Error", {}).get("Code", "")
+        if code == "AccessDenied":
+            print(
+                "this credential cannot read the bucket's lifecycle rules — add "
+                "s3:GetLifecycleConfiguration to the bindery-offsite policy "
+                "(infra/aws/bindery-offsite-policy.json)", file=sys.stderr,
+            )
+            return 1
+        print(f"{type(error).__name__}: {str(error)[:300]}", file=sys.stderr)
+        return 1
     if not rules:
         print(f"{config.bucket}: NO lifecycle rules at all — dumps would accumulate "
               "forever", file=sys.stderr)

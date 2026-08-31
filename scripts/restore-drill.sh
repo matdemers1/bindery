@@ -37,7 +37,10 @@ if [ "${1:-}" = "--from-s3" ]; then
   FROM_S3=1
   shift
   SEARCH_TERM="${1:-DD-214}"
-  BACKUP="$(mktemp -d -t bindery-offsite-drill)"
+  # An explicit XXXXXX template: BSD mktemp accepts `-t name` without one and
+  # GNU/busybox refuses it ("too few X's"). The host is the machine that
+  # matters here, and it is not the one this was written on.
+  BACKUP="$(mktemp -d "${TMPDIR:-/tmp}/bindery-offsite-drill.XXXXXX")"
   # Cleaned up by the exit trap below, along with the scratch container.
 else
   BACKUP="${1:?usage: restore-drill.sh <backup-directory> [search-term]  |  --from-s3 [search-term]}"

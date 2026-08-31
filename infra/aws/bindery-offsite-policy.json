@@ -4,13 +4,21 @@
     {
       "Sid": "ListTheBucket",
       "Effect": "Allow",
-      "Action": ["s3:ListBucket", "s3:ListBucketVersions", "s3:GetBucketLocation"],
+      "Action": [
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:GetBucketLocation",
+        "s3:GetLifecycleConfiguration"
+      ],
       "Resource": "arn:aws:s3:::bindery-offsite-d3cloud"
     },
     {
       "Sid": "ReadWriteObjectsNeverDelete",
       "Effect": "Allow",
-      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject"
+      ],
       "Resource": "arn:aws:s3:::bindery-offsite-d3cloud/*"
     },
     {
