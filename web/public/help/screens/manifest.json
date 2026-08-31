@@ -9,7 +9,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/search",
@@ -19,7 +19,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/add",
@@ -29,7 +29,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/files",
@@ -39,7 +39,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/review",
@@ -49,7 +49,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/archive",
@@ -59,7 +59,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/photos",
@@ -69,7 +69,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/organise",
@@ -79,7 +79,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/import",
@@ -89,7 +89,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/trust",
@@ -99,7 +99,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "141fe482eda369c948cb28b8f551fb857f99472e"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/pipeline",
@@ -109,7 +109,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/account",
@@ -119,7 +119,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/people",
@@ -129,7 +129,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/settings",
@@ -139,7 +139,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "786470d97fbacff3805335eb72855d88df0a1796"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/rules",
@@ -149,7 +149,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "20b73e0b2bb7cee98823b4ceb4796cb31bf97509"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     }
   ]
 }
