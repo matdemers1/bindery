@@ -36,13 +36,15 @@ export default function SegmentationPage() {
     );
   }, []);
 
-  useEffect(() => {
-    // Resets local state when the thing being shown changes. The
-    // idiomatic fix is a `key` from the parent, which means changing how
-    // seven screens manage their state lifecycle — a refactor worth doing
-    // deliberately and behind the e2e suite, not folded into a CI change.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  // Adjusted during render: a stale error from the previous file must not sit
+  // above the new one while it loads.
+  const [loadedFor, setLoadedFor] = useState(fileId);
+  if (fileId !== loadedFor) {
+    setLoadedFor(fileId);
     setError(null);
+  }
+
+  useEffect(() => {
     Promise.all([api.file(fileId), api.segments(fileId)])
       .then(([file, list]) => {
         setDetail(file);

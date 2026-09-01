@@ -75,7 +75,21 @@ async def main() -> None:
                 )
             ).scalar_one_or_none()
             if existing is not None:
-                print(f"{filename} already there")
+                # Establish the state, do not merely notice the row. The suite
+                # acknowledges this dead letter, so a second run found it
+                # already acknowledged and failed on a fixture rather than on
+                # the behaviour. A seed that is not idempotent works exactly
+                # once, which is the same as not working.
+                job = (
+                    await session.execute(
+                        sa.select(Job).where(Job.source_file_id == existing.id)
+                    )
+                ).scalar_one_or_none()
+                if job is not None:
+                    job.state = state
+                    job.acknowledged_at = None
+                    job.last_error = error
+                print(f"{filename} reset to {state.value}")
                 continue
 
             source = SourceFile(

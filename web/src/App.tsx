@@ -151,7 +151,9 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </Shell>
-        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+        {/* Mounted only while open, so each invocation starts empty without
+            an effect to clear it. */}
+        {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
       </LiveProvider>
     </BrowserRouter>
   );

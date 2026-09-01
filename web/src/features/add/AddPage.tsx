@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   FileText,
   Plus,
@@ -42,7 +42,13 @@ export default function AddPage({
   onUploaded: () => void;
 }) {
   const [staged, setStaged] = useState<Staged[]>([]);
-  const [libraryId, setLibraryId] = useState(libraries[0]?.id ?? "");
+  // Derived, not backfilled. `libraries` arrives from a fetch, so on the first
+  // render there is nothing to default to — which used to be handled by an
+  // effect that set the state once the list turned up, costing a second render
+  // and leaving the select momentarily blank. Falling back at render is the
+  // same default with neither problem, and an explicit choice still wins.
+  const [chosen, setChosen] = useState<string | null>(null);
+  const libraryId = chosen ?? libraries[0]?.id ?? "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -51,15 +57,6 @@ export default function AddPage({
   const [logFor, setLogFor] = useState<FileProgress | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    // Resets local state when the thing being shown changes. The
-    // idiomatic fix is a `key` from the parent, which means changing how
-    // seven screens manage their state lifecycle — a refactor worth doing
-    // deliberately and behind the e2e suite, not folded into a CI change.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!libraryId && libraries[0]) setLibraryId(libraries[0].id);
-  }, [libraries, libraryId]);
 
   const hasCamera =
     typeof navigator !== "undefined" &&
@@ -244,7 +241,7 @@ export default function AddPage({
                 <select
                   id="target-library"
                   value={libraryId}
-                  onChange={(event) => setLibraryId(event.target.value)}
+                  onChange={(event) => setChosen(event.target.value)}
                   className="rounded border border-edge bg-ink px-2 py-1 text-xs"
                 >
                   {libraries.map((library) => (

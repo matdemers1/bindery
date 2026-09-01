@@ -36,10 +36,21 @@ test("acknowledging a dead letter clears the badge without hiding the job", asyn
   expect(before, "the seeded dead letter is already acknowledged").toBeGreaterThan(0);
 
   const rowsBefore = await gaveUp.first().locator("li").count();
-  for (let i = 0; i < before; i += 1) {
-    await gaveUp.first().getByRole("button", { name: "Acknowledge" }).first().click();
-    await page.waitForTimeout(800);
+  // Until none remain, rather than a fixed count. The badge reflects *all*
+  // outstanding work, so asserting it goes out after acknowledging a fixed
+  // number is a global claim made from a local action — and the suite's own
+  // upload spec adds a document whose classification dead-letters without an
+  // API key, so "how many" is not something this test can know in advance.
+  for (let guard = 0; guard < 25; guard += 1) {
+    const remaining = gaveUp.first().getByRole("button", { name: "Acknowledge" });
+    if ((await remaining.count()) === 0) break;
+    await remaining.first().click();
+    await page.waitForTimeout(600);
   }
+  await expect(
+    gaveUp.first().getByRole("button", { name: "Acknowledge" }),
+    "something is still outstanding, so the badge assertion below cannot mean anything",
+  ).toHaveCount(0);
 
   // The row survives, with its error. Acknowledging is the weakest possible
   // action: it does not retry, hide or delete (REQ-169).

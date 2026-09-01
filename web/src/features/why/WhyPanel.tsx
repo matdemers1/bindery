@@ -28,15 +28,19 @@ export default function WhyPanel({
   const [error, setError] = useState<string | null>(null);
   const [rescan, setRescan] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Resets local state when the thing being shown changes. The
-    // idiomatic fix is a `key` from the parent, which means changing how
-    // seven screens manage their state lifecycle — a refactor worth doing
-    // deliberately and behind the e2e suite, not folded into a CI change.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  // Adjusted during render rather than cleared in an effect. Opening this on a
+  // second document used to show the *first* one's provenance for a frame —
+  // which, on a panel whose entire job is saying where a value came from, is
+  // the worst possible thing to be briefly wrong about.
+  const [shownFor, setShownFor] = useState(documentId);
+  if (documentId !== shownFor) {
+    setShownFor(documentId);
     setData(null);
     setError(null);
     setRescan(null);
+  }
+
+  useEffect(() => {
     api.why(documentId).then(setData).catch(() => setError("Could not load provenance."));
   }, [documentId]);
 

@@ -22,9 +22,29 @@ import WhyPanel from "../why/WhyPanel";
  * Two modes: a document (the normal path, reached from search) and a whole file
  * (reached from the pipeline screen or the segmentation editor).
  */
+/**
+ * Keyed on what it is showing, so navigating from one document to another
+ * remounts rather than resetting.
+ *
+ * The reset used to be an effect — `setError(null); setDetail(null);
+ * setDocument(null)` at the top of the loader — which meant one render showing
+ * the *previous* document's title above the new one's pages before the state
+ * caught up. A `key` makes that impossible rather than brief.
+ */
 export default function ViewerPage({ mode }: { mode: "document" | "file" }) {
   const params_ = useParams();
   const routeId = (mode === "document" ? params_.documentId : params_.fileId) ?? "";
+  return <Viewer mode={mode} routeId={routeId} key={`${mode}:${routeId}`} />;
+}
+
+function Viewer({
+  mode,
+  routeId,
+}: {
+  mode: "document" | "file";
+  routeId: string;
+}) {
+  const params_ = useParams();
   const pageNumber = params_.pageNumber ?? "1";
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -33,19 +53,18 @@ export default function ViewerPage({ mode }: { mode: "document" | "file" }) {
 
   const [detail, setDetail] = useState<SourceFileDetail | null>(null);
   const [document_, setDocument] = useState<DocumentDetail | null>(null);
-  const [boxes, setBoxes] = useState<PageBoxes | null>(null);
+  const [fetchedBoxes, setBoxes] = useState<PageBoxes | null>(null);
+  // Derived rather than cleared: with no search term there is nothing to
+  // highlight, and saying so at render cannot leave the previous page's boxes
+  // drawn over this one for a frame.
+  const boxes = query.trim() && detail ? fetchedBoxes : null;
   const [error, setError] = useState<string | null>(null);
   const [showWhy, setShowWhy] = useState(false);
 
   useEffect(() => {
-    // Resets local state when the thing being shown changes. The
-    // idiomatic fix is a `key` from the parent, which means changing how
-    // seven screens manage their state lifecycle — a refactor worth doing
-    // deliberately and behind the e2e suite, not folded into a CI change.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setError(null);
-    setDetail(null);
-    setDocument(null);
+    // No resetting here any more: the `key` above guarantees this component is
+    // fresh whenever `routeId` changes, so there is no previous document's
+    // state to clear.
     const load =
       mode === "document"
         ? api.document(routeId).then((found) => {
@@ -71,15 +90,9 @@ export default function ViewerPage({ mode }: { mode: "document" | "file" }) {
   // Boxes are fetched per page: ocr.json for a 300-page bundle is large, and the
   // viewer only ever draws one page.
   useEffect(() => {
-    if (!query.trim() || !detail) {
-      // Resets local state when the thing being shown changes. The
-      // idiomatic fix is a `key` from the parent, which means changing how
-      // seven screens manage their state lifecycle — a refactor worth doing
-      // deliberately and behind the e2e suite, not folded into a CI change.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setBoxes(null);
-      return;
-    }
+    // Nothing to highlight. `boxes` is derived away at render below, so this
+    // only has to not fetch.
+    if (!query.trim() || !detail) return;
     const controller = new AbortController();
     api
       .pageBoxes(fileId, filePage, controller.signal)

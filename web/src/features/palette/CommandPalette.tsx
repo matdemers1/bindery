@@ -8,48 +8,34 @@ import { api, type SearchResult } from "../../api";
 const DEBOUNCE_MS = 120;
 const MAX_RESULTS = 7;
 
-export default function CommandPalette({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+/**
+ * Mounted only while it is open, so every open starts empty.
+ *
+ * It used to be mounted permanently with an `if (!open) return null` and an
+ * effect that cleared the query, the results and the selection each time
+ * `open` flipped. Not rendering it at all is the same behaviour with no state
+ * to remember to reset — and no frame where the previous search is still on
+ * screen underneath the new one.
+ */
+export default function CommandPalette({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [fetched, setFetched] = useState<SearchResult[]>([]);
+  // Derived rather than cleared: an empty box has no results by definition.
+  const results = query.trim() ? fetched : [];
   const [selected, setSelected] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (open) {
-      // Resets local state when the thing being shown changes. The
-      // idiomatic fix is a `key` from the parent, which means changing how
-      // seven screens manage their state lifecycle — a refactor worth doing
-      // deliberately and behind the e2e suite, not folded into a CI change.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setQuery("");
-      setResults([]);
-      setSelected(0);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || !query.trim()) {
-      // Resets local state when the thing being shown changes. The
-      // idiomatic fix is a `key` from the parent, which means changing how
-      // seven screens manage their state lifecycle — a refactor worth doing
-      // deliberately and behind the e2e suite, not folded into a CI change.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setResults([]);
-      return;
-    }
+    // Nothing typed. `results` is derived away at render, so this only has to
+    // not fetch.
+    if (!query.trim()) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       api
         .search({ q: query, limit: MAX_RESULTS }, controller.signal)
         .then((response) => {
-          setResults(response.results);
+          setFetched(response.results);
           setSelected(0);
         })
         .catch(() => {});
@@ -58,9 +44,8 @@ export default function CommandPalette({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [open, query]);
+  }, [query]);
 
-  if (!open) return null;
 
   function openResult(result: SearchResult) {
     onClose();

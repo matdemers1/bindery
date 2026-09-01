@@ -22,37 +22,47 @@ export default function SearchPage({
   const formFilter = params.getAll("form");
 
   const [draft, setDraft] = useState(query);
-  const [response, setResponse] = useState<SearchResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<unknown>(null);
+  const [fetched, setFetched] = useState<SearchResponse | null>(null);
+  // What has been searched for, rather than a `loading` flag set at the top of
+  // the effect. `setLoading(true)` there is a synchronous state write inside an
+  // effect — a guaranteed second render on every keystroke that commits — and
+  // it is redundant: "still loading" is exactly "the thing on screen is not
+  // what the URL asks for", which the two can be compared to find out.
+  const [settled, setSettled] = useState<string | null>(null);
+  const signature = [query, libraryFilter.join(","), formFilter.join(",")].join("|");
+  const loading = Boolean(query.trim()) && settled !== signature;
+  // Derived, not cleared. An empty query has no results by definition, so
+  // saying so at render is simpler than an effect that reaches back to null —
+  // and it cannot leave last search's results on screen for a frame.
+  const response = query.trim() ? fetched : null;
+  const [fetchError, setError] = useState<unknown>(null);
+  // Scoped to the search it came from, so a failed query does not leave its
+  // message above the next one.
+  const error = settled === signature ? fetchError : null;
 
-  // Resets local state when the thing being shown changes. The
-  // idiomatic fix is a `key` from the parent, which means changing how
-  // seven screens manage their state lifecycle — a refactor worth doing
-  // deliberately and behind the e2e suite, not folded into a CI change.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setDraft(query), [query]);
+  // Adjusted during render rather than in an effect. The box has to follow the
+  // URL — arriving at /search?q=passport, or pressing back — but as an effect
+  // that is a second render pass every time the query changes, and React's own
+  // guidance is to compare against the previous value here instead.
+  const [lastQuery, setLastQuery] = useState(query);
+  if (query !== lastQuery) {
+    setLastQuery(query);
+    setDraft(query);
+  }
 
   useEffect(() => {
-    if (!query.trim()) {
-      // Resets local state when the thing being shown changes. The
-      // idiomatic fix is a `key` from the parent, which means changing how
-      // seven screens manage their state lifecycle — a refactor worth doing
-      // deliberately and behind the e2e suite, not folded into a CI change.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setResponse(null);
-      return;
-    }
+    // Nothing to search for. The results are derived away at render rather
+    // than cleared here — see `results` below — so this only has to not run.
+    if (!query.trim()) return;
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
     api
       .search(
         { q: query, libraryIds: libraryFilter, knownFormCodes: formFilter },
         controller.signal,
       )
       .then((found) => {
-        setResponse(found);
+        setFetched(found);
+        setSettled(signature);
         // Onboarding finishes here rather than at a dismissed dialog: being
         // told the archive can find things is not the same as having watched
         // it find one of yours (REQ-147).
@@ -64,8 +74,8 @@ export default function SearchPage({
         // which is the worst possible failure for this particular box.
         if (controller.signal.aborted) return;
         setError(caught);
-      })
-      .finally(() => setLoading(false));
+        setSettled(signature);
+      });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, libraryFilter.join(","), formFilter.join(",")]);
