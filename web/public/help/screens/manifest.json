@@ -19,7 +19,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
     },
     {
       "route": "/add",
@@ -29,7 +29,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
     },
     {
       "route": "/files",
@@ -39,7 +39,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
     },
     {
       "route": "/review",
@@ -49,7 +49,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
     },
     {
       "route": "/archive",
@@ -59,7 +59,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
     },
     {
       "route": "/photos",
@@ -79,7 +79,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
     },
     {
       "route": "/import",
@@ -89,7 +89,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
     },
     {
       "route": "/trust",
@@ -99,7 +99,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
     },
     {
       "route": "/pipeline",

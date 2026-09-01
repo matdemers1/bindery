@@ -175,9 +175,13 @@ decision currently happens at the end of `rules`.
 - `tests/test_no_destructive_paths.py` enforces REQ-090 by scanning `api/` and
   `worker/`. If it fails, revoke or tombstone — do not loosen the pattern list.
 - **The `test` and `test-worker` compose services bind-mount `api/`, `worker/`,
-  `tests/`, `alembic/` and `pyproject.toml`.** Without those mounts the suite
-  runs whatever source was baked into the image and reports a pass on code you
-  have already changed — which happened once, and cost a stale green run.
+  `tests/`, `alembic/`, `infra/`, `scripts/`, `web/src`, `web/public` and
+  `pyproject.toml`.** Without those mounts the suite runs whatever source was
+  baked into the image and reports a pass on code you have already changed —
+  which happened once, and cost a stale green run. `infra/` was added later for
+  the same reason: a guard asserting the worker image can run `pg_dump` was
+  reading the Dockerfile baked into the test image and reporting on a version of
+  the repository that no longer existed.
 
 ## Trust, export and resilience (Phase 6)
 
@@ -408,10 +412,31 @@ scales to fit instead of losing its right-hand columns off the page.
 
 ## Deployment
 
-`docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) runs lint and the
-default suite, then publishes `ghcr.io/matdemers1/bindery/{api,worker,web}` tagged
-`:main`, `:latest` and `:sha-<commit>`. The ZimaOS host pulls `:main`; rolling
-back means pinning a `:sha-` tag.
+`docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) is four gates in
+series — **lint → unit → integration → e2e** — and only then publishes
+`ghcr.io/matdemers1/bindery/{api,worker,web}` tagged `:main`, `:latest` and
+`:sha-<commit>`. The ZimaOS host pulls `:main`; rolling back means pinning a
+`:sha-` tag.
+
+Sequential on purpose: parallel finishes sooner and also spends a full e2e run —
+three image builds, a Postgres, a seeded corpus, a browser — to tell you about a
+lint error. Cheapest gate first.
+
+- **lint** — `ruff`, then `eslint --max-warnings 0` and `tsc --noEmit` for the
+  web app and the e2e specs. Before this the only typecheck was `tsc -b` inside
+  `Dockerfile.web`, which runs *after* the tests, so a type error surfaced as an
+  opaque Docker build failure.
+- **unit** — the default pytest run, excluding `live_api` and `slow`.
+- **integration** — `pytest -m slow` in the **worker** image, where the OCR
+  toolchain lives. ~30 tests.
+- **e2e** — Playwright against the real compose stack: build, migrate
+  explicitly, seed, then drive a browser. `make e2e` runs it locally against
+  `make up`.
+
+**Actions does not support YAML merge keys.** An `env: &anchor` plus `<<: *anchor`
+parses locally and makes Actions refuse the whole file with "this run likely
+failed because of a workflow file issue" — no line number, no failing job.
+Repeat the block instead.
 
 Every Dockerfile names its shipped stage **`runtime`**. The api and worker
 Dockerfiles also have a `dev` stage carrying pytest and the whole source tree —
