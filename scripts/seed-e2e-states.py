@@ -10,7 +10,11 @@ So this adds exactly one of each, on invented files:
 - a **declined** job, standing in for the 10x5 pixel image the real archive
   refused — it must be listed and must offer nothing to acknowledge;
 - a **dead-lettered** job, which must light the badge and must survive being
-  acknowledged, with its error intact.
+  acknowledged, with its error intact;
+- a document **waiting for review**, so the correction specs (Phase 17) have
+  something to correct. Without it the queue is empty on a healthy seeded
+  archive and the correct-then-accept test skips — which is the same nothing
+  the two above were added to stop.
 
 Piped into the api container rather than run from it: the runtime image ships
 `api/` and `alembic/` and deliberately not `scripts/`.
@@ -24,8 +28,8 @@ import uuid
 
 import sqlalchemy as sa
 
-from api.db.enums import IngestSource, JobStage, JobState
-from api.db.models import AppUser, Job, Library, Membership, SourceFile
+from api.db.enums import IngestSource, JobStage, JobState, ReviewState, SourceFileState
+from api.db.models import AppUser, Document, Job, Library, Membership, Page, SourceFile
 from api.db.session import SessionFactory
 
 EMAIL = os.environ.get("BINDERY_EMAIL", "demo@example.com")
@@ -144,7 +148,63 @@ async def main() -> None:
         if settled:
             print(f"acknowledged {settled} pre-existing dead letter(s) to make the state known")
 
+        await _document_awaiting_review(session, library_id)
+
         await session.commit()
+
+
+async def _document_awaiting_review(session, library_id) -> None:
+    """One document the gate declined to file, for the correction specs.
+
+    Given a title the model would plausibly produce and a person would
+    plausibly want to fix, because that is the case Phase 17 exists for.
+    """
+    filename = "needs-a-correction.pdf"
+    existing = (
+        await session.execute(
+            sa.select(SourceFile).where(
+                SourceFile.library_id == library_id,
+                SourceFile.original_filename == filename,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        existing = SourceFile(
+            library_id=library_id,
+            sha256=uuid.uuid4().hex * 2,
+            byte_size=2048,
+            original_filename=filename,
+            ingest_source=IngestSource.WEB_UPLOAD,
+            page_count=1,
+            state=SourceFileState.PROCESSED,
+        )
+        session.add(existing)
+        await session.flush()
+        session.add(
+            Page(
+                source_file_id=existing.id,
+                page_number=1,
+                text="Harbour Utilities quarterly statement, account 4417.",
+            )
+        )
+
+    document = (
+        await session.execute(
+            sa.select(Document).where(Document.source_file_id == existing.id)
+        )
+    ).scalar_one_or_none()
+    if document is None:
+        document = Document(
+            library_id=library_id,
+            source_file_id=existing.id,
+            page_start=1,
+            page_end=1,
+            title="Harbour Utilties - Statment",  # the misspelling is the point
+        )
+        session.add(document)
+    document.review_state = ReviewState.NEEDS_REVIEW
+    await session.flush()
+    print(f"{filename} is waiting for review")
 
 
 asyncio.run(main())

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Pencil } from "lucide-react";
 
 import {
   ApiError,
@@ -10,6 +11,7 @@ import {
   fileUrl,
 } from "../../api";
 import { matchesTerm, queryTerms } from "../../lib/highlight";
+import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 import MoveToVault from "../vault/MoveToVault";
 
@@ -61,6 +63,8 @@ function Viewer({
   const boxes = query.trim() && detail ? fetchedBoxes : null;
   const [error, setError] = useState<string | null>(null);
   const [showWhy, setShowWhy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
     // No resetting here any more: the `key` above guarantees this component is
@@ -201,6 +205,19 @@ function Viewer({
                 Why?
               </button>
             )}
+            {mode === "document" && (
+              <button
+                onClick={() => setEditing((open) => !open)}
+                className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm ${
+                  editing
+                    ? "border-accent/60 bg-accent/10 text-accent"
+                    : "border-edge text-muted hover:border-accent/60"
+                }`}
+              >
+                <Pencil size={14} />
+                Edit
+              </button>
+            )}
             <Link
               to={`/file/${fileId}/segments`}
               className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted hover:border-accent/60"
@@ -227,6 +244,29 @@ function Viewer({
             </a>
           </div>
         </header>
+
+        {saved && (
+          <p className="mb-3 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-sm text-accent">
+            {saved}
+          </p>
+        )}
+
+        {editing && document_ && (
+          <div className="mb-4">
+            <EditPanel
+              detail={document_}
+              onCancel={() => setEditing(false)}
+              onSaved={(message) => {
+                setSaved(message);
+                setEditing(false);
+                // Re-read rather than patching local state: the server decides
+                // what actually changed, and the field badges have to come back
+                // from it or they will claim a source the row does not have.
+                void api.document(routeId).then(setDocument);
+              }}
+            />
+          </div>
+        )}
 
         <div className={showWhy ? "grid gap-6 xl:grid-cols-[1fr_22rem]" : ""}>
           <PageCanvas fileId={fileId} page={filePage} boxes={boxes} query={query} />

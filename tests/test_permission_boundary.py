@@ -239,6 +239,11 @@ EVERY_READ_PATH = [
     ("logs", "/api/logs"),
     ("pipeline files", "/api/pipeline/files"),
     ("photo wall", "/api/photos"),
+    # The edit form's pickers (Phase 17). A tag list that reaches across
+    # libraries would let one person enumerate another's taxonomy — which is
+    # not document content, but it is a map of what somebody keeps.
+    ("tags", "/api/tags"),
+    ("document types", "/api/document-types"),
 ]
 
 

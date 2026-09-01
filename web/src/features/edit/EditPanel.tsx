@@ -1,0 +1,374 @@
+import { useCallback, useEffect, useState } from "react";
+import { Check, Plus, Undo2, X } from "lucide-react";
+
+import {
+  api,
+  type DocumentDetail,
+  type DocumentEdit,
+  type TaxonomyOption,
+} from "../../api";
+import SourceBadge from "./SourceBadge";
+
+/**
+ * Correcting a document (REQ-188 to REQ-190).
+ *
+ * Two rules shape this form, and both are about not deciding things on the
+ * person's behalf:
+ *
+ * **Only what changed is sent.** A field left alone is omitted from the
+ * payload, not sent as its current value — sending everything would claim
+ * every field for the person the first time they fixed one, and freeze the
+ * whole document against AI review for good.
+ *
+ * **Clearing is explicit.** Emptying a field sends `null`, which the server
+ * treats as "remove this" — distinct from omitting it. Without that there is
+ * no way to delete a wrong date, only to replace it with another wrong one.
+ *
+ * New taxonomy is created by an explicit action, never by typing a name that
+ * happens not to match (invariant 6). The counts beside each option are there
+ * so a near-duplicate is obvious while choosing.
+ */
+export default function EditPanel({
+  detail,
+  onSaved,
+  onCancel,
+}: {
+  detail: DocumentDetail;
+  onSaved: (message: string) => void;
+  onCancel?: () => void;
+}) {
+  const { document: doc } = detail;
+  const sources = new Map(detail.field_sources.map((row) => [row.field_name, row]));
+
+  const [title, setTitle] = useState(doc.title ?? "");
+  const [summary, setSummary] = useState(doc.summary ?? "");
+  const [documentDate, setDocumentDate] = useState(doc.document_date ?? "");
+  const [correspondentId, setCorrespondentId] = useState(doc.correspondent_id ?? "");
+  const [typeId, setTypeId] = useState(doc.document_type_id ?? "");
+  const [newCorrespondent, setNewCorrespondent] = useState("");
+  const [newType, setNewType] = useState("");
+
+  const [tagIds, setTagIds] = useState<string[]>(detail.tags.map((t) => t.id));
+  const [newTags, setNewTags] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState("");
+
+  const [correspondents, setCorrespondents] = useState<{ id: string; name: string }[]>([]);
+  const [types, setTypes] = useState<TaxonomyOption[]>([]);
+  const [tagOptions, setTagOptions] = useState<TaxonomyOption[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadOptions = useCallback(async () => {
+    const [people, kinds, tags] = await Promise.all([
+      api.correspondents(),
+      api.documentTypeOptions(),
+      api.tagOptions(),
+    ]);
+    setCorrespondents(people.map((p) => ({ id: p.id, name: p.name })));
+    setTypes(kinds);
+    setTagOptions(tags);
+  }, []);
+
+  useEffect(() => {
+    // Three list endpoints: the pickers genuinely are not available at first
+    // render, and the form is useless without them.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadOptions();
+  }, [loadOptions]);
+
+  /** Omitted means "leave it alone"; null means "clear it". */
+  function changed(): DocumentEdit {
+    const edit: DocumentEdit = {};
+    const trimmedTitle = title.trim();
+    if (trimmedTitle !== (doc.title ?? "")) edit.title = trimmedTitle || null;
+    const trimmedSummary = summary.trim();
+    if (trimmedSummary !== (doc.summary ?? "")) edit.summary = trimmedSummary || null;
+    if (documentDate !== (doc.document_date ?? "")) {
+      edit.document_date = documentDate || null;
+    }
+    if (newCorrespondent.trim()) {
+      edit.create_correspondent = newCorrespondent.trim();
+    } else if (correspondentId !== (doc.correspondent_id ?? "")) {
+      edit.correspondent_id = correspondentId || null;
+    }
+    if (newType.trim()) {
+      edit.create_document_type = newType.trim();
+    } else if (typeId !== (doc.document_type_id ?? "")) {
+      edit.document_type_id = typeId || null;
+    }
+
+    const before = new Set(detail.tags.map((t) => t.id));
+    const added = tagIds.filter((id) => !before.has(id));
+    const removed = [...before].filter((id) => !tagIds.includes(id));
+    if (added.length) edit.add_tag_ids = added;
+    if (removed.length) edit.remove_tag_ids = removed;
+    if (newTags.length) edit.create_tags = newTags;
+    return edit;
+  }
+
+  async function save() {
+    const edit = changed();
+    if (Object.keys(edit).length === 0) {
+      onSaved("Nothing changed.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.editDocument(doc.id, edit);
+      const parts = [
+        result.changed.length ? `${result.changed.join(", ")} updated` : "",
+        result.tags_added.length ? `added ${result.tags_added.join(", ")}` : "",
+        result.tags_removed.length ? `removed ${result.tags_removed.join(", ")}` : "",
+      ].filter(Boolean);
+      onSaved(parts.join(" · ") || "Saved.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function undo() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.undo(doc.id);
+      onSaved("Reverted.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const known = new Map(tagOptions.map((t) => [t.id, t]));
+  const draft = tagDraft.trim();
+  const matches = draft
+    ? tagOptions.filter(
+        (t) =>
+          t.name.toLowerCase().includes(draft.toLowerCase()) && !tagIds.includes(t.id),
+      )
+    : [];
+  const exact = tagOptions.some((t) => t.name.toLowerCase() === draft.toLowerCase());
+
+  return (
+    <div className="space-y-4 rounded-xl border border-edge bg-surface p-4">
+      <Field label="Title" source={sources.get("title")}>
+        <input
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="Untitled"
+          className="w-full rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+        />
+      </Field>
+
+      <Field label="Date" source={sources.get("document_date")}>
+        <input
+          type="date"
+          value={documentDate}
+          onChange={(event) => setDocumentDate(event.target.value)}
+          className="rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+        />
+      </Field>
+
+      <Field label="From" source={sources.get("correspondent_id")}>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={correspondentId}
+            disabled={!!newCorrespondent.trim()}
+            onChange={(event) => setCorrespondentId(event.target.value)}
+            className="min-w-40 rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-40"
+          >
+            <option value="">— none —</option>
+            {correspondents.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.name}
+              </option>
+            ))}
+          </select>
+          <input
+            value={newCorrespondent}
+            onChange={(event) => setNewCorrespondent(event.target.value)}
+            placeholder="or create a new one…"
+            className="min-w-40 flex-1 rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+        </div>
+      </Field>
+
+      <Field label="Type" source={sources.get("document_type_id")}>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={typeId}
+            disabled={!!newType.trim()}
+            onChange={(event) => setTypeId(event.target.value)}
+            className="min-w-40 rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-40"
+          >
+            <option value="">— none —</option>
+            {types.map((kind) => (
+              <option key={kind.id} value={kind.id}>
+                {kind.name} ({kind.document_count})
+              </option>
+            ))}
+          </select>
+          <input
+            value={newType}
+            onChange={(event) => setNewType(event.target.value)}
+            placeholder="or create a new one…"
+            className="min-w-40 flex-1 rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+        </div>
+      </Field>
+
+      <div>
+        <span className="text-xs text-muted">Tags</span>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {tagIds.map((id) => (
+            <Chip
+              key={id}
+              label={known.get(id)?.name ?? detail.tags.find((t) => t.id === id)?.name ?? "tag"}
+              onRemove={() => setTagIds((ids) => ids.filter((each) => each !== id))}
+            />
+          ))}
+          {newTags.map((name) => (
+            <Chip
+              key={`new:${name}`}
+              label={name}
+              isNew
+              onRemove={() => setNewTags((names) => names.filter((each) => each !== name))}
+            />
+          ))}
+        </div>
+        <input
+          value={tagDraft}
+          onChange={(event) => setTagDraft(event.target.value)}
+          placeholder="Find a tag, or type a new name…"
+          className="mt-2 w-full rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+        />
+        {draft && (
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {matches.slice(0, 6).map((tag) => (
+              <button
+                key={tag.id}
+                type="button"
+                onClick={() => {
+                  setTagIds((ids) => [...ids, tag.id]);
+                  setTagDraft("");
+                }}
+                className="rounded-full border border-edge px-2.5 py-1 text-xs hover:border-accent/60"
+              >
+                {tag.name} <span className="text-muted">({tag.document_count})</span>
+              </button>
+            ))}
+            {/* Creating is its own action, never a fallback for a name that
+                did not match something (invariant 6). */}
+            {!exact && (
+              <button
+                type="button"
+                onClick={() => {
+                  setNewTags((names) => [...new Set([...names, draft])]);
+                  setTagDraft("");
+                }}
+                className="flex items-center gap-1 rounded-full border border-accent/60 bg-accent/10 px-2.5 py-1 text-xs text-accent"
+              >
+                <Plus size={11} /> Create “{draft}”
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <Field label="Summary" source={sources.get("summary")}>
+        <textarea
+          value={summary}
+          onChange={(event) => setSummary(event.target.value)}
+          rows={3}
+          className="w-full rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+        />
+      </Field>
+
+      {error && (
+        <p className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300">
+          {error}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={busy}
+          className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
+        >
+          <Check size={14} /> {busy ? "Saving…" : "Save"}
+        </button>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg border border-edge px-3 py-2 text-sm text-muted hover:text-neutral-100"
+          >
+            Cancel
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => void undo()}
+          disabled={busy}
+          title="Walk back the last change to this document"
+          className="ml-auto flex items-center gap-1.5 text-xs text-muted underline underline-offset-2 hover:text-neutral-100 disabled:opacity-40"
+        >
+          <Undo2 size={12} /> Undo last change
+        </button>
+      </div>
+
+      <p className="text-xs text-muted">
+        What you set here is yours. AI review will keep improving the fields you
+        have not touched and will leave the ones you have.
+      </p>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  source,
+  children,
+}: {
+  label: string;
+  source?: { source: "ai" | "rule" | "human"; set_at: string | null };
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs text-muted">{label}</span>
+        <SourceBadge source={source?.source} when={source?.set_at} />
+      </div>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+function Chip({
+  label,
+  onRemove,
+  isNew = false,
+}: {
+  label: string;
+  onRemove: () => void;
+  isNew?: boolean;
+}) {
+  return (
+    <span
+      className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ${
+        isNew ? "border border-accent/60 bg-accent/10 text-accent" : "border border-edge"
+      }`}
+    >
+      {label}
+      <button type="button" onClick={onRemove} aria-label={`Remove ${label}`}>
+        <X size={11} />
+      </button>
+    </span>
+  );
+}

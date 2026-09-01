@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { ApiError, api, type WhyPanel as WhyPanelData } from "../../api";
 import OcrTextPanel from "../../components/OcrText";
+import SourceBadge from "../edit/SourceBadge";
 
 /**
  * Why every AI-written field says what it says (REQ-063).
@@ -58,6 +59,11 @@ export default function WhyPanel({
 
   const { classification, provenance, tags } = data;
   const byField = new Map(provenance.map((row) => [row.field_name, row]));
+  // `provenance` explains AI values and can only ever explain AI values — it
+  // hangs off a classification. This is the half that says "you set this",
+  // which is the question people actually bring to this panel after they have
+  // corrected something and want to know whether it stuck.
+  const bySource = new Map(data.field_sources.map((row) => [row.field_name, row]));
 
   return (
     <aside className="rounded-lg border border-edge bg-surface">
@@ -97,10 +103,37 @@ export default function WhyPanel({
         </div>
       )}
 
-      {!classification ? (
-        <p className="p-4 text-sm text-muted">
-          Set manually — there is no AI provenance for this document.
+      {data.field_sources.some((row) => row.source === "human") && (
+        <p className="border-b border-edge px-4 py-3 text-sm text-muted">
+          Fields marked{" "}
+          <span className="text-accent">you set this</span> are yours. AI review
+          will keep improving the rest and will leave those alone.
         </p>
+      )}
+
+      {!classification ? (
+        <div className="divide-y divide-edge">
+          <p className="px-4 py-3 text-sm text-muted">
+            No AI has looked at this document, so there is no model reasoning to
+            show — only who set what.
+          </p>
+          {["title", "document_date", "correspondent_id", "document_type_id"].map(
+            (field) => {
+              const set = bySource.get(field);
+              if (!set) return null;
+              return (
+                <section key={field} className="px-4 py-3">
+                  <p className="flex items-baseline justify-between gap-2">
+                    <span className="text-xs tracking-wide text-muted uppercase">
+                      {field.replace(/_id$/, "").replace(/_/g, " ")}
+                    </span>
+                    <SourceBadge source={set.source} when={set.set_at} />
+                  </p>
+                </section>
+              );
+            },
+          )}
+        </div>
       ) : (
         <div className="divide-y divide-edge">
           {["title", "document_date", "correspondent", "document_type"].map((field) => {
@@ -112,7 +145,19 @@ export default function WhyPanel({
                   <span className="text-xs tracking-wide text-muted uppercase">
                     {field.replace(/_/g, " ")}
                   </span>
-                  {confidence !== undefined && <Confidence value={confidence} />}
+                  <span className="flex items-center gap-2">
+                    <SourceBadge
+                      source={
+                        bySource.get(field)?.source ??
+                        bySource.get(`${field}_id`)?.source
+                      }
+                      when={
+                        bySource.get(field)?.set_at ??
+                        bySource.get(`${field}_id`)?.set_at
+                      }
+                    />
+                    {confidence !== undefined && <Confidence value={confidence} />}
+                  </span>
                 </p>
                 {row ? (
                   <>

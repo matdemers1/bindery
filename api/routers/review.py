@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import events
+from api import events, field_source
 from api import undo as undo_module
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -32,6 +32,7 @@ from api.schemas import (
     DocumentOut,
     ExtractionOut,
     FieldProvenanceOut,
+    FieldSourceOut,
     ReviewQueueOut,
     TagOut,
     WhyPanelOut,
@@ -144,6 +145,8 @@ async def why(
         )
     ).one()
 
+    sources = await field_source.sources_for(session, document_id)
+
     return WhyPanelOut(
         source_file_id=document.source_file_id,
         extraction=ExtractionOut(
@@ -154,6 +157,16 @@ async def why(
             ClassificationOut.model_validate(classification) if classification else None
         ),
         provenance=[FieldProvenanceOut.model_validate(row) for row in provenance],
+        field_sources=[
+            FieldSourceOut(
+                field_name=row.field_name,
+                source=row.source.value,
+                set_by=row.set_by,
+                set_at=row.set_at,
+                event_id=row.set_by_event_id,
+            )
+            for row in sources.values()
+        ],
         tags=[
             TagOut(id=tag_id, name=name, source=TagSource(source).value)
             for tag_id, name, source in tags

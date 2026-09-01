@@ -1,9 +1,10 @@
 import PageThumb from "../../components/PageThumb";
-import { ClipboardCheck } from "lucide-react";
+import { ClipboardCheck, Pencil } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
-import { ApiError, api, type Document } from "../../api";
+import { ApiError, api, type Document, type DocumentDetail } from "../../api";
+import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 
 /**
@@ -22,6 +23,7 @@ export default function ReviewPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [correcting, setCorrecting] = useState<DocumentDetail | null>(null);
 
   const load = useCallback(async () => {
     const queue = await api.review();
@@ -143,6 +145,31 @@ export default function ReviewPage() {
               >
                 Accept
               </button>
+              {/* The case the queue had no expression for. Until now the only
+                  answers were "accept all of it" and "throw all of it away",
+                  so "this is right except the date" meant accepting something
+                  wrong or rejecting something mostly right. */}
+              <button
+                onClick={() => {
+                  if (correcting) {
+                    setCorrecting(null);
+                    return;
+                  }
+                  void api
+                    .document(current.id)
+                    .then(setCorrecting)
+                    .catch(() => setNotice("Could not open this for editing."));
+                }}
+                disabled={busy}
+                className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm disabled:opacity-40 ${
+                  correcting
+                    ? "border-accent/60 bg-accent/10 text-accent"
+                    : "border-edge hover:border-accent/60"
+                }`}
+              >
+                <Pencil size={14} />
+                Correct
+              </button>
               <button
                 onClick={() => act("undo")}
                 disabled={busy}
@@ -158,6 +185,20 @@ export default function ReviewPage() {
               </Link>
             </div>
           </div>
+
+          {correcting && correcting.document.id === current.id && (
+            <div className="mb-3">
+              <EditPanel
+                detail={correcting}
+                onCancel={() => setCorrecting(null)}
+                onSaved={(message) => {
+                  setCorrecting(null);
+                  setNotice(`${message} — accept when you are happy with it.`);
+                  void load();
+                }}
+              />
+            </div>
+          )}
 
           <ul className="flex gap-2 overflow-x-auto rounded-lg border border-edge bg-surface p-3">
             {pages.map((page) => (

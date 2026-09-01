@@ -1,12 +1,13 @@
 import uuid
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import editing, events, field_source
 from api.auth.dependencies import current_user
 from api.db import repository
-from api.db.models import AppUser, KnownForm
+from api.db.models import AppUser, DocumentTag, KnownForm, Tag, live_tag_links
 from api.db.session import get_session
 from api.schemas import (
     DocumentDetailOut,
@@ -18,6 +19,7 @@ from api.schemas import (
     LibraryOut,
     PageOut,
     SourceFileOut,
+    TagOut,
 )
 
 router = APIRouter(tags=["archive"])
@@ -87,6 +89,14 @@ async def get_document(
     ]
 
     sources = await field_source.sources_for(session, document.id)
+    tags = (
+        await session.execute(
+            sa.select(Tag.id, Tag.name, DocumentTag.source)
+            .join(DocumentTag, DocumentTag.tag_id == Tag.id)
+            .where(DocumentTag.document_id == document.id, live_tag_links())
+            .order_by(Tag.name)
+        )
+    ).all()
 
     return DocumentDetailOut(
         document=DocumentOut.model_validate(document),
@@ -102,6 +112,10 @@ async def get_document(
                 event_id=row.set_by_event_id,
             )
             for row in sources.values()
+        ],
+        tags=[
+            TagOut(id=tag_id, name=name, source=source.value)
+            for tag_id, name, source in tags
         ],
     )
 

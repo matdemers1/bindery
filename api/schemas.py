@@ -75,6 +75,12 @@ class DocumentOut(BaseModel):
     review_state: str
     is_backlog: bool
     known_form_id: uuid.UUID | None
+    # Needed by the edit form to show what is currently set (REQ-188). Ids
+    # rather than names, because that is what an edit sends back — a form that
+    # displayed a name and posted a name would be resolving taxonomy by string,
+    # which invariant 6 forbids.
+    correspondent_id: uuid.UUID | None = None
+    document_type_id: uuid.UUID | None = None
     created_at: datetime
 
     @property
@@ -188,6 +194,11 @@ class DocumentDetailOut(BaseModel):
     # Who set each field. Empty for a document nobody has corrected and no
     # classification has claimed — which is every document older than Phase 17.
     field_sources: list[FieldSourceOut] = []
+    # Live tag links, with the source on each. The edit form needs to know what
+    # is on the document before it can offer to take any of it off.
+    # Forward reference: TagOut is defined below, and moving it up here
+    # would separate it from the other taxonomy shapes for no gain.
+    tags: list["TagOut"] = []
 
 
 class PageHitOut(BaseModel):
@@ -248,6 +259,19 @@ class TagOut(BaseModel):
     source: str
 
 
+class TaxonomyOptionOut(BaseModel):
+    """One pickable tag or document type, for the edit form (REQ-190).
+
+    Just an id, a name and a count — the count is what makes an accidental
+    near-duplicate obvious at the moment of choosing rather than on the
+    Organise screen a month later.
+    """
+
+    id: uuid.UUID
+    name: str
+    document_count: int = 0
+
+
 class ClassificationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
@@ -301,6 +325,11 @@ class WhyPanelOut(BaseModel):
     extraction: ExtractionOut
     # So the screen can offer a rescan without a second round trip.
     source_file_id: uuid.UUID
+    # Who decided each field (REQ-064). `provenance` above explains AI values
+    # and can only ever explain AI values — it hangs off a classification. This
+    # is the half that can say "a person set this", which is what makes the
+    # panel answer the question people actually ask of it.
+    field_sources: list["FieldSourceOut"] = []
 
 
 class ReviewQueueOut(BaseModel):
@@ -790,6 +819,7 @@ __all__ = [
     "StageCount",
     "TagOut",
     "TaxonomyHealthOut",
+    "TaxonomyOptionOut",
     "TreeGroupOut",
     "TreeOut",
     "UploadResult",

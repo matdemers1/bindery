@@ -446,6 +446,35 @@ harness.
 `infra/zimaos/bindery.zimaos.yaml` is the CasaOS custom-app manifest. It must
 never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
 
+## Corrections (Phase 17)
+
+`PATCH /documents/{id}`, `api/editing.py`, `api/field_source.py`. The archive
+could find any document in ten seconds and could not fix one of them.
+
+- **`field_source` is what makes a correction survive.** Per field, not per
+  document: the model still improves the nine fields nobody corrected and
+  leaves the one they did. Not `field_provenance` — that hangs off a
+  classification and records the page and snippet behind an AI value, which is
+  provenance of *evidence*. This is provenance of *authority*, and a document
+  can have excellent evidence for a value a person has since overruled.
+- **The failure to design against is the silent revert**, not a bad edit. Bad
+  edits undo. Correcting a date and having AI review put it back three days
+  later teaches people not to bother correcting anything.
+- **Absent is not null.** A PATCH that omits `title` leaves it alone; one that
+  sends `null` clears it. Without the distinction there is no way to remove a
+  wrong date, only to replace it with another wrong date. A no-op is also not
+  recorded — otherwise opening the form and saving freezes every field.
+- **Creating taxonomy is an explicit act** (`create_correspondent`,
+  `create_tags`), never a name falling through to a create because it matched
+  nothing. Invariant 6 is about how reuse resolves, and a form that posts names
+  resolves by string.
+- **Undo releases the claims and restores the tags**, read from a manifest the
+  edit recorded. Inferring "which tags did this edit touch" from timestamps
+  sweeps up what a *later* edit did.
+- **`field_source` rows are released, never deleted** — `released_at`, the same
+  shape as `document_tag.removed_at`. The destructive-paths guard says revoke or
+  tombstone rather than loosen the pattern list, and it was right.
+
 ## The private vault (Phase 16)
 
 A second lock with its own passphrase, for documents that would otherwise not go

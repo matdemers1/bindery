@@ -100,6 +100,8 @@ export interface Document {
   review_state: string;
   is_backlog: boolean;
   known_form_id: string | null;
+  correspondent_id: string | null;
+  document_type_id: string | null;
   created_at: string;
 }
 
@@ -116,6 +118,9 @@ export interface DocumentDetail {
   source_file: SourceFile;
   known_form: KnownForm | null;
   pages: PageSummary[];
+  /** Empty for a document nobody has corrected and no classifier has claimed. */
+  field_sources: FieldSourceRef[];
+  tags: TagRef[];
 }
 
 export interface SegmentList {
@@ -226,6 +231,8 @@ export interface WhyPanel {
   tags: TagRef[];
   extraction: Extraction;
   source_file_id: string;
+  /** Who decided each field — the half provenance cannot express. */
+  field_sources: FieldSourceRef[];
 }
 
 export interface ReviewQueue {
@@ -631,6 +638,14 @@ export const api = {
     request<BulkResult>(`/bulk/${operationId}/undo`, { method: "POST" }),
 
   correspondents: () => request<CorrespondentRef[]>("/correspondents"),
+  tagOptions: () => request<TaxonomyOption[]>("/tags"),
+  documentTypeOptions: () => request<TaxonomyOption[]>("/document-types"),
+  editDocument: (id: string, changes: DocumentEdit) =>
+    request<DocumentEditResult>(`/documents/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
+    }),
   addAlias: (id: string, alias: string) =>
     request<CorrespondentRef>(
       `/correspondents/${id}/aliases?alias=${encodeURIComponent(alias)}`,
@@ -1221,6 +1236,52 @@ export interface VaultSearchResults {
   pages_scanned: number;
   elapsed_ms: number;
   slow: boolean;
+}
+
+// --------------------------------------------------------------------------
+// Corrections (Phase 17)
+// --------------------------------------------------------------------------
+
+/** Who set one field. What makes an AI value look different from yours. */
+export interface FieldSourceRef {
+  field_name: string;
+  source: "ai" | "rule" | "human";
+  set_by: string | null;
+  set_at: string | null;
+  event_id: string | null;
+}
+
+export interface TaxonomyOption {
+  id: string;
+  name: string;
+  document_count: number;
+}
+
+/**
+ * A correction. Every key optional, and **omitting one is not the same as
+ * sending null**: omit to leave a field alone, send null to clear it. The
+ * client mirrors the server here — only keys actually present are sent.
+ */
+export interface DocumentEdit {
+  title?: string | null;
+  summary?: string | null;
+  document_date?: string | null;
+  correspondent_id?: string | null;
+  document_type_id?: string | null;
+  create_correspondent?: string;
+  create_document_type?: string;
+  add_tag_ids?: string[];
+  remove_tag_ids?: string[];
+  create_tags?: string[];
+}
+
+export interface DocumentEditResult {
+  document: Document;
+  changed: string[];
+  tags_added: string[];
+  tags_removed: string[];
+  created: Record<string, string>;
+  event_id: string | null;
 }
 
 export const fileUrl = {

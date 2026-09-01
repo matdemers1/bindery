@@ -107,7 +107,7 @@
     {
       "route": "/review",
       "title": "Review",
-      "blurb": "The documents Bindery was not confident enough to file on its own.",
+      "blurb": "The documents Bindery was not confident enough to file on its own — and where you correct the ones it got wrong.",
       "screenshot": "review.png",
       "sections": [
         {
@@ -115,6 +115,15 @@
           "body": [
             "Filing is decided on **structural facts**, not on how confident the model says it is: whether the document matched a known form, whether every tag it chose already existed, whether the date was quoted from a labelled field.",
             "Model confidence is shown, because it is interesting, and is deliberately not part of the decision. It is not well calibrated, and a system that files on it files wrongly with conviction."
+          ]
+        },
+        {
+          "heading": "Correcting it, then accepting",
+          "body": [
+            "**Correct** opens the fields inline. Fix the title, the date, who it is from, its type, and its tags — then **Accept**. Until now the only answers were \"accept all of it\" and \"throw all of it away\", so \"this is right except the date\" meant accepting something wrong or rejecting something mostly right.",
+            "**What you set is yours.** Re-running AI review will keep improving the fields you have not touched and will leave the ones you have. A field you set is marked *you set this*, so finding it unchanged after a review run reads as correct rather than broken.",
+            "Every correction is one undoable action. **Undo last change** walks back the whole edit — the fields, the tags you added, and the tags you removed — and hands the fields back to AI review.",
+            "Typing a name that does not exist yet offers to **create** it, as an explicit choice. Nothing is ever matched by resemblance: taxonomy is linked by identity, so two things with similar names stay two things until you merge them on Organise."
           ]
         },
         {

@@ -23,6 +23,8 @@ from api.db.models import (
     CorrespondentAlias,
     Document,
     DocumentAsset,
+    DocumentTag,
+    DocumentType,
     DuplicatePair,
     SavedSearch,
     Tag,
@@ -40,6 +42,7 @@ from api.schemas import (
     SavedSearchOut,
     SimilarOut,
     TaxonomyHealthOut,
+    TaxonomyOptionOut,
     UnifyApplyIn,
     UnifyProposalOut,
 )
@@ -103,6 +106,76 @@ async def list_correspondents(
             )
         )
     return out
+
+
+@router.get("/tags", response_model=list[TaxonomyOptionOut])
+async def list_tags(
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list:
+    """Every tag the caller can reach, for the edit form's picker (REQ-190).
+
+    Counts included so a near-duplicate is obvious while choosing — "banking
+    (142)" next to "banking (1)" is the moment to notice, rather than on the
+    Organise screen a month later.
+    """
+    library_ids = await repository.visible_library_ids(session, user.id)
+    if not library_ids:
+        return []
+    rows = (
+        await session.execute(
+            sa.select(
+                Tag,
+                sa.select(sa.func.count())
+                .select_from(DocumentTag)
+                .join(Document, Document.id == DocumentTag.document_id)
+                .where(
+                    DocumentTag.tag_id == Tag.id,
+                    DocumentTag.removed_at.is_(None),
+                    live(),
+                )
+                .scalar_subquery()
+                .label("document_count"),
+            )
+            .where(Tag.library_id.in_(library_ids), Tag.merged_at.is_(None))
+            .order_by(Tag.name)
+        )
+    ).all()
+    return [
+        TaxonomyOptionOut(id=tag.id, name=tag.name, document_count=count)
+        for tag, count in rows
+    ]
+
+
+@router.get("/document-types", response_model=list[TaxonomyOptionOut])
+async def list_document_types(
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list:
+    library_ids = await repository.visible_library_ids(session, user.id)
+    if not library_ids:
+        return []
+    rows = (
+        await session.execute(
+            sa.select(
+                DocumentType,
+                sa.select(sa.func.count())
+                .select_from(Document)
+                .where(Document.document_type_id == DocumentType.id, live())
+                .scalar_subquery()
+                .label("document_count"),
+            )
+            .where(
+                DocumentType.library_id.in_(library_ids),
+                DocumentType.merged_at.is_(None),
+            )
+            .order_by(DocumentType.name)
+        )
+    ).all()
+    return [
+        TaxonomyOptionOut(id=kind.id, name=kind.name, document_count=count)
+        for kind, count in rows
+    ]
 
 
 @router.post("/correspondents/{correspondent_id}/aliases", response_model=CorrespondentOut)
