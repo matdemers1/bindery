@@ -198,12 +198,12 @@ jobs:
           docker compose --env-file .env -f infra/docker-compose.yml exec -T \
             -e BINDERY_EMAIL=demo@example.com api \
             python - < scripts/seed-e2e-states.py
-          BINDERY_EMAIL: demo@example.com
 
       - name: Playwright
         run: |
           docker compose --env-file .env -f infra/docker-compose.yml \
             --profile e2e run --rm e2e
+        env:
           BINDERY_EMAIL: demo@example.com
           CI: "true"
       - name: What the stack said, if it failed
