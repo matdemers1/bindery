@@ -19,7 +19,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
+      "source_commit": "6743e7c6587e6079a8c38af50445648a9110195a"
     },
     {
       "route": "/add",
@@ -29,7 +29,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
+      "source_commit": "6743e7c6587e6079a8c38af50445648a9110195a"
     },
     {
       "route": "/files",
