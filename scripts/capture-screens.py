@@ -95,7 +95,16 @@ async def _prepare_vault(page) -> None:
               .then((r) => r.json());
             if (state.exists) {
               if (state.unlocked) return 'already open';
-              return 'exists but locked — not guessing at its secret';
+              // Its own credential, not a guess: this script is what created
+              // the vault on a demonstration stack. If the passphrase has been
+              // changed it stays shut, which is the right outcome.
+              const opened = await fetch('/api/vault/unlock', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({passphrase: 'demonstration vault passphrase'}),
+              });
+              return opened.ok ? 'unlocked' : 'exists and stayed shut';
             }
             const made = await fetch('/api/vault/setup', {
               method: 'POST',

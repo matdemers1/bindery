@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
   FileLock2,
+  Images,
   Lock,
   LockOpen,
   Search,
@@ -12,6 +13,7 @@ import {
 import { api, fileUrl, type VaultItem, type VaultSearchResults, type VaultState } from "../../api";
 import PageHeader from "../../components/PageHeader";
 import SetupForm from "./SetupForm";
+import VaultGrid from "./VaultGrid";
 import UnlockForm from "./UnlockForm";
 
 /**
@@ -31,6 +33,10 @@ export default function VaultPage() {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<VaultSearchResults | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Null until the person picks one, so the default can follow what is
+  // actually in the vault: opening on an empty Documents tab because
+  // everything you vaulted was a photograph is the wrong first impression.
+  const [tab, setTab] = useState<"documents" | "photos" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (next: VaultState) => {
@@ -88,6 +94,10 @@ export default function VaultPage() {
   if (!state) {
     return <p className="text-sm text-muted">Loading…</p>;
   }
+
+  const photos = items.filter((item) => item.is_image);
+  const documents = items.filter((item) => !item.is_image);
+  const active = tab ?? (documents.length === 0 && photos.length > 0 ? "photos" : "documents");
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -181,46 +191,86 @@ export default function VaultPage() {
               “Move to vault”.
             </p>
           ) : (
-            <ul className="space-y-2">
-              {items.map((item) => (
-                <li
-                  key={item.document_id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-edge bg-surface p-3"
-                >
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-2 truncate text-sm font-medium">
-                      <FileLock2 size={14} className="shrink-0 text-muted" />
-                      {item.title ?? item.original_filename ?? "Untitled"}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted">
-                      {item.page_count} page{item.page_count === 1 ? "" : "s"} ·{" "}
-                      {(item.byte_size / 1024 / 1024).toFixed(1)} MB
-                      {item.vaulted_at && ` · vaulted ${item.vaulted_at.slice(0, 10)}`}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <a
-                      href={fileUrl.vaultOriginal(item.document_id)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
-                    >
-                      Open original
-                    </a>
+            <>
+              {/* Two kinds of thing, two shapes. A photograph in a table row is
+                  as unhelpful here as it is on the Photos screen. */}
+              <div className="flex gap-1 border-b border-edge">
+                {(["documents", "photos"] as const).map((which) => {
+                  const count =
+                    which === "photos" ? photos.length : documents.length;
+                  const Icon = which === "photos" ? Images : FileLock2;
+                  return (
                     <button
+                      key={which}
                       type="button"
-                      onClick={() => void moveOut(item.document_id)}
-                      disabled={busy === item.document_id}
-                      title="Decrypt it back into the archive, where it becomes searchable again"
-                      className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+                      onClick={() => setTab(which)}
+                      className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm capitalize ${
+                        active === which
+                          ? "border-accent text-accent"
+                          : "border-transparent text-muted hover:text-neutral-100"
+                      }`}
                     >
-                      <Undo2 size={13} />
-                      {busy === item.document_id ? "Restoring…" : "Take out"}
+                      <Icon size={14} />
+                      {which}
+                      <span className="text-xs text-muted">{count}</span>
                     </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  );
+                })}
+              </div>
+
+              {active === "photos" ? (
+                <VaultGrid
+                  items={photos}
+                  busy={busy}
+                  onTakeOut={(id) => void moveOut(id)}
+                />
+              ) : documents.length === 0 ? (
+                <p className="rounded-xl border border-edge bg-surface p-8 text-center text-sm text-muted">
+                  Everything in the vault is a picture — they are under Photos.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {documents.map((item) => (
+                    <li
+                      key={item.document_id}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-edge bg-surface p-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-2 truncate text-sm font-medium">
+                          <FileLock2 size={14} className="shrink-0 text-muted" />
+                          {item.title ?? item.original_filename ?? "Untitled"}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted">
+                          {item.page_count} page{item.page_count === 1 ? "" : "s"} ·{" "}
+                          {(item.byte_size / 1024 / 1024).toFixed(1)} MB
+                          {item.vaulted_at && ` · vaulted ${item.vaulted_at.slice(0, 10)}`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={fileUrl.vaultOriginal(item.document_id)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
+                        >
+                          Open original
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => void moveOut(item.document_id)}
+                          disabled={busy === item.document_id}
+                          title="Decrypt it back into the archive, where it becomes searchable again"
+                          className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+                        >
+                          <Undo2 size={13} />
+                          {busy === item.document_id ? "Restoring…" : "Take out"}
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
           )}
 
           <p className="text-xs text-muted">

@@ -1221,6 +1221,8 @@ export interface VaultItem {
   page_count: number;
   vaulted_at: string | null;
   warnings: string[];
+  media_type: string | null;
+  is_image: boolean;
 }
 
 export interface VaultSearchHit {

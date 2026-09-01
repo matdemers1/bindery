@@ -673,6 +673,11 @@ class VaultItemOut(BaseModel):
     page_count: int = 0
     vaulted_at: datetime | None = None
     warnings: list[str] = []
+    # So the vault can show photographs as photographs. Derived from the
+    # filename when the stored type is null, which is every item sealed before
+    # the `mime_type` typo was fixed.
+    media_type: str | None = None
+    is_image: bool = False
 
 
 class VaultSearchHitOut(BaseModel):

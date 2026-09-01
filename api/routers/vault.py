@@ -171,14 +171,18 @@ async def items(
     out = []
     for item in rows:
         meta = store.open_meta(item, key)
+        media_type = store.media_type_for(item, meta)
+        filename = meta.get("original_filename")
         out.append(
             VaultItemOut(
                 document_id=item.document_id,
                 title=meta.get("title"),
-                original_filename=meta.get("original_filename"),
+                original_filename=filename,
                 byte_size=item.byte_size,
                 page_count=item.page_count,
                 vaulted_at=item.vaulted_at,
+                media_type=media_type,
+                is_image=store.is_image(media_type, filename),
             )
         )
     return out
@@ -335,9 +339,14 @@ async def original(
         payload = store.open_object(item.object_name, document_id, key)
     except store.VaultRefused as error:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(error)) from error
+
+    # Falls back to the filename rather than octet-stream, or a photograph
+    # downloads instead of displaying — which is what every item sealed before
+    # the `mime_type` fix would otherwise still do.
+    media_type = store.media_type_for(item, store.open_meta(item, key))
     return Response(
         content=payload,
-        media_type=item.original_media_type or "application/octet-stream",
+        media_type=media_type or "application/octet-stream",
         headers={
             # No caching anywhere. A decrypted vault document sitting in a
             # browser or proxy cache outlives the unlock that authorised it.

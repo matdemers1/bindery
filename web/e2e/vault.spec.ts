@@ -107,3 +107,39 @@ test("search offers the vault but does not look in it unasked", async ({
   await panel.click();
   await expect(page.getByText(/The vault is locked/)).toBeVisible();
 });
+
+test("the vault separates documents from photos", async ({ signedIn: page }) => {
+  const state = await page.evaluate(async () => {
+    const r = await fetch("/api/vault", { credentials: "same-origin" });
+    return r.json();
+  });
+  test.skip(!state.exists, "no vault on this account");
+
+  // Normalise to shut, then open it — rather than testing `count()` on a form
+  // that may not have rendered yet. `count()` does not auto-wait, so the
+  // conditional silently skips and the unlock never happens.
+  await lockedVault(page);
+  await page.goto("/vault");
+  await page.getByLabel("Vault PIN").fill(PIN);
+  await page.getByRole("button", { name: "Unlock" }).click();
+  await expect(page.getByText(/Open\. It locks itself/)).toBeVisible();
+
+  const items = await page.evaluate(async () => {
+    const r = await fetch("/api/vault/items", { credentials: "same-origin" });
+    return r.json();
+  });
+  test.skip(items.length === 0, "nothing in the vault to split");
+
+  // Both tabs are offered whenever the vault holds anything at all.
+  // Case-insensitive: the labels are capitalised by CSS, which does not change
+  // the accessible name — it is still the lowercase text in the DOM.
+  await expect(page.getByRole("button", { name: /documents/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /photos/i })).toBeVisible();
+
+  if (items.some((item: { is_image: boolean }) => item.is_image)) {
+    await page.getByRole("button", { name: /photos/i }).click();
+    // Rendered, not listed: an <img> whose source is the decrypted original.
+    const picture = page.locator('img[src*="/api/vault/items/"]').first();
+    await expect(picture).toBeVisible();
+  }
+});

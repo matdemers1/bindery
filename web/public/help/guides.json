@@ -179,6 +179,15 @@
           ]
         },
         {
+          "heading": "Documents and photos",
+          "body": [
+            "The vault splits into two tabs, because a photograph in a table row is as unhelpful here as it is anywhere else. **Photos** shows them as pictures; **Documents** lists everything else. If everything you have vaulted is a picture, the vault opens on Photos.",
+            "Once the vault is open, its contents are readable — pictures included. Clicking one opens it full size, with **Take out of the vault** beside it.",
+            "These are the full originals, decrypted for you as the page loads. There are no thumbnails on purpose: a thumbnail is a plaintext copy of the thing you are hiding, and generating them would put that copy back on disk. Nothing here is cached, so locking the vault makes it unreadable again immediately.",
+            "A format your browser cannot draw — usually HEIC outside Safari — shows as a placeholder rather than an empty square. **Open original** still hands you the file."
+          ]
+        },
+        {
           "heading": "The passphrase and the PIN",
           "body": [
             "The passphrase is the real key and **cannot be recovered**. It is not stored anywhere — only a copy of the vault key wrapped with it. Nothing in Bindery, in the database, or in any backup can open the vault without it. Write it down somewhere physical.",

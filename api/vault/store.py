@@ -22,6 +22,7 @@ had, and the ciphertext — so "what happened to that?" stays answerable forever
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 import secrets
 import uuid
@@ -40,6 +41,13 @@ from api.storage.blobs import blob_path
 from api.vault import crypto
 
 log = logging.getLogger("bindery.vault")
+
+# What the vault shows as pictures rather than as rows. Matches the photo
+# wall's list, because "is this a photograph" should not have two answers.
+IMAGE_SUFFIXES = (
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff",
+    ".heic", ".heif",
+)
 
 # Stages that are still going to want the plaintext. Vaulting something mid-
 # pipeline would seal a half-read document and leave jobs pointing at bytes
@@ -184,7 +192,12 @@ async def seal(
     meta = {
         "title": document.title,
         "original_filename": source.original_filename,
-        "media_type": getattr(source, "media_type", None),
+        # `source.mime_type`, not `media_type`. The first version read the
+        # wrong attribute through `getattr(..., None)`, which swallowed the
+        # typo silently: every vaulted item got a null type, every download
+        # was served as application/octet-stream, and photographs downloaded
+        # instead of displaying.
+        "media_type": source.mime_type,
         "page_start": document.page_start,
         "page_end": document.page_end,
         "document_date": document.document_date.isoformat()
@@ -199,7 +212,7 @@ async def seal(
         byte_size=len(original),
         sealed_sha256=crypto.encrypt(source.sha256.encode(), data_key),
         sealed_meta=crypto.encrypt(json.dumps(meta).encode(), data_key),
-        original_media_type=getattr(source, "media_type", None),
+        original_media_type=source.mime_type,
         page_count=len(pages),
     )
     session.add(item)
@@ -262,6 +275,37 @@ def open_object(object_name: str, document_id: uuid.UUID, data_key: bytes) -> by
 
 def open_meta(item: VaultItem, data_key: bytes) -> dict:
     return json.loads(crypto.decrypt(item.sealed_meta, data_key).decode())
+
+
+def media_type_for(item: VaultItem, meta: dict) -> str | None:
+    """What this is, so a browser renders it rather than downloading it.
+
+    Falls back to the filename when the column is null, which covers every
+    item sealed before the `mime_type` typo above was fixed. Guessing from an
+    extension is weak in general and exactly right here: the alternative is
+    `application/octet-stream`, under which a photograph is a file you save
+    rather than a picture you look at.
+    """
+    if item.original_media_type:
+        return item.original_media_type
+    filename = meta.get("original_filename")
+    if not filename:
+        return None
+    return mimetypes.guess_type(filename)[0]
+
+
+def is_image(media_type: str | None, filename: str | None) -> bool:
+    """Whether the vault should show this as a picture.
+
+    The media type first; the extension when there is none. HEIC is included
+    because an iPhone camera roll is most of what anyone vaults, and Safari
+    renders it natively even where other browsers do not.
+    """
+    if media_type and media_type.startswith("image/"):
+        return True
+    if filename:
+        return filename.lower().endswith(IMAGE_SUFFIXES)
+    return False
 
 
 def open_pages(pages: list[VaultPage], data_key: bytes) -> dict[int, str]:
