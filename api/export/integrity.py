@@ -16,6 +16,14 @@ Three failure modes, reported separately because they mean different things:
 - **orphan** — a blob no data references. Harmless (backup ordering produces
   these by design) and *never* removed automatically: REQ-090 has no exceptions,
   and an "orphan" is also what an interrupted ingest looks like from here.
+- **sealed** — the original is in the private vault, so its plaintext is
+  deliberately gone (Phase 16). Not missing, and reported separately because
+  calling it missing makes a working archive look like a damaged one — and
+  `run_backup` and `replicate` both *refuse to run* over a failing integrity
+  check. A false alarm here does not just mislead, it stops the backups.
+
+  Their ciphertext is checked instead: a vault object that is gone from disk
+  really is missing, and nothing else in the archive can replace it.
 """
 
 import hashlib
@@ -28,7 +36,7 @@ from pathlib import Path
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.db.models import SourceFile
+from api.db.models import Document, SourceFile, VaultItem
 from api.storage.blobs import blob_path
 
 log = logging.getLogger("bindery.integrity")
@@ -48,6 +56,9 @@ class IntegrityReport:
     missing: list[dict] = field(default_factory=list)
     corrupt: list[dict] = field(default_factory=list)
     orphans: list[str] = field(default_factory=list)
+    # Originals that are encrypted rather than absent. Listed, never counted
+    # against health — the plaintext being gone is the feature working.
+    sealed: list[dict] = field(default_factory=list)
 
     @property
     def healthy(self) -> bool:
@@ -63,6 +74,7 @@ class IntegrityReport:
             "healthy": self.healthy,
             "missing": self.missing,
             "corrupt": self.corrupt,
+            "sealed": self.sealed,
             # Orphans are informational. They are listed, never acted on.
             "orphan_count": len(self.orphans),
             "orphans": self.orphans[:200],
@@ -88,6 +100,21 @@ async def check(
     """Re-hash every original and compare against its content address."""
     report = IntegrityReport(started_at=datetime.now(UTC))
 
+    # Source files whose plaintext was deliberately destroyed when a document
+    # on them went into the vault. Without this they read as missing, which
+    # makes a healthy archive look damaged — and stops the backups, because
+    # `run_backup` and `replicate` both refuse over a failing check.
+    sealed_files = {
+        row.source_file_id: row.object_name
+        for row in (
+            await session.execute(
+                sa.select(Document.source_file_id, VaultItem.object_name)
+                .join(VaultItem, VaultItem.document_id == Document.id)
+                .where(Document.vaulted_by.is_not(None))
+            )
+        ).all()
+    }
+
     query = sa.select(
         SourceFile.id, SourceFile.sha256, SourceFile.original_filename, SourceFile.byte_size
     )
@@ -104,6 +131,24 @@ async def check(
             "sha256": row.sha256,
             "original_filename": row.original_filename,
         }
+
+        if row.id in sealed_files:
+            # The plaintext is supposed to be gone. What must still be here is
+            # the ciphertext — and unlike a blob, nothing can reproduce it.
+            from api.vault import store
+
+            object_name = sealed_files[row.id]
+            if store.object_path(object_name).is_file():
+                report.sealed.append({**record, "vault_object": object_name})
+                report.ok += 1
+            else:
+                log.error(
+                    "integrity: VAULT OBJECT MISSING for %s (%s) — the encrypted "
+                    "copy is gone and there is no other",
+                    object_name[:12], row.original_filename,
+                )
+                report.missing.append({**record, "vault_object": object_name})
+            continue
 
         if not path.is_file():
             log.error("integrity: blob missing for %s (%s)", row.sha256, row.original_filename)
@@ -129,9 +174,10 @@ async def check(
 
     report.finished_at = datetime.now(UTC)
     log.info(
-        "integrity: %s checked, %s ok, %s missing, %s corrupt, %s orphaned",
+        "integrity: %s checked, %s ok, %s missing, %s corrupt, %s orphaned, "
+        "%s sealed in the vault",
         report.checked, report.ok, len(report.missing), len(report.corrupt),
-        len(report.orphans),
+        len(report.orphans), len(report.sealed),
     )
     return report
 

@@ -865,6 +865,9 @@ class IntegrityOut(BaseModel):
     healthy: bool
     missing: list[dict]
     corrupt: list[dict]
+    # Originals that are encrypted rather than absent. Shown so the count of
+    # checked originals adds up on screen without looking like loss.
+    sealed: list[dict] = []
     orphan_count: int
     orphans: list[str]
 

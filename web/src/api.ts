@@ -973,7 +973,8 @@ export interface IntegrityReport {
   missing: { sha256: string; original_filename: string | null }[];
   corrupt: { sha256: string; original_filename: string | null; actual_sha256: string }[];
   orphan_count: number;
-  orphans: string[];
+  orphans: string[];  /** Encrypted rather than absent — the vault working, not loss. */
+  sealed: Record<string, unknown>[];
 }
 
 export interface MirrorResult {

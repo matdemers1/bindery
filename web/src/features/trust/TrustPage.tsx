@@ -135,6 +135,16 @@ function ResiliencePanel() {
             {integrity.healthy ? (
               <p className="text-emerald-400">
                 All {integrity.checked} originals match their hashes.
+                {integrity.sealed?.length > 0 && (
+                  <>
+                    {" "}
+                    <span className="text-muted">
+                      {integrity.sealed.length} of them are in the vault — their
+                      plaintext is gone on purpose, and their encrypted copies
+                      are present.
+                    </span>
+                  </>
+                )}
               </p>
             ) : (
               <div className="space-y-2 text-red-300">
