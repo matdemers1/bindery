@@ -211,6 +211,7 @@ async def run_segment(session: AsyncSession, job: ClaimedJob) -> None:
         session, source_file, specs, actor_type=ActorType.SYSTEM
     )
     matches = await match_documents(session, documents)
+    await _date_from_the_file(session, source_file.id, documents)
 
     source_file.state = SourceFileState.PROCESSED
     await session.flush()
@@ -231,3 +232,31 @@ async def run_segment(session: AsyncSession, job: ClaimedJob) -> None:
     )
     for page, reasons in accepted:
         log.info("  boundary at page %s: %s", page, "; ".join(reasons))
+
+
+async def _date_from_the_file(session: AsyncSession, source_file_id, documents) -> None:
+    """A photograph's capture date fills `document_date` when nothing else has
+    (T-18.5, REQ-193), recorded as source `file` so the why-panel can say
+    "read from the file's metadata" and so a person's edit still wins.
+
+    Only when nothing else has: a document that already carries a date — from
+    a re-run, from a rule, from a person — keeps it. Metadata is a fact about
+    the file, not an argument with whoever set the date.
+    """
+    from datetime import UTC
+
+    from api import field_source
+    from api.db.enums import FieldSource as Kind
+    from api.db.models import MediaMetadata
+
+    meta = await session.get(MediaMetadata, source_file_id)
+    if meta is None or meta.captured_at is None:
+        return
+    for document in documents:
+        if document.document_date is not None:
+            continue
+        held = await field_source.held_by_human(session, document.id)
+        if "document_date" in held:
+            continue
+        document.document_date = meta.captured_at.astimezone(UTC).date()
+        await field_source.record(session, document.id, ["document_date"], Kind.FILE)

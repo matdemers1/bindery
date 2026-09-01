@@ -20,6 +20,7 @@ from api.db.models.importing import (
 from api.db.models.job import Job
 from api.db.models.known_form import KnownForm
 from api.db.models.library import Library
+from api.db.models.media import MediaMetadata
 from api.db.models.membership import Membership
 from api.db.models.offsite_object import OffsiteObject
 from api.db.models.offsite_run import OffsiteRun
@@ -61,6 +62,7 @@ __all__ = [
     "KnownForm",
     "Library",
     "LoginAttempt",
+    "MediaMetadata",
     "Membership",
     "OffsiteObject",
     "OffsiteRun",

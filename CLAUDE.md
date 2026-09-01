@@ -376,7 +376,13 @@ requests a second*.
 Two families, and only one pipeline.
 
 - **Scans and photographs** — `.pdf .jpg .jpeg .png .tif .tiff .heic .heif` —
-  go straight to OCR.
+  go straight to OCR. Photographs also have their EXIF read first (Phase 18):
+  capture date, camera, dimensions, location, into `media_metadata`.
+- **Videos** — everything ffprobe reads — are **not** OCR'd or classified.
+  `normalize` probes them, writes a poster frame, and creates one filed
+  document whose page text is the metadata summary, so the clip is findable by
+  its date, camera and length. No downstream job is ever created for them.
+  ffmpeg is worker-only, like Pillow.
 - **Office documents** — Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT,
   MD — are rendered to PDF by headless LibreOffice in `worker/convert.py` and
   then travel the *ordinary* path. That is the whole design: handling them
@@ -397,7 +403,7 @@ being added. Deliberate exclusions, each for its own reason:
 | `.one`, `.onetoc2` | **Genuinely archive material** — college notes — but no converter works. LibreOffice fails to load it outright. A gap to report, not to paper over. |
 | `.psd`, `.indd`, `.skp` | Design sources, not documents |
 | `.zip`, `.gz`, `.rar` | Unpacking is a separate decision with its own hazards — nesting, bombs, and what "the original" means afterwards |
-| code, build output, 3D printing, game data, media, binaries | Not archive material, and they would bury the things that are |
+| code, build output, 3D printing, game data, audio, binaries | Not archive material, and they would bury the things that are. Video *was* on this list until Phase 18 |
 
 `.html` is supported because a saved order confirmation or pay statement is
 ordinary archive material. Be aware that generated documentation — a Javadoc

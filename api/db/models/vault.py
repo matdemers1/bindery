@@ -55,6 +55,12 @@ class VaultItem(Base):
     sealed_sha256: Mapped[bytes] = mapped_column(sa.LargeBinary, nullable=False)
     sealed_meta: Mapped[bytes] = mapped_column(sa.LargeBinary, nullable=False)
     original_media_type: Mapped[str | None] = mapped_column(sa.Text)
+    # 1 = one AES-GCM message (ADR-012); 2 = independently decryptable chunks
+    # (ADR-013). Read by the re-seal that upgrades v1 objects on the next
+    # unlock, and by nothing else: `open_object` dispatches on the bytes.
+    format_version: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default="1"
+    )
     page_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
     vaulted_at: Mapped[datetime] = created_at()
 

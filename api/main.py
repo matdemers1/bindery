@@ -35,6 +35,7 @@ from api.routers import (
     upload,
 )
 from api.routers import vault as vault_router
+from api.vault import sweep as vault_sweep
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -61,11 +62,17 @@ async def lifespan(_app: FastAPI):
         events.broadcaster.run(events.listen_dsn(get_settings().database_url), stopping),
         name="change-listener",
     )
+    # Seals vault-bound imports as their files finish, while the owner's vault
+    # is open (REQ-197). Here rather than in the worker because the data key
+    # never leaves this process.
+    sweep = asyncio.create_task(
+        vault_sweep.run_forever(stopping, SessionFactory), name="vault-sweep"
+    )
     try:
         yield
     finally:
         stopping.set()
-        for task in (drain, listener):
+        for task in (drain, listener, sweep):
             with contextlib.suppress(asyncio.CancelledError, TimeoutError):
                 await asyncio.wait_for(task, timeout=5)
 

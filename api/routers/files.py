@@ -112,6 +112,48 @@ async def page_boxes(
     raise _NOT_FOUND
 
 
+@router.get("/{source_file_id}/poster")
+async def file_poster(
+    source_file_id: uuid.UUID,
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> FileResponse:
+    """A video's poster frame (REQ-194). 404 for anything without one."""
+    source_file = await repository.get_source_file(session, user.id, source_file_id)
+    if source_file is None:
+        raise _NOT_FOUND
+    poster = derived_for(source_file.sha256).poster
+    if not poster.is_file():
+        raise _NOT_FOUND
+    return FileResponse(poster, media_type="image/webp", headers={"Cache-Control": IMMUTABLE})
+
+
+@router.get("/{source_file_id}/original")
+async def file_original(
+    source_file_id: uuid.UUID,
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> FileResponse:
+    """The stored bytes, as they arrived, with their own media type (REQ-195).
+
+    `/pdf` hands back the searchable PDF and is the right thing for a document.
+    This is for the things that are not documents — a video the browser will
+    play, a photograph in its original format. `FileResponse` answers `Range`
+    itself, which is what lets a `<video>` element seek.
+    """
+    source_file = await repository.get_source_file(session, user.id, source_file_id)
+    if source_file is None:
+        raise _NOT_FOUND
+    path = blob_path(source_file.sha256)
+    if not path.is_file():
+        raise HTTPException(status.HTTP_410_GONE, "the stored blob is missing — integrity alert")
+    return FileResponse(
+        path,
+        media_type=source_file.mime_type or "application/octet-stream",
+        headers={"Cache-Control": IMMUTABLE, "Content-Disposition": "inline"},
+    )
+
+
 @router.get("/{source_file_id}/pdf")
 async def file_pdf(
     source_file_id: uuid.UUID,

@@ -8,6 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       qpdf \
       unpaper \
       pngquant \
+      # Video (Phase 18): ffprobe reads the metadata, ffmpeg extracts one poster
+      # frame. The first binary dependency since LibreOffice, for the same
+      # reason — implementing it is not an option. Worker only.
+      ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Office formats. A household archive is full of documents that never touched a

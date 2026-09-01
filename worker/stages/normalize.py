@@ -23,16 +23,17 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import queue
 from api.artifacts import derived_for
 from api.config import get_settings
-from api.db.enums import JobStage, SourceFileState
+from api.db.enums import JobStage, ReviewState, SourceFileState
 from api.db.models import SourceFile
 from api.queue import ClaimedJob
 from api.storage.blobs import blob_path
-from worker import convert, subprocess_util
+from worker import convert, media, subprocess_util
 from worker.ocr.word_boxes import extract_word_boxes
 
 log = logging.getLogger("bindery.worker.normalize")
@@ -456,8 +457,32 @@ async def run_normalize(session: AsyncSession, job: ClaimedJob) -> None:
     paths = derived_for(source_file.sha256)
     paths.mkdirs()
 
+    if media.is_video(source_file.original_filename, source_file.mime_type):
+        # Not through the pipeline (REQ-194). There is nothing to OCR and
+        # nothing for the model to say; the file's own metadata is the record,
+        # and the document this makes is the whole of the video's presence in
+        # the archive. Deliberately no cascade — no page, segment, embed,
+        # classify or rules job is ever created for it.
+        await _absorb_video(session, source_file, original, paths)
+        return
+
     source_file.state = SourceFileState.NORMALIZING
     await session.flush()
+
+    if _looks_like_image(source_file):
+        # What the photograph already knows about itself (REQ-193). Read before
+        # OCR, independently of it: a picture with no readable text still has
+        # a capture date and a camera. Failure here is logged and not fatal —
+        # EXIF is a bonus, not the point of normalising.
+        try:
+            probed = await asyncio.to_thread(media.read_exif, original)
+        except Exception as error:  # a truncated JPEG, an unsupported HEIC
+            log.warning(
+                "could not read metadata from %s: %s", source_file.original_filename, error
+            )
+        else:
+            if probed is not None:
+                await media.record(session, source_file.id, probed)
 
     get_settings().temp_root.mkdir(parents=True, exist_ok=True)
     async with _ocr_input(source_file, original) as ocr_source:
@@ -546,3 +571,70 @@ async def run_normalize(session: AsyncSession, job: ClaimedJob) -> None:
     # On a first run there is no existing job, so the two behave identically.
     await queue.requeue_stage(session, JobStage.PAGE, source_file_id=source_file.id)
     log.info("normalized %s (%s pages)", source_file.original_filename, page_count)
+
+
+async def _absorb_video(
+    session: AsyncSession, source_file: SourceFile, original: Path, paths
+) -> None:
+    """Probe, poster, one document, done (T-18.6).
+
+    The document is a page range like every other (invariant 2): one page,
+    with the metadata summary as its text so the clip is findable by anything
+    the file knew about itself — the date, the camera, the length.
+    """
+    from datetime import UTC
+
+    from api import field_source
+    from api.db.enums import FieldSource as Kind
+    from api.db.models import Document, Page
+
+    source_file.state = SourceFileState.NORMALIZING
+    await session.flush()
+
+    probed = await asyncio.to_thread(media.probe_video, original, source_file.original_filename)
+    await media.record(session, source_file.id, probed)
+    if await asyncio.to_thread(media.poster_frame, original, paths.poster):
+        log.info("poster frame written for %s", source_file.original_filename)
+    else:
+        log.warning(
+            "no poster frame for %s; the wall shows a placeholder", source_file.original_filename
+        )
+
+    existing = (
+        await session.execute(
+            sa.select(Document).where(
+                Document.source_file_id == source_file.id, Document.superseded_at.is_(None)
+            )
+        )
+    ).scalars().first()
+    if existing is None:
+        stem = Path(source_file.original_filename or "video").stem
+        document = Document(
+            library_id=source_file.library_id,
+            source_file_id=source_file.id,
+            page_start=1,
+            page_end=1,
+            title=stem,
+            # Filed, not queued for review: there is no classification to
+            # review, and a review queue full of videos with nothing to decide
+            # is a review queue nobody reads.
+            review_state=ReviewState.FILED,
+        )
+        session.add(document)
+        await session.flush()
+        await field_source.record(session, document.id, ["title"], Kind.FILE)
+        if probed.captured_at:
+            document.document_date = probed.captured_at.astimezone(UTC).date()
+            await field_source.record(session, document.id, ["document_date"], Kind.FILE)
+    page_exists = (
+        await session.execute(
+            sa.select(Page.id).where(Page.source_file_id == source_file.id, Page.page_number == 1)
+        )
+    ).scalar_one_or_none()
+    if page_exists is None:
+        session.add(Page(source_file_id=source_file.id, page_number=1, text=probed.summary()))
+
+    source_file.page_count = 1
+    source_file.state = SourceFileState.PROCESSED
+    await session.flush()
+    log.info("absorbed video %s: %s", source_file.original_filename, probed.summary())

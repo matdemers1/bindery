@@ -257,9 +257,20 @@ def test_things_that_are_not_documents_stay_out() -> None:
         ".zip", ".gz", ".rar",    # archives
         ".js", ".java", ".class", ".jar", ".json", ".xml", ".plist", ".swift",
         ".gcode", ".stl", ".3mf", ".mca",
-        ".exe", ".ipa", ".wav", ".mp4",
+        # Audio stays out. Video came in with Phase 18 — not through the
+        # pipeline, but stored and described by its own metadata — so `.mp4`
+        # left this list on purpose.
+        ".exe", ".ipa", ".wav", ".mp3",
     ):
         assert suffix not in SUPPORTED, f"{suffix} is not archive material"
+
+
+def test_video_is_archive_material_now() -> None:
+    """Phase 18. The owner is backing up specific things that are videos."""
+    from api.backlog.walker import SUPPORTED
+
+    for suffix in (".mp4", ".mov", ".m4v", ".mkv", ".avi"):
+        assert suffix in SUPPORTED, f"{suffix} should be importable"
 
 
 def test_the_digital_text_threshold_ignores_stray_ocr_junk() -> None:

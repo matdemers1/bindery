@@ -16,6 +16,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from api.vault.store import VIDEO_SUFFIXES
+
 log = logging.getLogger("bindery.import.walk")
 
 # Scans and photographs. All of these reach OCR directly — verified against
@@ -44,7 +46,13 @@ OFFICE = {
     ".pages", ".numbers", ".key",
 }
 
-SUPPORTED = SCANNED | OFFICE
+# Videos (Phase 18). Not through the pipeline — there is nothing to OCR — but
+# stored, described by their own metadata, and playable. The list lives on the
+# vault module because api/ may not import worker/, and a test asserts the
+# worker's copy agrees.
+VIDEO = set(VIDEO_SUFFIXES)
+
+SUPPORTED = SCANNED | OFFICE | VIDEO
 
 # Deliberately absent, after auditing a real 80,000-file tree:
 #

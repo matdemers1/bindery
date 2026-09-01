@@ -61,6 +61,9 @@ class TagSource(StrEnum):
     AI = "ai"
     RULE = "rule"
     HUMAN = "human"
+    # Read from the file itself — an EXIF capture date, a video's duration.
+    # A fact the file carries, not an inference; still outranked by a person.
+    FILE = "file"
 
 
 class JobStage(StrEnum):
@@ -144,3 +147,11 @@ class FieldSource(StrEnum):
     AI = "ai"
     RULE = "rule"
     HUMAN = "human"
+    # Read from the file itself — an EXIF capture date, a video's duration.
+    # A fact the file carries, not an inference; still outranked by a person.
+    FILE = "file"
+
+
+class MediaKind(StrEnum):
+    IMAGE = "image"
+    VIDEO = "video"

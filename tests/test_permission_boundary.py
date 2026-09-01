@@ -347,6 +347,8 @@ async def test_the_shared_library_is_shared(client, household) -> None:
 # need a leak-suite entry. Every addition here is a claim you are making; the
 # test below verifies the claim is at least plausible by requiring a reason.
 NOT_LIBRARY_SCOPED = {
+    # A settings path (the watched folder), not documents. Phase 18.
+    "/api/imports/presets": "returns the inbox path from settings; no library data",
     "/api/health": "liveness only",
     "/api/auth/me": "the caller's own identity",
     "/api/settings": "instance settings; secrets are masked, never returned",

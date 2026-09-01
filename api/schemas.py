@@ -184,6 +184,25 @@ class FieldSourceOut(BaseModel):
     event_id: uuid.UUID | None = None
 
 
+class MediaMetadataOut(BaseModel):
+    """What the file said about itself (REQ-193, REQ-194)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: str
+    width: int | None = None
+    height: int | None = None
+    duration_seconds: float | None = None
+    captured_at: datetime | None = None
+    camera_make: str | None = None
+    camera_model: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    codec: str | None = None
+    frame_rate: float | None = None
+    browser_playable: bool = True
+
+
 class DocumentDetailOut(BaseModel):
     """Everything the viewer needs to show a page range as a standalone document."""
 
@@ -199,6 +218,8 @@ class DocumentDetailOut(BaseModel):
     # Forward reference: TagOut is defined below, and moving it up here
     # would separate it from the other taxonomy shapes for no gain.
     tags: list["TagOut"] = []
+    # Present for photographs and videos; None for a scan of a form.
+    media: MediaMetadataOut | None = None
 
 
 class PageHitOut(BaseModel):
@@ -462,6 +483,10 @@ class TreeOut(BaseModel):
 
 
 class ImportStartIn(BaseModel):
+    # Seal every document this import produces, as its pipeline finishes,
+    # while the creator's vault is open. Refused (423) if the vault is shut
+    # at creation, so the intent is real rather than a box nobody can honour.
+    to_vault: bool = False
     library_id: uuid.UUID
     # Absolute, and resolved inside the worker container — not on your laptop.
     root_path: str
@@ -480,6 +505,28 @@ class ImportSessionOut(BaseModel):
     progress: dict[str, int]
     last_error: str | None
     created_at: datetime
+    # Bound for the vault (REQ-197). `vaulted` counts documents already sealed;
+    # `awaiting_vault` counts the ones whose pipeline has finished but that are
+    # waiting for the vault to be open. The difference between "done" and
+    # "unlock to continue" has to be visible, or the second looks like a bug.
+    to_vault: bool = False
+    vaulted: int = 0
+    awaiting_vault: int = 0
+    vault_unlocked: bool = False
+
+
+class ImportPresetsOut(BaseModel):
+    """Paths the screen can offer without anyone typing them."""
+
+    inbox: str
+
+
+class ImportLogLineOut(BaseModel):
+    at: datetime
+    level: str
+    message: str
+    source_file_id: uuid.UUID | None = None
+    stage: str | None = None
 
 
 class ImportItemOut(BaseModel):
@@ -678,6 +725,9 @@ class VaultItemOut(BaseModel):
     # the `mime_type` typo was fixed.
     media_type: str | None = None
     is_image: bool = False
+    is_video: bool = False
+    # What the file said about itself, decrypted with the rest of the item.
+    media: MediaMetadataOut | None = None
 
 
 class VaultSearchHitOut(BaseModel):
@@ -787,6 +837,8 @@ __all__ = [
     "GoBagIn",
     "HealthOut",
     "ImportItemOut",
+    "ImportLogLineOut",
+    "ImportPresetsOut",
     "ImportSessionOut",
     "ImportStartIn",
     "IntegrityOut",
@@ -794,6 +846,7 @@ __all__ = [
     "KnownFormOut",
     "LibraryOut",
     "LoginRequest",
+    "MediaMetadataOut",
     "MergeIn",
     "MergePreviewOut",
     "MirrorOut",
@@ -1193,6 +1246,10 @@ class PhotoOut(BaseModel):
     # Whether anything has actually *looked* at this picture. A title written
     # from an empty page — "Unreadable Scan" — does not count.
     described: bool
+    # image | video (Phase 18). Videos have a poster rather than a page render,
+    # a duration rather than text, and a player rather than a viewer.
+    kind: str = "image"
+    media: MediaMetadataOut | None = None
 
 
 class PhotoWallOut(BaseModel):

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import editing, events, field_source
 from api.auth.dependencies import current_user
 from api.db import repository
-from api.db.models import AppUser, DocumentTag, KnownForm, Tag, live_tag_links
+from api.db.models import AppUser, DocumentTag, KnownForm, MediaMetadata, Tag, live_tag_links
 from api.db.session import get_session
 from api.schemas import (
     DocumentDetailOut,
@@ -17,6 +17,7 @@ from api.schemas import (
     FieldSourceOut,
     KnownFormOut,
     LibraryOut,
+    MediaMetadataOut,
     PageOut,
     SourceFileOut,
     TagOut,
@@ -89,6 +90,7 @@ async def get_document(
     ]
 
     sources = await field_source.sources_for(session, document.id)
+    media = await session.get(MediaMetadata, document.source_file_id)
     tags = (
         await session.execute(
             sa.select(Tag.id, Tag.name, DocumentTag.source)
@@ -117,6 +119,7 @@ async def get_document(
             TagOut(id=tag_id, name=name, source=source.value)
             for tag_id, name, source in tags
         ],
+        media=MediaMetadataOut.model_validate(media) if media else None,
     )
 
 

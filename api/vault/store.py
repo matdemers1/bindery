@@ -36,9 +36,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import artifacts
 from api.config import get_settings
 from api.db.enums import JobState
-from api.db.models import Document, DocumentTag, Job, Page, SourceFile, VaultItem, VaultPage
+from api.db.models import (
+    Document,
+    DocumentTag,
+    Job,
+    MediaMetadata,
+    Page,
+    SourceFile,
+    VaultItem,
+    VaultPage,
+)
 from api.storage.blobs import blob_path
-from api.vault import crypto
+from api.vault import chunked, crypto
 
 log = logging.getLogger("bindery.vault")
 
@@ -47,6 +56,13 @@ log = logging.getLogger("bindery.vault")
 IMAGE_SUFFIXES = (
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff",
     ".heic", ".heif",
+)
+# Kept in the api rather than imported from `worker.media`: api/ must never
+# import worker/ (the layering rule). `tests/test_media_formats.py` asserts
+# the two lists agree.
+VIDEO_SUFFIXES = (
+    ".mp4", ".m4v", ".mov", ".webm", ".3gp",
+    ".mkv", ".avi", ".wmv", ".mts", ".m2ts", ".mpg", ".mpeg",
 )
 
 # Stages that are still going to want the plaintext. Vaulting something mid-
@@ -151,19 +167,19 @@ async def seal(
 
     object_name = new_object_name()
     key = crypto.file_key(data_key, object_name.encode())
-    # The document id is authenticated alongside the bytes, so a ciphertext
-    # cannot be moved onto another document's row and still decrypt.
-    associated = str(document.id).encode()
 
     target = object_path(object_name)
-    _write_atomically(target, crypto.encrypt(original, key, associated=associated))
+    # Chunked (ADR-013), so a byte range can later be served by decrypting only
+    # the chunks that cover it. The document id rides in every chunk's
+    # associated data along with its position and the file's shape.
+    _write_atomically(target, chunked.seal_bytes(original, key, document.id))
 
     # Read back from disk rather than trusting the buffer we just encrypted:
     # the question is whether *the file* can be decrypted, not whether the
-    # function is deterministic.
+    # function is deterministic. Chunk by chunk, so the verify itself never
+    # holds more than one chunk of plaintext.
     try:
-        recovered = crypto.decrypt(target.read_bytes(), key, associated=associated)
-        verified = hashlib.sha256(recovered).hexdigest() == source.sha256
+        verified = chunked.Reader(target, key, document.id).verify() == source.sha256
     except crypto.WrongSecret:
         # By far the likelier corruption: a flipped bit fails the AEAD tag
         # rather than decrypting to different plaintext. Catching only the hash
@@ -189,9 +205,34 @@ async def seal(
         .all()
     )
 
+    # A photograph's metadata says where and when it was taken. Left in the
+    # clear it would be the one thing about a vaulted picture still readable
+    # from the database, so it travels into `sealed_meta` and the row is
+    # blanked — the same thing done to the title, for the same reason. Kept
+    # (not deleted): the row comes back exactly on unseal.
+    media_row = await session.get(MediaMetadata, source.id)
+    media_meta = None
+    if media_row is not None:
+        media_meta = {
+            "kind": media_row.kind.value,
+            "width": media_row.width,
+            "height": media_row.height,
+            "duration_seconds": media_row.duration_seconds,
+            "captured_at": media_row.captured_at.isoformat() if media_row.captured_at else None,
+            "camera_make": media_row.camera_make,
+            "camera_model": media_row.camera_model,
+            "latitude": media_row.latitude,
+            "longitude": media_row.longitude,
+            "codec": media_row.codec,
+            "frame_rate": media_row.frame_rate,
+            "browser_playable": media_row.browser_playable,
+            "raw": media_row.raw,
+        }
+
     meta = {
         "title": document.title,
         "original_filename": source.original_filename,
+        "media": media_meta,
         # `source.mime_type`, not `media_type`. The first version read the
         # wrong attribute through `getattr(..., None)`, which swallowed the
         # typo silently: every vaulted item got a null type, every download
@@ -214,6 +255,7 @@ async def seal(
         sealed_meta=crypto.encrypt(json.dumps(meta).encode(), data_key),
         original_media_type=source.mime_type,
         page_count=len(pages),
+        format_version=chunked.VERSION,
     )
     session.add(item)
     await session.flush()
@@ -247,6 +289,12 @@ async def seal(
     document.correspondent_id = None
     document.document_type_id = None
     document.known_form_id = None
+    if media_row is not None:
+        for column in (
+            "captured_at", "camera_make", "camera_model", "latitude", "longitude",
+        ):
+            setattr(media_row, column, None)
+        media_row.raw = {}
 
     for page in pages:
         await session.delete(page)
@@ -264,13 +312,89 @@ async def seal(
     return Sealed(document.id, object_name, len(original), len(pages), warnings)
 
 
+def _is_v2(path: Path) -> bool:
+    with path.open("rb") as handle:
+        return chunked.is_chunked(handle.read(4))
+
+
 def open_object(object_name: str, document_id: uuid.UUID, data_key: bytes) -> bytes:
-    """The original bytes, for a caller that has already been authorised."""
+    """The original bytes, for a caller that has already been authorised.
+
+    Dispatches on the bytes, not on `format_version`: a v1 object (one AES-GCM
+    message, ADR-012) stays readable forever, and a column that disagreed with
+    the file would be the wrong thing to trust.
+    """
     path = object_path(object_name)
     if not path.is_file():
         raise VaultRefused(f"the vault object for {document_id} is missing from disk")
     key = crypto.file_key(data_key, object_name.encode())
+    if _is_v2(path):
+        return chunked.Reader(path, key, document_id).read_all()
     return crypto.decrypt(path.read_bytes(), key, associated=str(document_id).encode())
+
+
+def open_reader(
+    object_name: str, document_id: uuid.UUID, data_key: bytes
+) -> chunked.Reader | None:
+    """A range-capable reader, or None for a v1 object that cannot serve one.
+
+    The caller falls back to `open_object` for v1 — the whole file, which is
+    what v1 always cost — and the re-seal on the next unlock retires the case.
+    """
+    path = object_path(object_name)
+    if not path.is_file():
+        raise VaultRefused(f"the vault object for {document_id} is missing from disk")
+    if not _is_v2(path):
+        return None
+    key = crypto.file_key(data_key, object_name.encode())
+    return chunked.Reader(path, key, document_id)
+
+
+async def reseal(session: AsyncSession, item: VaultItem, data_key: bytes) -> bool:
+    """Upgrade one v1 object to the chunked format (T-18.2, ADR-013).
+
+    The third path in the project that destroys something, after seal and
+    unseal, and it inherits the same rule: decrypt the old object, verify it
+    against the hash recorded when it went in, write the new object beside it,
+    verify *that* reads back to the same hash, and only then retire the old
+    one. Returns False when there was nothing to do.
+    """
+    old_path = object_path(item.object_name)
+    if not old_path.is_file() or _is_v2(old_path):
+        return False
+
+    key = crypto.file_key(data_key, item.object_name.encode())
+    plaintext = crypto.decrypt(
+        old_path.read_bytes(), key, associated=str(item.document_id).encode()
+    )
+    expected = crypto.decrypt(item.sealed_sha256, data_key).decode()
+    if hashlib.sha256(plaintext).hexdigest() != expected:
+        raise VaultRefused(
+            "the vaulted copy does not match the hash recorded when it went in; "
+            "not re-sealing something that is already wrong"
+        )
+
+    # A new name, so the new object never overwrites the old one in place and
+    # the offsite ledger sees a new key rather than a changed one.
+    new_name = new_object_name()
+    new_key = crypto.file_key(data_key, new_name.encode())
+    new_path = object_path(new_name)
+    _write_atomically(new_path, chunked.seal_bytes(plaintext, new_key, item.document_id))
+    try:
+        verified = chunked.Reader(new_path, new_key, item.document_id).verify() == expected
+    except crypto.WrongSecret:
+        verified = False
+    if not verified:
+        new_path.unlink(missing_ok=True)
+        raise VaultRefused("the re-sealed copy did not read back; the old object is untouched")
+
+    item.object_name = new_name
+    item.format_version = chunked.VERSION
+    await session.flush()
+    # Only now, and only after the row points at the replacement.
+    old_path.unlink(missing_ok=True)
+    log.info("re-sealed vault object for %s into the chunked format", item.document_id)
+    return True
 
 
 def open_meta(item: VaultItem, data_key: bytes) -> dict:
@@ -292,6 +416,14 @@ def media_type_for(item: VaultItem, meta: dict) -> str | None:
     if not filename:
         return None
     return mimetypes.guess_type(filename)[0]
+
+
+def is_video(media_type: str | None, filename: str | None) -> bool:
+    """Whether the vault should show this under Videos. Same list the worker
+    imports by, so "is this a video" does not have two answers."""
+    if media_type and media_type.startswith("video/"):
+        return True
+    return bool(filename) and filename.lower().endswith(VIDEO_SUFFIXES)
 
 
 def is_image(media_type: str | None, filename: str | None) -> bool:
@@ -361,6 +493,16 @@ async def unseal(
     meta = open_meta(item, data_key)
     document.title = meta.get("title")
     document.vaulted_by = None
+    if (media_meta := meta.get("media")) is not None:
+        from datetime import datetime
+
+        media_row = await session.get(MediaMetadata, source.id)
+        if media_row is not None:
+            captured = media_meta.get("captured_at")
+            media_row.captured_at = datetime.fromisoformat(captured) if captured else None
+            for column in ("camera_make", "camera_model", "latitude", "longitude"):
+                setattr(media_row, column, media_meta.get(column))
+            media_row.raw = media_meta.get("raw") or {}
 
     # Pages come back so the document is searchable again. Their text is the
     # same text; re-OCR would be a second reading of the same bytes and could

@@ -44,6 +44,12 @@ class ImportSession(Base):
         JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
     )
     last_error: Mapped[str | None] = mapped_column(sa.Text)
+    # Every document this import produces is sealed into its creator's vault
+    # as soon as its pipeline finishes, while the vault is open (REQ-197). Set
+    # only when the vault was unlocked at creation, so the intent is real.
+    to_vault: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, server_default=sa.false()
+    )
     created_at: Mapped[datetime] = created_at()
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()

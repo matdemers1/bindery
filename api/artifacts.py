@@ -41,6 +41,12 @@ class DerivedPaths:
     def thumbs_dir(self) -> Path:
         return self.root / "thumbs"
 
+    @property
+    def poster(self) -> Path:
+        """One frame of a video, for the wall (Phase 18). Derived like a page
+        render, and purged with the rest when the document is sealed."""
+        return self.root / "poster.webp"
+
     def page_render(self, page_number: int) -> Path:
         return self.pages_dir / f"{page_number:04d}.webp"
 

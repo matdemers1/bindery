@@ -15,17 +15,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import bulk as bulk_module
 from api.audit import record
 from api.auth.dependencies import current_user
+from api.config import get_settings
 from api.db import repository
 from api.db.enums import ActorType, ImportItemState, ImportState
-from api.db.models import AppUser, ImportItem, ImportSession
+from api.db.models import AppUser, EventLog, ImportItem, ImportSession
 from api.db.session import get_session
 from api.schemas import (
     BulkEditIn,
     BulkResultOut,
     ImportItemOut,
+    ImportLogLineOut,
+    ImportPresetsOut,
     ImportSessionOut,
     ImportStartIn,
 )
+from api.vault import sweep as vault_sweep
+from api.vault.session import sessions as vault_sessions
 
 router = APIRouter(tags=["import"])
 
@@ -45,7 +50,13 @@ async def _owned(session: AsyncSession, user: AppUser, session_id: uuid.UUID) ->
     return found
 
 
-def _out(import_session: ImportSession, progress: dict[str, int]) -> ImportSessionOut:
+async def _out(
+    session: AsyncSession, import_session: ImportSession, progress: dict[str, int]
+) -> ImportSessionOut:
+    vaulted = awaiting = 0
+    if import_session.to_vault:
+        vaulted = await vault_sweep.vaulted(session, import_session)
+        awaiting = await vault_sweep.awaiting(session, import_session)
     return ImportSessionOut(
         id=import_session.id,
         library_id=import_session.library_id,
@@ -58,6 +69,12 @@ def _out(import_session: ImportSession, progress: dict[str, int]) -> ImportSessi
         progress=progress,
         last_error=import_session.last_error,
         created_at=import_session.created_at,
+        to_vault=import_session.to_vault,
+        vaulted=vaulted,
+        awaiting_vault=awaiting,
+        vault_unlocked=bool(
+            import_session.created_by and vault_sessions.is_unlocked(import_session.created_by)
+        ),
     )
 
 
@@ -100,9 +117,20 @@ async def start_import(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "the path must be absolute"
         )
 
+    if payload.to_vault and not vault_sessions.is_unlocked(user.id):
+        # Refused now rather than accepted and never honoured: an import bound
+        # for a vault nobody can open would sit in the archive indefinitely
+        # with a box ticked that says otherwise.
+        raise HTTPException(
+            status.HTTP_423_LOCKED,
+            "unlock your vault first — an import bound for the vault is sealed as "
+            "its files finish, and that needs the vault open",
+        )
+
     import_session = ImportSession(
         library_id=payload.library_id, root_path=str(root),
         sample_size=payload.sample_size, created_by=user.id,
+        to_vault=payload.to_vault,
     )
     session.add(import_session)
     await session.flush()
@@ -115,7 +143,48 @@ async def start_import(
     )
     await session.commit()
     await session.refresh(import_session)
-    return _out(import_session, await progress_of(session, import_session))
+    return await _out(session, import_session, await progress_of(session, import_session))
+
+
+@router.get("/imports/presets", response_model=ImportPresetsOut)
+async def presets(user: AppUser = Depends(current_user)) -> ImportPresetsOut:
+    """Paths the screen offers without anyone typing them (REQ-196). The inbox
+    is the watched folder every other feature already knows about."""
+    return ImportPresetsOut(inbox=str(get_settings().inbox_root))
+
+
+@router.get("/imports/{session_id}/log", response_model=list[ImportLogLineOut])
+async def import_log(
+    session_id: uuid.UUID,
+    limit: int = Query(200, ge=1, le=1000),
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list:
+    """What the pipeline said about this import's files (REQ-196).
+
+    The per-file outcomes live on `import_item`; this is the other half — the
+    worker's own log lines for those files, so "failed" comes with the why
+    that was written at the time rather than reconstructed later.
+    """
+    await _owned(session, user, session_id)
+    file_ids = sa.select(ImportItem.source_file_id).where(
+        ImportItem.session_id == session_id, ImportItem.source_file_id.is_not(None)
+    )
+    rows = (
+        await session.execute(
+            sa.select(EventLog)
+            .where(EventLog.source_file_id.in_(file_ids))
+            .order_by(EventLog.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [
+        ImportLogLineOut(
+            at=row.created_at, level=row.level, message=row.message,
+            source_file_id=row.source_file_id, stage=row.stage,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/imports/{session_id}", response_model=ImportSessionOut)
@@ -127,7 +196,7 @@ async def get_import(
     from api.backlog.session import progress as progress_of
 
     import_session = await _owned(session, user, session_id)
-    return _out(import_session, await progress_of(session, import_session))
+    return await _out(session, import_session, await progress_of(session, import_session))
 
 
 @router.get("/imports/{session_id}/items", response_model=list[ImportItemOut])
@@ -170,7 +239,7 @@ async def sample(
     import_session = await _owned(session, user, session_id)
     await select_sample(session, import_session)
     await session.commit()
-    return _out(import_session, await progress_of(session, import_session))
+    return await _out(session, import_session, await progress_of(session, import_session))
 
 
 @router.post("/imports/{session_id}/run", response_model=ImportSessionOut)
@@ -213,7 +282,7 @@ async def run(
     elif done:
         import_session.state = ImportState.IMPORTING
     await session.commit()
-    return _out(import_session, await progress_of(session, import_session))
+    return await _out(session, import_session, await progress_of(session, import_session))
 
 
 @router.post("/imports/{session_id}/pause", response_model=ImportSessionOut)
@@ -227,7 +296,7 @@ async def pause(
     import_session = await _owned(session, user, session_id)
     import_session.state = ImportState.PAUSED
     await session.commit()
-    return _out(import_session, await progress_of(session, import_session))
+    return await _out(session, import_session, await progress_of(session, import_session))
 
 
 @router.post("/imports/{session_id}/curate", response_model=ImportSessionOut)
@@ -247,7 +316,7 @@ async def curate(
     import_session.state = ImportState.CURATING
     import_session.pass_number = 2
     await session.commit()
-    return _out(import_session, await progress_of(session, import_session))
+    return await _out(session, import_session, await progress_of(session, import_session))
 
 
 # --------------------------------------------------------------------------

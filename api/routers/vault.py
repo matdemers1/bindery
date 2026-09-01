@@ -11,10 +11,11 @@ at a keyboard with a PIN; a long-lived bearer token is the opposite, and
 `Scope` refuses it by construction.
 """
 
+import logging
 import uuid
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,7 @@ from api.db.enums import ActorType
 from api.db.models import AppUser, Document, SourceFile, VaultItem
 from api.db.session import get_session
 from api.schemas import (
+    MediaMetadataOut,
     VaultItemOut,
     VaultSearchHitOut,
     VaultSearchOut,
@@ -33,6 +35,8 @@ from api.schemas import (
 from api.vault import crypto, service, store
 from api.vault import search as vault_search
 from api.vault.session import sessions
+
+log = logging.getLogger("bindery.vault")
 
 router = APIRouter(prefix="/vault", tags=["vault"])
 
@@ -121,6 +125,30 @@ async def unlock(
         after={"with": "passphrase" if passphrase else "pin"},
     )
     await session.commit()
+
+    # Objects still in the one-message format are upgraded now, while the key
+    # is in hand (T-18.2). A failure here is logged and leaves the item as it
+    # was — still readable, still not range-capable — rather than failing the
+    # unlock the person just performed.
+    key = service.require_key(user.id)
+    legacy = (
+        await session.execute(
+            sa.select(VaultItem).where(
+                VaultItem.vault_id == vault.id, VaultItem.format_version < 2
+            )
+        )
+    ).scalars().all()
+    upgraded = 0
+    for item in legacy:
+        try:
+            upgraded += await store.reseal(session, item, key)
+            await session.commit()
+        except (store.VaultRefused, crypto.WrongSecret) as error:
+            await session.rollback()
+            log.error("could not re-seal vault item %s: %s", item.document_id, error)
+    if upgraded:
+        log.info("re-sealed %s vault object(s) into the chunked format", upgraded)
+
     return await state(user=user, session=session)
 
 
@@ -183,6 +211,12 @@ async def items(
                 vaulted_at=item.vaulted_at,
                 media_type=media_type,
                 is_image=store.is_image(media_type, filename),
+                is_video=store.is_video(media_type, filename),
+                media=(
+                    MediaMetadataOut.model_validate(meta["media"])
+                    if meta.get("media")
+                    else None
+                ),
             )
         )
     return out
@@ -316,13 +350,45 @@ async def search(
     )
 
 
+def _parse_range(header: str, length: int) -> tuple[int, int] | None:
+    """`bytes=A-B`, `bytes=A-`, or `bytes=-N`. Anything else, or anything
+    unsatisfiable, and the caller sends the whole file — which is what a client
+    that cannot read a 206 wanted anyway."""
+    if not header.startswith("bytes=") or length == 0:
+        return None
+    spec = header[len("bytes="):].split(",")[0].strip()
+    start_s, _, end_s = spec.partition("-")
+    try:
+        if start_s == "":
+            count = int(end_s)
+            if count <= 0:
+                return None
+            return max(0, length - count), length - 1
+        start = int(start_s)
+        end = int(end_s) if end_s else length - 1
+    except ValueError:
+        return None
+    end = min(end, length - 1)
+    if start < 0 or start > end:
+        return None
+    return start, end
+
+
 @router.get("/items/{document_id}/original")
 async def original(
     document_id: uuid.UUID,
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
+    range_header: str | None = Header(None, alias="Range"),
 ) -> Response:
-    """The decrypted original, for viewing or downloading while unlocked."""
+    """The decrypted original, for viewing, downloading — or playing.
+
+    Honours `Range` (REQ-192): a browser plays video by asking for byte ranges,
+    and under the chunked format each one is answered by decrypting only the
+    chunks it covers. The 423 for a locked vault comes first, before any chunk
+    is touched — a range must never be a way to read one byte of a locked
+    vault.
+    """
     key = _key_or_423(user)
     vault = await _vault_or_404(session, user)
     item = (
@@ -335,22 +401,47 @@ async def original(
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not in your vault")
 
-    try:
-        payload = store.open_object(item.object_name, document_id, key)
-    except store.VaultRefused as error:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(error)) from error
-
     # Falls back to the filename rather than octet-stream, or a photograph
     # downloads instead of displaying — which is what every item sealed before
     # the `mime_type` fix would otherwise still do.
-    media_type = store.media_type_for(item, store.open_meta(item, key))
-    return Response(
-        content=payload,
-        media_type=media_type or "application/octet-stream",
-        headers={
-            # No caching anywhere. A decrypted vault document sitting in a
-            # browser or proxy cache outlives the unlock that authorised it.
-            "Cache-Control": "no-store, no-cache, must-revalidate, private",
-            "Content-Disposition": "inline",
-        },
+    media_type = (
+        store.media_type_for(item, store.open_meta(item, key)) or "application/octet-stream"
     )
+    headers = {
+        # No caching anywhere. A decrypted vault document sitting in a browser
+        # or proxy cache outlives the unlock that authorised it.
+        "Cache-Control": "no-store, no-cache, must-revalidate, private",
+        "Content-Disposition": "inline",
+        "Accept-Ranges": "bytes",
+    }
+
+    try:
+        reader = store.open_reader(item.object_name, document_id, key)
+        if reader is None:
+            # A v1 object: the whole file is the only thing it can give, which
+            # is what it always cost. The re-seal on the next unlock retires it.
+            return Response(
+                content=store.open_object(item.object_name, document_id, key),
+                media_type=media_type, headers=headers,
+            )
+
+        if range_header and (span := _parse_range(range_header, reader.length)):
+            start, end = span
+            # Only the chunks covering the range are decrypted (ADR-013). A
+            # 2 GB video seeked to the middle costs two chunks of memory.
+            return Response(
+                content=reader.read_range(start, end),
+                status_code=status.HTTP_206_PARTIAL_CONTENT,
+                media_type=media_type,
+                headers={
+                    **headers,
+                    "Content-Range": f"bytes {start}-{end}/{reader.length}",
+                },
+            )
+        return Response(content=reader.read_all(), media_type=media_type, headers=headers)
+    except store.VaultRefused as error:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(error)) from error
+    except crypto.WrongSecret as error:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "the vault object did not decrypt"
+        ) from error

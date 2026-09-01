@@ -35,6 +35,7 @@ from api.db.enums import ActorType, IngestSource
 from api.db.models import Library
 from api.db.session import SessionFactory
 from api.storage.blobs import CHUNK_SIZE, store_stream
+from worker import media
 
 log = logging.getLogger("bindery.worker.inbox")
 
@@ -44,7 +45,9 @@ FAILED_DIR = ".failed"
 # Directories the watcher manages itself, plus anything hidden.
 RESERVED = {INGESTED_DIR, FAILED_DIR}
 
-SUPPORTED_SUFFIXES = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif"}
+SUPPORTED_SUFFIXES = (
+    {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif"} | media.VIDEO_SUFFIXES
+)
 
 
 @dataclass(frozen=True)

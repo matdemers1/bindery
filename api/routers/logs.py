@@ -21,6 +21,7 @@ from api.db.models import (
     Document,
     EventLog,
     Job,
+    MediaMetadata,
     Page,
     SourceFile,
 )
@@ -29,11 +30,13 @@ from api.schemas import (
     FileProgressOut,
     LogEntryOut,
     LogPageOut,
+    MediaMetadataOut,
     PhotoOut,
     PhotoWallOut,
     PipelineFilesOut,
 )
 from api.vault import boundary as vault
+from api.vault.store import VIDEO_SUFFIXES
 
 router = APIRouter(tags=["logs"])
 
@@ -255,8 +258,9 @@ async def photos(
     ),
     limit: int = Query(120, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    kind: str = Query("image", pattern="^(image|video)$", description="photos or videos"),
 ) -> PhotoWallOut:
-    """Every image in the archive, as pictures rather than as rows.
+    """Every image — or every video — in the archive, as pictures rather than rows.
 
     A list of filenames is the wrong shape for photographs: you recognise a
     picture instantly and read a filename slowly, so a grid finds things a
@@ -301,7 +305,10 @@ async def photos(
         # needed it.
         vault.document_clause(user.id),
         sa.or_(
-            *[SourceFile.original_filename.ilike(f"%{ext}") for ext in IMAGE_SUFFIXES]
+            *[
+                SourceFile.original_filename.ilike(f"%{ext}")
+                for ext in (IMAGE_SUFFIXES if kind == "image" else VIDEO_SUFFIXES)
+            ]
         ),
     ]
     if q:
@@ -354,6 +361,19 @@ async def photos(
         )
     ).all()
 
+    # One query for every row's metadata rather than one per row. Absent for
+    # anything that arrived before Phase 18 read files for it.
+    media = {
+        row.source_file_id: row
+        for row in (
+            await session.execute(
+                sa.select(MediaMetadata).where(
+                    MediaMetadata.source_file_id.in_([r[0].source_file_id for r in rows])
+                )
+            )
+        ).scalars().all()
+    } if rows else {}
+
     return PhotoWallOut(
         total=total or 0,
         photos=[
@@ -371,6 +391,12 @@ async def photos(
                     row[0].title
                     and row[0].summary
                     and ((row.text_chars or 0) >= MIN_USABLE_TEXT or row.looked_at)
+                ),
+                kind=kind,
+                media=(
+                    MediaMetadataOut.model_validate(media[row[0].source_file_id])
+                    if row[0].source_file_id in media
+                    else None
                 ),
             )
             for row in rows
