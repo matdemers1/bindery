@@ -149,7 +149,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "7cabe4500cab6492ae8c5994a8d35a82ceb0e8ad"
     },
     {
       "route": "/vault",
