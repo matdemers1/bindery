@@ -420,9 +420,36 @@ async def main() -> None:
     )
     # Announced before any work is claimed, so a worker that dies during its
     # first job has still said which build it was.
+    #
+    # Best-effort, and that is the whole point of the try. Migrations are
+    # applied explicitly and never on boot (REQ-114), and the deploy sequence is
+    # `docker compose up -d` *then* `alembic upgrade head` — so between those two
+    # commands the worker is running against a database that does not yet have
+    # the tables this release expects. Crashing there makes the documented
+    # deploy sequence broken, and it crashes on the one statement whose only job
+    # is telemetry.
+    #
+    # Found in CI, where the gap is seconds rather than the moments a human
+    # takes: the worker died on `relation "service_heartbeat" does not exist`,
+    # four jobs sat queued forever, and the browser searched an archive nothing
+    # was processing. It survived in production only because that table has
+    # existed since Phase 6.
+    #
+    # The drift itself is not swallowed: `api/version.py` compares the applied
+    # revision against the code's head and the UI says "migration pending",
+    # which is the thing actually designed to report this.
     async with SessionFactory() as session:
-        await version.announce(session, "worker")
-        await session.commit()
+        try:
+            await version.announce(session, "worker")
+            await session.commit()
+        except Exception:
+            log.warning(
+                "could not record this worker's build — the database is probably "
+                "behind this release. Apply migrations: `alembic upgrade head`. "
+                "Carrying on; the schema check will report the drift.",
+                exc_info=True,
+            )
+            await session.rollback()
 
     stopping = asyncio.Event()
     in_flight: set[uuid.UUID] = set()

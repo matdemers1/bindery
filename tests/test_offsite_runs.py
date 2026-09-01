@@ -296,3 +296,53 @@ def test_both_images_can_take_a_dump():
             f"{image} cannot run pg_dump — a backup taken from it would fail at "
             "the moment it is needed"
         )
+
+
+def test_the_worker_survives_a_database_behind_its_release():
+    """The deploy sequence starts containers before migrating (REQ-114).
+
+    `docker compose up -d` then `alembic upgrade head` means the worker spends
+    the gap running against a database that does not yet have this release's
+    tables. It used to die there — on the heartbeat, whose only job is
+    telemetry — which made the documented deploy sequence broken and left the
+    queue unattended.
+
+    Found in CI, where the gap is seconds rather than however long a human
+    takes: `relation "service_heartbeat" does not exist`, four jobs queued
+    forever, and a browser searching an archive nothing was processing.
+    Reproduced locally by renaming the table: the old worker exited 1, the
+    fixed one stays up and says why.
+
+    The drift itself is still reported — `api/version.py` compares the applied
+    revision against the code's head — so this makes the worker survive it, not
+    hide it.
+    """
+    import ast
+
+    source = (Path(__file__).resolve().parent.parent / "worker" / "runner.py").read_text()
+    main = next(
+        node for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "main"
+    )
+    announces = [
+        node for node in ast.walk(main)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "announce"
+    ]
+    assert announces, "the startup heartbeat has gone; this guard is watching nothing"
+
+    guarded = [
+        node for node in ast.walk(main)
+        if isinstance(node, ast.Try)
+        and any(
+            isinstance(inner, ast.Call)
+            and isinstance(inner.func, ast.Attribute)
+            and inner.func.attr == "announce"
+            for inner in ast.walk(node)
+        )
+    ]
+    assert guarded, (
+        "the startup heartbeat is not inside a try — a database one migration "
+        "behind will kill the worker before anyone can run alembic"
+    )
