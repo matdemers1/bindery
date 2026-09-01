@@ -47,7 +47,11 @@ export default function UnlockForm({
         caught instanceof ApiError && caught.status === 401
           ? usePassphrase
             ? "That passphrase does not open this vault."
-            : `That PIN is wrong. ${remaining - 1 > 0 ? `${remaining - 1} attempt${remaining - 1 === 1 ? "" : "s"} left before the PIN is switched off — the passphrase will still work.` : "The PIN has now been switched off. Use the passphrase."}`
+            : remaining - 1 > 0
+              // The count lives under the input, in one place. Repeating it
+              // here made the same sentence appear twice on one screen.
+              ? "That PIN is wrong."
+              : "That was the last attempt, so the PIN is now switched off. The passphrase still opens the vault and nothing in it is lost."
           : caught instanceof Error
             ? caught.message
             : String(caught),

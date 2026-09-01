@@ -14,7 +14,7 @@ test("the sidebar shows the daily destinations and hides setup", async ({ signed
   // exact-name match passes or fails on whether the archive happens to be
   // healthy, which is not what this test is about.
   for (const href of ["/", "/search", "/archive", "/files", "/photos",
-                      "/review", "/organise", "/import", "/rules",
+                      "/vault", "/review", "/organise", "/import", "/rules",
                       "/trust", "/pipeline"]) {
     await expect(nav.locator(`a[href="${href}"]`), `${href} is missing`).toBeVisible();
   }

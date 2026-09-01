@@ -193,6 +193,28 @@ async def main() -> int:
             await browser.close()
             return 1
 
+        # Signed in is not the same as able to see anything. Capturing with an
+        # account that has no documents writes fifteen pictures of empty states
+        # and reports success — the same failure the sign-in guard above exists
+        # to prevent, one step further along. It happened.
+        visible = await page.evaluate(
+            """async () => {
+                const r = await fetch('/api/archive?limit=1', {credentials: 'same-origin'});
+                if (!r.ok) return -1;
+                const body = await r.json();
+                return body.total ?? (body.documents ? body.documents.length : 0);
+            }"""
+        )
+        if visible == 0:
+            print(
+                f"{EMAIL} can see no documents, so every screenshot would show an "
+                "empty archive. Capture with the seeded demonstration account "
+                "(scripts/seed-demo.py) instead.\nNothing was captured.",
+                file=sys.stderr,
+            )
+            await browser.close()
+            return 1
+
         # The vault screen shows a setup form until a vault exists, and a guide
         # about searching and restoring illustrated by an empty create-account
         # form is a guide that documents the wrong screen. So one is made here,
