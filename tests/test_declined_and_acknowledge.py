@@ -168,3 +168,32 @@ async def test_the_migration_reclassified_the_real_refusals(session, signed_in):
     panel = await health_panel.collect(session)
     assert panel.declined == 3
     assert panel.healthy is True, "three correct refusals are not an unhealthy archive"
+
+
+async def test_acknowledging_tells_the_badge(client, session, signed_in, monkeypatch):
+    """The action exists to turn the badge off, so it has to say so.
+
+    Without a published hint the sidebar refetches on its own timer — a minute
+    — and keeps warning about something you have just answered. Long enough to
+    read as "it did not work", which is how people learn to stop pressing the
+    button (ADR-011). It also made the e2e badge assertion flaky, which is the
+    same defect wearing a different hat.
+    """
+    from api import events
+
+    announced: list[list] = []
+
+    async def spy(session_, topics, **kwargs):
+        announced.append(list(topics))
+
+    monkeypatch.setattr(events, "publish", spy)
+
+    _, library = await signed_in()
+    job = await _job(session, library.id, state=JobState.DEAD_LETTER, error="TimeoutError()")
+
+    response = await client.post(f"/api/pipeline/jobs/{job.id}/acknowledge")
+    assert response.status_code == 200
+    assert [events.Topic.JOBS] in announced, (
+        "acknowledging published nothing, so the badge only clears on the "
+        "client's fallback timer"
+    )

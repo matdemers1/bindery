@@ -205,6 +205,13 @@ async def acknowledge(
         before=before,
         after={"acknowledged_at": job.acknowledged_at.isoformat() if job.acknowledged_at else None},
     )
+    # The one action whose entire purpose is to turn the badge off has to tell
+    # the badge. Without this the sidebar keeps warning for up to a minute
+    # after you have answered it — long enough to read as "it did not work",
+    # which is how people learn to stop pressing the button (ADR-011).
+    # In the same session as the mutation: pg_notify fires on commit and is
+    # discarded on rollback, so it cannot announce a change that did not happen.
+    await events.publish(session, [events.Topic.JOBS])
     await session.commit()
     await session.refresh(job)
     return JobOut.model_validate(job)

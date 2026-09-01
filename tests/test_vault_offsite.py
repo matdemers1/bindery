@@ -140,6 +140,23 @@ def test_the_manifest_says_what_cannot_be_read(data_root, tmp_path, monkeypatch)
     assert result.vault_object_count == 2
 
 
+async def test_an_archive_with_no_vault_replicates_normally(session, data_root):
+    """The path every stack that has never made a vault takes, nightly.
+
+    `vault/objects/` does not exist until the first document is sealed, so this
+    is the ordinary case rather than an edge one — and it runs unattended.
+    """
+    from api import offsite
+
+    fake = FakeS3()
+    result = await offsite.sync_vault_objects(
+        session, CONFIG, fake, vault_root=store.vault_root()
+    )
+
+    assert (result.uploaded, result.skipped, result.failures) == (0, 0, [])
+    assert fake.objects == {}
+
+
 async def test_the_sealed_objects_reach_the_bucket(session, data_root):
     names = _seal_two(data_root)
     fake = FakeS3()
