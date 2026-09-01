@@ -109,7 +109,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "0ed09283068541722d269a71edac3f30b14e1ad9"
     },
     {
       "route": "/rules",

@@ -29,7 +29,16 @@ import uuid
 import sqlalchemy as sa
 
 from api.db.enums import IngestSource, JobStage, JobState, ReviewState, SourceFileState
-from api.db.models import AppUser, Document, Job, Library, Membership, Page, SourceFile
+from api.db.models import (
+    AppUser,
+    Document,
+    FieldSource,
+    Job,
+    Library,
+    Membership,
+    Page,
+    SourceFile,
+)
 from api.db.session import SessionFactory
 
 EMAIL = os.environ.get("BINDERY_EMAIL", "demo@example.com")
@@ -199,11 +208,22 @@ async def _document_awaiting_review(session, library_id) -> None:
             source_file_id=existing.id,
             page_start=1,
             page_end=1,
-            title="Harbour Utilties - Statment",  # the misspelling is the point
         )
         session.add(document)
+
+    # Reset every run, not just on creation. The correction specs edit this
+    # document and the screenshot capture photographs it, so a fixture that
+    # kept whatever the last test typed would drift into the documentation —
+    # which is how "Corrected by the e2e run" ended up in review.png once.
+    document.title = "Harbour Utilties - Statment"  # the misspelling is the point
     document.review_state = ReviewState.NEEDS_REVIEW
     await session.flush()
+
+    # And give the fields back, or the second run starts with them claimed by
+    # whoever the first run signed in as.
+    await session.execute(
+        sa.delete(FieldSource).where(FieldSource.document_id == document.id)
+    )
     print(f"{filename} is waiting for review")
 
 
