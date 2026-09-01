@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: up down build logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
+.PHONY: up down build logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite e2e lint-web lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
 
 build:            ## build all images
 	$(COMPOSE) build
@@ -34,6 +34,12 @@ test:             ## full suite against a throwaway database
 
 test-pipeline:    ## OCR / pipeline / golden-corpus suites (needs the OCR toolchain)
 	$(COMPOSE) --profile test run --rm test-worker
+
+e2e:              ## end-to-end tests against the running stack (needs `make up`)
+	$(COMPOSE) --profile e2e run --rm e2e
+
+lint-web:         ## eslint + tsc for the web app
+	cd web && npm run lint && npm run typecheck
 
 lifecycle-check:  ## audit the offsite bucket's expiry rules (R-21: a bucket-wide rule deletes the archive)
 	$(COMPOSE) exec api python -m api.cli lifecycle-check

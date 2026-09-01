@@ -187,8 +187,17 @@ export function useLiveQuery(
   { fallbackMs = 15000 }: { fallbackMs?: number } = {},
 ) {
   const { subscribe, degraded } = useLive();
+  // The newest `load`, without it being a dependency of the subscription
+  // below — every call site passes a fresh closure, so depending on it would
+  // resubscribe on every render.
   const latest = useRef(load);
-  latest.current = load;
+  // Assigned in an effect rather than during render. Writing to a ref while
+  // rendering is the thing React cannot see, and under StrictMode or a
+  // re-render that is thrown away it can leave the ref pointing at a closure
+  // that was never committed.
+  useEffect(() => {
+    latest.current = load;
+  }, [load]);
 
   // Topics are declared inline at every call site, so a fresh array each render
   // would resubscribe forever. The contents are what matter.

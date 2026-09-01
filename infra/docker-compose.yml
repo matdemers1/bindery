@@ -161,6 +161,39 @@ services:
       postgres:
         condition: service_healthy
 
+  # End-to-end tests (Playwright):
+  #   docker compose --profile e2e run --rm e2e
+  #
+  # Same network trick as `screenshots`, and for the same two reasons: there
+  # are no published ports (REQ-104), and the session cookie is `Secure`, so a
+  # browser reaching the app over plain `http://web` discards it silently — the
+  # login succeeds and every later request 401s while the screen sits on the
+  # login form looking like a wrong password. `localhost` is the one origin
+  # Chrome trusts without TLS.
+  e2e:
+    profiles: [e2e]
+    image: mcr.microsoft.com/playwright:v1.62.1-noble
+    working_dir: /repo/web
+    network_mode: "service:web"
+    environment:
+      BINDERY_URL: http://localhost
+      BINDERY_EMAIL: ${BINDERY_EMAIL:-demo@example.com}
+      BINDERY_PASSWORD: ${BINDERY_PASSWORD:-}
+      CI: ${CI:-}
+    volumes:
+      - ..:/repo
+    depends_on:
+      web:
+        condition: service_healthy
+    # `npm ci` against the repo's lockfile, so the browsers in the image and
+    # the @playwright/test that drives them stay the same version. A mismatch
+    # fails with an executable-not-found several layers down.
+    command:
+      - sh
+      - -c
+      - |
+        npm ci --no-audit --no-fund && npx playwright test
+
   # Documentation screenshots (T-11.2, REQ-149):
   #   docker compose --profile screenshots run --rm screenshots
   #

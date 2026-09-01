@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Playwright specs run in Node, not the browser: `Buffer` and `process`
+    // come from there. Kept out of the app's own tsconfig so nothing in `src`
+    // can reach for a Node API by accident.
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["e2e", "playwright.config.ts"]
+}

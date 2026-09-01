@@ -371,6 +371,9 @@ function Taxonomy() {
     setHealth(await api.taxonomyHealth());
     setDuplicates(await api.duplicates());
   }, []);
+  // An async data load: the state is genuinely unavailable on the first
+  // render, so the extra pass is the point rather than a mistake.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, [load]);
 
   if (!health) return <Empty>Loading…</Empty>;

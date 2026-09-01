@@ -3,16 +3,60 @@ name: build
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
-# The images are what the ZimaOS host pulls. They are tagged three ways:
-#   :main   — what the host normally runs, so a redeploy is `pull` with no edit
-#   :<sha>  — an exact, immutable reference to roll back to
-#   :latest — convenience only
-# Deploy stays a deliberate manual pull-and-restart. You choose when the thing
-# holding your passport restarts.
+# Four gates, in order, and nothing is published until all four pass.
+#
+#   lint  →  unit  →  integration  →  e2e  →  images
+#
+# Sequential on purpose. Running them in parallel would finish sooner and would
+# also spend a full e2e run — build three images, stand up Postgres, seed a
+# corpus, drive a browser — to tell you about a lint error. The gates are
+# ordered cheapest-first so the common failure is also the fastest one.
+#
+# `actions/checkout@v5` and `setup-python@v6` run on Node 24. The v4/v5 pair
+# targeted Node 20, which GitHub now force-upgrades and warns about on every
+# run — a warning on every green build is one nobody reads.
+
 jobs:
-  test:
+  lint:
+    name: lint (ruff, eslint, tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install python tooling
+        run: |
+          python infra/extract-deps.py dev > requirements.txt
+          pip install -r requirements.txt
+      - name: ruff
+        run: ruff check api worker tests
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: eslint
+        working-directory: web
+        # --max-warnings 0: a warning nobody has to fix is the same trap as a
+        # badge that is always on.
+        run: npm run lint
+      - name: tsc
+        working-directory: web
+        # The app and the e2e specs. Previously the only typecheck was `tsc -b`
+        # inside Dockerfile.web, which runs *after* the tests — so a type error
+        # failed the image build as an opaque Docker error rather than here.
+        run: npm run typecheck
+
+  unit:
+    name: unit (pytest)
+    needs: lint
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -31,29 +75,131 @@ jobs:
       JWT_SECRET: ci-only-not-a-real-secret
       COOKIE_SECURE: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # `test_docs.py` asks git when a screen last changed, to catch a
           # documentation screenshot that is quietly out of date. A shallow
           # clone has no history to ask, and the check would pass by knowing
-          # nothing — which is exactly the failure mode it exists to prevent.
+          # nothing — which is exactly the failure it exists to prevent.
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Install
         run: |
           python infra/extract-deps.py dev > requirements.txt
           pip install -r requirements.txt
-      - name: Lint
-        run: ruff check api worker tests
-      - name: Test
-        # The default run excludes `live_api` and `slow`, so CI never makes a
+      - name: pytest
+        # The default run excludes `live_api` and `slow`, so this never makes a
         # billable API call and never needs the OCR toolchain.
         run: python -m pytest
 
+  integration:
+    name: integration (OCR, golden corpus)
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Run the slow suite in the worker image
+        # The OCR toolchain — tesseract, ghostscript, LibreOffice — only exists
+        # in the worker image, so this tier runs where its dependencies are
+        # rather than reinstalling several hundred megabytes onto the runner.
+        run: |
+          cp .env.example .env 2>/dev/null || true
+          docker compose --env-file .env -f infra/docker-compose.yml \
+            --profile test run --rm test-worker \
+            python -m pytest -m slow --no-header
+        env:
+          POSTGRES_USER: bindery
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: bindery
+          JWT_SECRET: ci-only-not-a-real-secret
+          HOST_DATA_ROOT: /tmp/bindery-ci-data
+
+  e2e:
+    name: e2e (playwright)
+    needs: integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Stand up the stack
+        run: |
+          cp .env.example .env 2>/dev/null || true
+          mkdir -p /tmp/bindery-ci-data/inbox/household
+          docker compose --env-file .env -f infra/docker-compose.yml up -d --build
+        env: &stack
+          POSTGRES_USER: bindery
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: bindery
+          JWT_SECRET: ci-only-not-a-real-secret
+          HOST_DATA_ROOT: /tmp/bindery-ci-data
+      - name: Migrate
+        # Explicitly, never on boot (REQ-114) — the same way a real deploy does
+        # it, so this exercises the path that is actually used.
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T api \
+            alembic upgrade head
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T api \
+            python -m api.cli seed-forms
+        env: *stack
+      - name: Create the throwaway account
+        # Generated per run rather than committed. A password in the repository
+        # is a password in the repository whatever the file is called.
+        run: |
+          echo "BINDERY_PASSWORD=Grebulon-Verdant-$(openssl rand -hex 6)" >> "$GITHUB_ENV"
+        env: *stack
+      - name: Create the account the fixtures belong to
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T api \
+            python -m api.cli create-user --email demo@example.com \
+            --password "$BINDERY_PASSWORD" --library "Demo Papers"
+        env: *stack
+      - name: Seed the corpus
+        # After the account exists: seed-demo ingests into that user's library.
+        run: |
+          # Piped in rather than run from the image. The api runtime stage
+          # ships `api/` and `alembic/` and deliberately not `scripts/` — only
+          # the `dev` stage carries the whole tree — so `python scripts/...`
+          # inside that container is a file-not-found. `python -` reads stdin.
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T api \
+            python - < scripts/seed-demo.py
+          # And the two job states the pipeline specs check. Without them those
+          # tests skip, and a test that always skips is not a test.
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T \
+            -e BINDERY_EMAIL=demo@example.com api \
+            python - < scripts/seed-e2e-states.py
+        env:
+          <<: *stack
+          BINDERY_EMAIL: demo@example.com
+
+      - name: Playwright
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.yml \
+            --profile e2e run --rm e2e
+        env:
+          <<: *stack
+          BINDERY_EMAIL: demo@example.com
+          CI: "true"
+      - name: What the stack said, if it failed
+        if: failure()
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.yml logs --tail 120 api worker web
+        env: *stack
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
+
   images:
-    needs: test
+    name: publish
+    needs: e2e
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -62,7 +208,7 @@ jobs:
       matrix:
         service: [api, worker, web]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -85,6 +231,11 @@ jobs:
           # what stops the api and worker images shipping their `dev` stage,
           # which carries the test harness and the whole source tree.
           target: runtime
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           # Derived from the build, never hand-maintained (REQ-152). A version
           # somebody has to remember to bump is a version that is wrong, and
           # "which code is actually running" is the first question of every
@@ -93,8 +244,3 @@ jobs:
             BINDERY_COMMIT=${{ github.sha }}
             BINDERY_BUILT_AT=${{ github.event.repository.updated_at }}
             BINDERY_REF=${{ github.ref_name }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max

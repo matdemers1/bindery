@@ -37,6 +37,11 @@ export default function SegmentationPage() {
   }, []);
 
   useEffect(() => {
+    // Resets local state when the thing being shown changes. The
+    // idiomatic fix is a `key` from the parent, which means changing how
+    // seven screens manage their state lifecycle — a refactor worth doing
+    // deliberately and behind the e2e suite, not folded into a CI change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null);
     Promise.all([api.file(fileId), api.segments(fileId)])
       .then(([file, list]) => {

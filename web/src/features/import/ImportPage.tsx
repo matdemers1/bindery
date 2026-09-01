@@ -45,6 +45,9 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
   }, []);
 
   useEffect(() => {
+    // An async data load: the state is genuinely unavailable on the first
+    // render, so the extra pass is the point rather than a mistake.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 

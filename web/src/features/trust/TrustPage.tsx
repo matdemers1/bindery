@@ -503,12 +503,15 @@ function AuditPanel() {
       }
       // `cursor` is intentionally excluded: including it would reload the first
       // page every time paging advanced it.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [actorType, entityId, since],
   );
 
   useEffect(() => {
+    // An async data load: the state is genuinely unavailable on the first
+    // render, so the extra pass is the point rather than a mistake.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 

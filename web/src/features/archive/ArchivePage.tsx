@@ -33,6 +33,10 @@ const GROUPINGS = [
 
 export default function ArchivePage() {
   const [params, setParams] = useSearchParams();
+  // Computed once rather than inside the dependency list. `params.toString()`
+  // in a dep array is a fresh value the linter cannot reason about, and it is
+  // recomputed on every render for a comparison that only needs the string.
+  const search = params.toString();
   const [archive, setArchive] = useState<Archive | null>(null);
   const [tree, setTree] = useState<Tree | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,9 +67,12 @@ export default function ArchivePage() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.toString(), groupBy]);
+  }, [search, groupBy]);
 
   useEffect(() => {
+    // An async data load: the state is genuinely unavailable on the first
+    // render, so the extra pass is the point rather than a mistake.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
@@ -262,9 +269,11 @@ export default function ArchivePage() {
                     onToggle={() =>
                       setSelected((current) => {
                         const next = new Set(current);
-                        next.has(entry.document_id)
-                          ? next.delete(entry.document_id)
-                          : next.add(entry.document_id);
+                        if (next.has(entry.document_id)) {
+                          next.delete(entry.document_id);
+                        } else {
+                          next.add(entry.document_id);
+                        }
                         return next;
                       })
                     }

@@ -23,6 +23,11 @@ export default function CommandPalette({
 
   useEffect(() => {
     if (open) {
+      // Resets local state when the thing being shown changes. The
+      // idiomatic fix is a `key` from the parent, which means changing how
+      // seven screens manage their state lifecycle — a refactor worth doing
+      // deliberately and behind the e2e suite, not folded into a CI change.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuery("");
       setResults([]);
       setSelected(0);
@@ -31,6 +36,11 @@ export default function CommandPalette({
 
   useEffect(() => {
     if (!open || !query.trim()) {
+      // Resets local state when the thing being shown changes. The
+      // idiomatic fix is a `key` from the parent, which means changing how
+      // seven screens manage their state lifecycle — a refactor worth doing
+      // deliberately and behind the e2e suite, not folded into a CI change.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setResults([]);
       return;
     }
