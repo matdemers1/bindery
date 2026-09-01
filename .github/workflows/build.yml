@@ -107,16 +107,26 @@ jobs:
         # in the worker image, so this tier runs where its dependencies are
         # rather than reinstalling several hundred megabytes onto the runner.
         run: |
-          cp .env.example .env 2>/dev/null || true
+          # The same coherent .env as the e2e job, for the same reason: every
+          # service must read one set of values, not two files that agree by
+          # coincidence.
+          cat > .env <<'ENV'
+          POSTGRES_USER=bindery
+          POSTGRES_PASSWORD=ci
+          POSTGRES_DB=bindery
+          DATABASE_URL=postgresql+asyncpg://bindery:ci@postgres:5432/bindery
+          JWT_SECRET=ci-only-not-a-real-secret
+          COOKIE_SECURE=false
+          HOST_DATA_ROOT=/tmp/bindery-ci-data
+          DATA_ROOT=/data
+          INBOX_ROOT=/data/inbox
+          WORKER_CONCURRENCY=2
+          OCR_LANGUAGES=eng
+          ENV
+          mkdir -p /tmp/bindery-ci-data/inbox/household
           docker compose --env-file .env -f infra/docker-compose.yml \
             --profile test run --rm test-worker \
             python -m pytest -m slow --no-header
-        env:
-          POSTGRES_USER: bindery
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: bindery
-          JWT_SECRET: ci-only-not-a-real-secret
-          HOST_DATA_ROOT: /tmp/bindery-ci-data
 
   e2e:
     name: e2e (playwright)
@@ -124,19 +134,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Write a coherent .env
+        # Not `cp .env.example .env`. Compose interpolates `${POSTGRES_PASSWORD}`
+        # from the *shell* environment, so Postgres came up with `ci` while the
+        # api read DATABASE_URL out of the copied example and got the template's
+        # password — "password authentication failed for user bindery", from two
+        # files that each looked right on their own.
+        #
+        # One file, written once, and every service reads the same values.
+        run: |
+          cat > .env <<'ENV'
+          POSTGRES_USER=bindery
+          POSTGRES_PASSWORD=ci
+          POSTGRES_DB=bindery
+          DATABASE_URL=postgresql+asyncpg://bindery:ci@postgres:5432/bindery
+          JWT_SECRET=ci-only-not-a-real-secret
+          JWT_ACCESS_TTL_MINUTES=30
+          JWT_REFRESH_TTL_DAYS=30
+          COOKIE_SECURE=false
+          HOST_DATA_ROOT=/tmp/bindery-ci-data
+          DATA_ROOT=/data
+          INBOX_ROOT=/data/inbox
+          WORKER_CONCURRENCY=2
+          OCR_LANGUAGES=eng
+          OCR_DESKEW=true
+          OCR_CLEAN=true
+          ENV
+          mkdir -p /tmp/bindery-ci-data/inbox/household
       - name: Stand up the stack
         run: |
-          cp .env.example .env 2>/dev/null || true
-          mkdir -p /tmp/bindery-ci-data/inbox/household
           docker compose --env-file .env -f infra/docker-compose.yml up -d --build
         # Repeated rather than a YAML anchor: Actions parses anchors but does
         # not support merge keys, and `<<:` fails the whole workflow file.
-        env:
-          POSTGRES_USER: bindery
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: bindery
-          JWT_SECRET: ci-only-not-a-real-secret
-          HOST_DATA_ROOT: /tmp/bindery-ci-data
       - name: Migrate
         # Explicitly, never on boot (REQ-114) — the same way a real deploy does
         # it, so this exercises the path that is actually used.
@@ -145,34 +174,16 @@ jobs:
             alembic upgrade head
           docker compose --env-file .env -f infra/docker-compose.yml exec -T api \
             python -m api.cli seed-forms
-        env:
-          POSTGRES_USER: bindery
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: bindery
-          JWT_SECRET: ci-only-not-a-real-secret
-          HOST_DATA_ROOT: /tmp/bindery-ci-data
       - name: Create the throwaway account
         # Generated per run rather than committed. A password in the repository
         # is a password in the repository whatever the file is called.
         run: |
           echo "BINDERY_PASSWORD=Grebulon-Verdant-$(openssl rand -hex 6)" >> "$GITHUB_ENV"
-        env:
-          POSTGRES_USER: bindery
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: bindery
-          JWT_SECRET: ci-only-not-a-real-secret
-          HOST_DATA_ROOT: /tmp/bindery-ci-data
       - name: Create the account the fixtures belong to
         run: |
           docker compose --env-file .env -f infra/docker-compose.yml exec -T api \
             python -m api.cli create-user --email demo@example.com \
             --password "$BINDERY_PASSWORD" --library "Demo Papers"
-        env:
-          POSTGRES_USER: bindery
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: bindery
-          JWT_SECRET: ci-only-not-a-real-secret
-          HOST_DATA_ROOT: /tmp/bindery-ci-data
       - name: Seed the corpus
         # After the account exists: seed-demo ingests into that user's library.
         run: |
@@ -187,36 +198,18 @@ jobs:
           docker compose --env-file .env -f infra/docker-compose.yml exec -T \
             -e BINDERY_EMAIL=demo@example.com api \
             python - < scripts/seed-e2e-states.py
-        env:
-          POSTGRES_USER: bindery
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: bindery
-          JWT_SECRET: ci-only-not-a-real-secret
-          HOST_DATA_ROOT: /tmp/bindery-ci-data
           BINDERY_EMAIL: demo@example.com
 
       - name: Playwright
         run: |
           docker compose --env-file .env -f infra/docker-compose.yml \
             --profile e2e run --rm e2e
-        env:
-          POSTGRES_USER: bindery
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: bindery
-          JWT_SECRET: ci-only-not-a-real-secret
-          HOST_DATA_ROOT: /tmp/bindery-ci-data
           BINDERY_EMAIL: demo@example.com
           CI: "true"
       - name: What the stack said, if it failed
         if: failure()
         run: |
           docker compose --env-file .env -f infra/docker-compose.yml logs --tail 120 api worker web
-        env:
-          POSTGRES_USER: bindery
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: bindery
-          JWT_SECRET: ci-only-not-a-real-secret
-          HOST_DATA_ROOT: /tmp/bindery-ci-data
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
