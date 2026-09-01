@@ -24,7 +24,11 @@ type Kind = "image" | "video";
  * classified, so "nothing said about these" does not apply to it.
  */
 export default function PhotosPage() {
-  const [kind, setKind] = useState<Kind>("image");
+  // Null until chosen, so the first view can follow what is actually there:
+  // an archive whose only pictures are videos should not open on an empty
+  // Photos tab. Same reasoning as the vault's tabs.
+  const [chosen, setChosen] = useState<Kind | null>(null);
+  const [imageCount, setImageCount] = useState<number | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [total, setTotal] = useState(0);
   const [videoCount, setVideoCount] = useState<number | null>(null);
@@ -34,22 +38,30 @@ export default function PhotosPage() {
   const [describing, setDescribing] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
 
+  const kind: Kind =
+    chosen ?? (imageCount === 0 && (videoCount ?? 0) > 0 ? "video" : "image");
+
   const load = useCallback(async () => {
+    // Both counts every time, so each tab label says whether there is anything
+    // behind it without making you click to find out — and so the default tab
+    // can be decided from what is there.
+    const [images, videos] = await Promise.all([
+      api.photos({ kind: "image", limit: 1 }),
+      api.photos({ kind: "video", limit: 1 }),
+    ]);
+    setImageCount(images.total);
+    setVideoCount(videos.total);
+    const showing: Kind =
+      chosen ?? (images.total === 0 && videos.total > 0 ? "video" : "image");
     const wall = await api.photos({
       q: q || undefined,
-      undescribed: kind === "image" ? undescribed : false,
+      undescribed: showing === "image" ? undescribed : false,
       limit: 200,
-      kind,
+      kind: showing,
     });
     setPhotos(wall.photos);
     setTotal(wall.total);
-    // The other tab's count, so the tab label can say whether there is anything
-    // behind it without making you click to find out.
-    if (kind === "image") {
-      const videos = await api.photos({ kind: "video", limit: 1 });
-      setVideoCount(videos.total);
-    }
-  }, [q, undescribed, kind]);
+  }, [q, undescribed, chosen]);
 
   useLiveQuery(["documents", "files"], load);
 
@@ -85,13 +97,13 @@ export default function PhotosPage() {
       <div className="flex gap-1 border-b border-edge">
         {(["image", "video"] as const).map((which) => {
           const Icon = which === "image" ? Images : Film;
-          const count = which === "image" ? (kind === "image" ? total : null) : videoCount;
+          const count = which === "image" ? imageCount : videoCount;
           return (
             <button
               key={which}
               type="button"
               onClick={() => {
-                setKind(which);
+                setChosen(which);
                 setSelected(null);
               }}
               className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm ${
