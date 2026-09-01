@@ -199,6 +199,26 @@ jobs:
             -e BINDERY_EMAIL=demo@example.com api \
             python - < scripts/seed-e2e-states.py
 
+      - name: Wait for the pipeline to finish the seeded corpus
+        # Seeding *ingests*; OCR, paging and segmentation happen afterwards in
+        # the worker. Locally the fixtures have been processed for hours, so
+        # this was invisible — in CI the browser arrived seconds after the
+        # upload and found documents that were not yet searchable. Two specs
+        # failed on that and one passed, because it matched on text rather than
+        # on a link.
+        run: |
+          for i in $(seq 1 60); do
+            pending=$(docker compose --env-file .env -f infra/docker-compose.yml \
+              exec -T postgres psql -U bindery -d bindery -tAc \
+              "select count(*) from job where state in ('queued','running')" | tr -d '[:space:]')
+            echo "  in flight: $pending"
+            [ "$pending" = "0" ] && break
+            sleep 5
+          done
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
+            psql -U bindery -d bindery -c \
+            "select state, count(*) from job group by state order by 1;"
+
       - name: Playwright
         run: |
           docker compose --env-file .env -f infra/docker-compose.yml \
