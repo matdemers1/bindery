@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router";
 import { api, type Library, type SearchResponse, fileUrl } from "../../api";
 import { rememberFoundSomething } from "../firstrun/onboarding";
 import Snippet from "../../components/Snippet";
+import VaultSearchPanel from "../vault/VaultSearchPanel";
 import { ErrorState } from "../../components/States";
 
 // Every piece of search state lives in the URL (REQ-028), so a result is a link
@@ -150,6 +151,10 @@ export default function SearchPage({
           onSuggestion={(suggestion) => update((next) => next.set("q", suggestion))}
         />
       ) : null}
+
+      {/* Its own section, below the ordinary results and off unless asked for.
+          See VaultSearchPanel for why they are not merged. */}
+      <VaultSearchPanel query={query} />
     </div>
   );
 }

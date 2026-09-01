@@ -11,6 +11,7 @@ import {
 } from "../../api";
 import { matchesTerm, queryTerms } from "../../lib/highlight";
 import WhyPanel from "../why/WhyPanel";
+import MoveToVault from "../vault/MoveToVault";
 
 /**
  * Renders a page range as if it were a standalone document (ADR-001), while
@@ -206,6 +207,9 @@ function Viewer({
             >
               Segments
             </Link>
+            {/* Documents only: the vault holds a document, not a whole bundle,
+                because a bundle is usually one vaultable page among fifty. */}
+            {mode === "document" && <MoveToVault documentId={routeId} title={title} />}
             <a
               href={
                 mode === "document" ? fileUrl.documentPdf(routeId) : fileUrl.pdf(routeId)

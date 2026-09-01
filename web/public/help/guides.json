@@ -156,6 +156,44 @@
       ]
     },
     {
+      "route": "/vault",
+      "title": "Vault",
+      "blurb": "A second lock, with its own passphrase, for the things you would rather not have on screen.",
+      "screenshot": "vault.png",
+      "sections": [
+        {
+          "heading": "What it actually does",
+          "body": [
+            "Moving a document into the vault encrypts the original and **deletes the plaintext copy**. What is left on disk is ciphertext with a random name — nothing about the file name says what it holds.",
+            "It also leaves search, Ask, the archive, the photo wall and every count. Not filtered out of them: a locked vault reports that it exists and nothing else, because a count of what is inside is already a statement about the contents.",
+            "This can be undone. **Take out** decrypts it back into the archive with its title and page text, and it becomes searchable again."
+          ]
+        },
+        {
+          "heading": "The passphrase and the PIN",
+          "body": [
+            "The passphrase is the real key and **cannot be recovered**. It is not stored anywhere — only a copy of the vault key wrapped with it. Nothing in Bindery, in the database, or in any backup can open the vault without it. Write it down somewhere physical.",
+            "The PIN is the everyday way in. Five wrong entries switch it off — that destroys the PIN wrapper and nothing else. The passphrase still opens everything and you can set a new PIN straight afterwards.",
+            "The vault locks itself after fifteen minutes of not being used, and restarting the server locks it too. The key lives in memory and never touches disk."
+          ]
+        },
+        {
+          "heading": "Searching it",
+          "body": [
+            "Search has an **Also search the vault** section, off unless you ask for it, because the ordinary search is the one that runs over somebody's shoulder. Turning it on asks for the PIN.",
+            "Vault search decrypts and scans in memory rather than using an index. An index would mean writing the text back to disk in plaintext, which is the thing the vault exists to prevent. The cost is that it is linear — it tells you how many pages it scanned and how long it took, and says so plainly once that starts being slow."
+          ]
+        },
+        {
+          "heading": "Backups",
+          "body": [
+            "Vaulted documents are backed up and replicated offsite like everything else, as ciphertext. A restore brings them back still sealed; they open with the passphrase and with nothing else.",
+            "The restore drill checks them: it verifies every sealed object came back and matches the hash recorded when it was uploaded. It does not decrypt them, because it cannot."
+          ]
+        }
+      ]
+    },
+    {
       "route": "/organise",
       "title": "Organise",
       "blurb": "Tidy the folders, types and tags the archive has accumulated.",

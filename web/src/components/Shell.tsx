@@ -21,6 +21,7 @@ import {
   UserCircle,
   Users,
   UsersRound,
+  Vault,
   Workflow,
 } from "lucide-react";
 
@@ -77,6 +78,12 @@ const GROUPS: { title: string; items: Item[] }[] = [
       { to: "/archive", label: "Archive", icon: LibraryIcon, hint: "Browse everything" },
       { to: "/files", label: "Files", icon: FolderTree, hint: "The folder tree" },
       { to: "/photos", label: "Photos", icon: Images, hint: "Everything you recognise by looking" },
+      {
+        to: "/vault",
+        label: "Vault",
+        icon: Vault,
+        hint: "Behind a second passphrase, and out of everything above",
+      },
     ],
   },
   {

@@ -364,16 +364,22 @@ def checksum_matches(client, config: Config, key: str, sha256_hex: str) -> bool:
     return stored_checksum(client, config, key) == _checksum_header(sha256_hex)
 
 
-async def _already_shipped(session: AsyncSession) -> set[str]:
-    """Keys the ledger records **and** does not know to be missing.
+async def _already_shipped(session: AsyncSession, prefix: str = BLOB_PREFIX) -> set[str]:
+    """Keys under `prefix` the ledger records **and** does not know to be missing.
 
     The `absent_at` half is load-bearing. Without it a reconcile could find an
     object gone from the bucket, say so, and the next sync would skip it anyway
     — which is what this did until the offsite drill made it worth checking.
+
+    The prefix is a parameter rather than a constant because sealed vault
+    objects live under their own. Defaulting it to `blobs/` and querying that
+    for the vault would report nothing as shipped, so every object would upload
+    again on every run — and with versioning on and no delete permission, each
+    run would leave another version nothing can remove.
     """
     rows = await session.execute(
         sa.select(OffsiteObject.object_key).where(
-            OffsiteObject.object_key.startswith(BLOB_PREFIX),
+            OffsiteObject.object_key.startswith(prefix),
             OffsiteObject.absent_at.is_(None),
         )
     )
@@ -598,6 +604,73 @@ async def reconcile(
     return result
 
 
+def vault_object_key(object_name: str) -> str:
+    """`vault/ab/cd/<name>`, mirroring the blob layout for the same reason.
+
+    A separate prefix rather than `blobs/`, because these are not blobs: the
+    name is random rather than a content address, so nothing may assume the key
+    describes the bytes.
+    """
+    return f"{VAULT_PREFIX}{object_name[:2]}/{object_name[2:4]}/{object_name}"
+
+
+async def sync_vault_objects(
+    session: AsyncSession,
+    config: Config,
+    client,
+    *,
+    vault_root: Path,
+    commit: bool = True,
+) -> SyncResult:
+    """Ship the vault's ciphertext offsite (T-16.10, REQ-186).
+
+    Vault objects are the only files in the archive that cannot be recovered
+    from anywhere else — there is no second copy, no re-download, and no way to
+    regenerate them. Leaving them out of the offsite copy would make the most
+    protected part of the archive the least protected.
+
+    What does **not** go is the pepper. It is what keeps a stolen database from
+    being enough to brute-force a six-digit PIN, and a bucket holding both the
+    dump and the pepper is a bucket where that is no longer true. The objects
+    are useless without the passphrase either way.
+    """
+    result = SyncResult()
+    shipped = await _already_shipped(session, VAULT_PREFIX)
+
+    if not vault_root.is_dir():
+        return result
+
+    for path in sorted(vault_root.rglob("*")):
+        if not path.is_file():
+            continue
+        name = path.name
+        if len(name) != 64 or not all(c in "0123456789abcdef" for c in name):
+            # A `.partial` from an interrupted seal, or something that wandered
+            # in. Never uploaded under a key nothing can interpret.
+            log.warning("skipping %s: not a vault object name", path)
+            continue
+        key = vault_object_key(name)
+        if key in shipped:
+            result.skipped += 1
+            continue
+        try:
+            # The digest is of the ciphertext, computed here — a vault object's
+            # name is random, so unlike a blob there is no hash already on hand.
+            digest, size = upload_file(client, config, path, key)
+        except Exception as error:
+            log.error("offsite vault upload failed for %s: %s", name[:12], error)
+            result.failures.append(_explain(error, config))
+            continue
+        await _record(session, key, digest, size)
+        if commit:
+            await session.commit()
+        result.uploaded += 1
+        result.bytes_sent += size
+
+    if commit:
+        await session.commit()
+    return result
+
 # ---------------------------------------------------------------------------
 # The database dump, and the manifest that makes a restore checkable
 # (T-13.5, REQ-162)
@@ -619,6 +692,7 @@ class Kind(StrEnum):
 
 DUMP_PREFIX = "dumps/"
 MANIFEST_PREFIX = "manifests/"
+VAULT_PREFIX = "vault/"
 
 
 def dump_object_key(kind: Kind, stamp: datetime) -> str:
@@ -660,8 +734,13 @@ def upload_bytes(client, config: Config, key: str, payload: bytes) -> None:
     )
 
 
-def upload_dump(client, config: Config, path: Path, key: str) -> tuple[str, int]:
-    """Put the dump under a key the retention rules will eventually expire."""
+def upload_file(client, config: Config, path: Path, key: str) -> tuple[str, int]:
+    """Put one file at one key, checked against a hash computed here.
+
+    Used for the dump, whose key the retention rules will eventually expire,
+    and for sealed vault objects, whose hash is not already known the way a
+    blob's is. Returns the digest so the ledger records what actually went up.
+    """
     digest = _sha256_of(path)
     size = path.stat().st_size
     if size > MAX_SINGLE_PUT:
@@ -742,6 +821,7 @@ async def replicate(
     and eventually rotated into every generation you have.
     """
     from api.export import backup as local_backup
+    from api.vault import store as vault_store
 
     result = ReplicationResult(kind=kind)
 
@@ -775,11 +855,23 @@ async def replicate(
         result.bytes_sent = sync.bytes_sent
         result.failures.extend(sync.summarised())
 
-        if sync.failures:
+        # Step 2b: sealed vault objects. Same promise as blobs — the dump
+        # references vault_item rows, and a dump whose ciphertext is missing is
+        # as unrestorable as one whose blobs are.
+        vault_sync = await sync_vault_objects(
+            session, config, client, vault_root=vault_store.vault_root()
+        )
+        result.blobs_uploaded += vault_sync.uploaded
+        result.blobs_skipped += vault_sync.skipped
+        result.bytes_sent += vault_sync.bytes_sent
+        result.failures.extend(vault_sync.summarised())
+
+        if sync.failures or vault_sync.failures:
             # Deliberately no dump. A dump in the bucket is a promise that its
             # blobs are there too, and this run cannot make that promise.
+            failed = len(sync.failures) + len(vault_sync.failures)
             result.detail = (
-                f"{len(sync.failures)} blob(s) failed to upload — the dump was not "
+                f"{failed} object(s) failed to upload — the dump was not "
                 "sent, because a dump whose blobs are missing is an unrestorable "
                 "backup rather than a partial one."
             )
@@ -787,7 +879,7 @@ async def replicate(
 
         # Step 3: the dump, last.
         try:
-            digest, size = upload_dump(client, config, dump_path, dump_key)
+            digest, size = upload_file(client, config, dump_path, dump_key)
         except Exception as error:
             result.detail = f"the dump failed to upload: {_explain(error, config)}"
             result.failures.append(result.detail)
@@ -803,6 +895,24 @@ async def replicate(
             "uploaded_this_run": sync.uploaded,
             "already_present": sync.skipped,
             "total_in_ledger": await _ledger_count(session),
+        },
+        # Stated in the file a restore reads first, because the alternative is
+        # finding out during one (T-16.10).
+        "vault": {
+            "objects_uploaded_this_run": vault_sync.uploaded,
+            "objects_already_present": vault_sync.skipped,
+            "readable_without_passphrase": False,
+            "pepper_included": False,
+            "note": (
+                "Vault objects here are ciphertext. Nothing in this bucket — "
+                "not the dump, not Bindery, not AWS — can decrypt them; they "
+                "open only with the vault passphrase, which is not stored "
+                "anywhere. The PIN pepper is deliberately NOT uploaded: it is "
+                "what stops a stolen database from being enough to brute-force "
+                "a short PIN, and shipping it alongside the dump would undo "
+                "that. It lives in the local backup instead, and losing it "
+                "costs the PIN only."
+            ),
         },
         "integrity": integrity_report.as_dict() if integrity_report else None,
         # What a restore has to match. A dump restored by code that expects a
@@ -1056,6 +1166,45 @@ def fetch_blobs(client, config: Config, shas: list[str], into: Path) -> FetchRes
         actual = hashlib.sha256(body).hexdigest()
         if actual != sha:
             result.corrupt.append(sha)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+        result.fetched += 1
+        result.bytes_read += len(body)
+    return result
+
+
+def fetch_vault_objects(
+    client, config: Config, wanted: list[tuple[str, str]], into: Path
+) -> FetchResult:
+    """Pull sealed vault objects and check them against the ledger (T-16.12).
+
+    A vault object cannot be self-verifying the way a blob is: its name is
+    random precisely so that the key says nothing about the contents. What
+    makes it checkable anyway is that the restored database carries the offsite
+    ledger, and the ledger recorded the ciphertext's digest when it was
+    uploaded — so the expected hash is restored alongside the thing it
+    describes.
+
+    Nothing here decrypts. A drill proves the ciphertext came back intact and
+    stops there; opening it needs the passphrase, which is the point.
+    """
+    from botocore.exceptions import ClientError
+
+    result = FetchResult()
+    for object_name, expected in wanted:
+        key = vault_object_key(object_name)
+        path = into / object_name[:2] / object_name[2:4] / object_name
+        try:
+            body = client.get_object(Bucket=config.bucket, Key=key)["Body"].read()
+        except ClientError as error:
+            code = error.response.get("Error", {}).get("Code", "")
+            if code in ("NoSuchKey", "404"):
+                result.missing.append(object_name)
+                continue
+            raise
+        if hashlib.sha256(body).hexdigest() != expected:
+            result.corrupt.append(object_name)
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(body)

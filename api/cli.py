@@ -277,6 +277,45 @@ async def _offsite_blobs(into: str, sha_file: str) -> int:
     return 0 if result.ok else 1
 
 
+async def _offsite_vault(into: str, listing_file: str) -> int:
+    """Fetch sealed vault objects and verify each against the restored ledger.
+
+    Reads `<object_name><TAB><expected sha256>` lines, which the drill takes
+    straight out of the restored database — so the expected hash comes back
+    from the same backup as the object it describes.
+    """
+    from pathlib import Path as _Path
+
+    from api import offsite
+    from api.db.session import SessionFactory
+
+    async with SessionFactory() as session:
+        config = await offsite.config_from_settings(session)
+    if not config.complete:
+        print("offsite replication is not configured", file=sys.stderr)
+        return 1
+
+    wanted = []
+    for line in _Path(listing_file).read_text().splitlines():
+        if not line.strip():
+            continue
+        name, _, expected = line.partition("\t")
+        wanted.append((name.strip(), expected.strip()))
+
+    client = offsite.make_client(config)
+    result = await asyncio.to_thread(
+        offsite.fetch_vault_objects, client, config, wanted, _Path(into)
+    )
+
+    print(f"  {result.fetched}/{len(wanted)} sealed vault objects downloaded and "
+          f"hash-verified ({result.bytes_read} bytes) — still encrypted")
+    for name in result.missing:
+        print(f"  MISSING FROM BUCKET {name}", file=sys.stderr)
+    for name in result.corrupt:
+        print(f"  CORRUPT IN BUCKET   {name}", file=sys.stderr)
+    return 1 if (result.missing or result.corrupt) else 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="api.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -301,6 +340,13 @@ def main() -> None:
     blobs.add_argument("--into", required=True)
     blobs.add_argument("--from-file", dest="sha_file", required=True)
 
+    sealed = sub.add_parser(
+        "offsite-vault",
+        help="download and hash-verify sealed vault objects from S3",
+    )
+    sealed.add_argument("--into", required=True)
+    sealed.add_argument("--from-file", dest="listing_file", required=True)
+
     sub.add_parser(
         "lifecycle-check",
         help="audit the offsite bucket's lifecycle rules against what this build writes",
@@ -320,6 +366,8 @@ def main() -> None:
         raise SystemExit(asyncio.run(_offsite_fetch(args.into, args.kind)))
     if args.command == "offsite-blobs":
         raise SystemExit(asyncio.run(_offsite_blobs(args.into, args.sha_file)))
+    if args.command == "offsite-vault":
+        raise SystemExit(asyncio.run(_offsite_vault(args.into, args.listing_file)))
     if args.command == "lifecycle-check":
         raise SystemExit(asyncio.run(_lifecycle_check()))
     if args.command == "seed-forms":

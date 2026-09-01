@@ -45,6 +45,7 @@ SOURCES: dict[str, list[str]] = {
     "/archive": ["web/src/features/archive"],
     "/files": ["web/src/features/files"],
     "/photos": ["web/src/features/photos"],
+    "/vault": ["web/src/features/vault"],
     "/add": ["web/src/features/add"],
     "/review": ["web/src/features/review"],
     "/organise": ["web/src/features/organise"],
@@ -81,6 +82,35 @@ def _source_commit(paths: list[str]) -> str:
     return out.stdout.strip() or "unknown"
 
 
+async def _prepare_vault(page) -> None:
+    """Create and unlock a vault on the demonstration stack, best effort.
+
+    Deliberately does not move a document in. Vaulting deletes the plaintext
+    original, and a screenshot script that quietly destroys one of the seeded
+    documents every time it runs would be a bad trade for a nicer picture.
+    """
+    result = await page.evaluate(
+        """async () => {
+            const state = await fetch('/api/vault', {credentials: 'same-origin'})
+              .then((r) => r.json());
+            if (state.exists) {
+              if (state.unlocked) return 'already open';
+              return 'exists but locked — not guessing at its secret';
+            }
+            const made = await fetch('/api/vault/setup', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({
+                passphrase: 'demonstration vault passphrase',
+                pin: '481516',
+              }),
+            });
+            return made.ok ? 'created' : `setup failed: ${made.status}`;
+        }"""
+    )
+    print(f"  vault:           {result}")
+
 async def main() -> int:
     try:
         from playwright.async_api import async_playwright
@@ -103,6 +133,17 @@ async def main() -> int:
         return 2
 
     guides = json.loads(GUIDES.read_text())["guides"]
+    # Re-shooting fifteen screens to document one new one is churn: every
+    # unrelated picture changes because the seeded data moved on a little.
+    only = {arg for arg in sys.argv[1:] if not arg.startswith("-")}
+    if only:
+        guides = [
+            guide for guide in guides
+            if guide["route"] in only or guide["screenshot"] in only
+        ]
+        if not guides:
+            print(f"nothing matches {sorted(only)}", file=sys.stderr)
+            return 2
     OUT.mkdir(parents=True, exist_ok=True)
     entries = []
 
@@ -152,6 +193,12 @@ async def main() -> int:
             await browser.close()
             return 1
 
+        # The vault screen shows a setup form until a vault exists, and a guide
+        # about searching and restoring illustrated by an empty create-account
+        # form is a guide that documents the wrong screen. So one is made here,
+        # in the demonstration stack, with a throwaway secret.
+        await _prepare_vault(page)
+
         for guide in guides:
             route, shot = guide["route"], guide["screenshot"]
             await page.goto(f"{BASE_URL}{route}", wait_until="networkidle")
@@ -184,10 +231,25 @@ async def main() -> int:
 
         await browser.close()
 
-    (OUT / "manifest.json").write_text(
-        json.dumps({"screens": entries}, indent=2) + "\n"
+    # Merged, never replaced. A partial run that overwrote the manifest with
+    # only the screens it shot would drop the staleness record for every other
+    # one — and the check would then pass by knowing nothing about them, which
+    # is the exact failure `test_docs.py` exists to prevent.
+    manifest = OUT / "manifest.json"
+    kept = []
+    if manifest.is_file():
+        shot_now = {entry["screenshot"] for entry in entries}
+        kept = [
+            entry
+            for entry in json.loads(manifest.read_text()).get("screens", [])
+            if entry["screenshot"] not in shot_now
+        ]
+    merged = sorted(kept + entries, key=lambda entry: entry["route"])
+    manifest.write_text(json.dumps({"screens": merged}, indent=2) + "\n")
+    print(
+        f"\n{len(entries)} screenshot(s) captured; manifest describes "
+        f"{len(merged)} in {OUT.relative_to(REPO)}"
     )
-    print(f"\n{len(entries)} screenshots in {OUT.relative_to(REPO)}")
     return 0
 
 

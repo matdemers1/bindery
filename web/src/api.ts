@@ -762,6 +762,36 @@ export const api = {
   runBackup: (force = false) =>
     request<BackupResult>(`/backup/run${force ? "?force=true" : ""}`, { method: "POST" }),
 
+  // --- The private vault (Phase 16) --------------------------------------
+
+  vault: () => request<VaultState>("/vault"),
+  vaultSetup: (passphrase: string, pin: string) =>
+    request<VaultState>("/vault/setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase, pin }),
+    }),
+  vaultUnlock: (secret: { pin?: string; passphrase?: string }) =>
+    request<VaultState>("/vault/unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(secret),
+    }),
+  vaultLock: () => request<VaultState>("/vault/lock", { method: "POST" }),
+  vaultSetPin: (pin: string) =>
+    request<VaultState>("/vault/pin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    }),
+  vaultItems: () => request<VaultItem[]>("/vault/items"),
+  vaultMoveIn: (documentId: string) =>
+    request<VaultItem>(`/vault/items/${documentId}`, { method: "POST" }),
+  vaultMoveOut: (documentId: string) =>
+    request<VaultItem>(`/vault/items/${documentId}`, { method: "DELETE" }),
+  vaultSearch: (q: string, signal?: AbortSignal) =>
+    request<VaultSearchResults>(`/vault/search?q=${encodeURIComponent(q)}`, { signal }),
+
   audit: (filters: AuditFilters = {}) => {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(filters)) {
@@ -1151,12 +1181,60 @@ export interface UnifyProposal {
 }
 
 /** Blob URLs. Authenticated and library-scoped server-side; no token in the URL. */
+// --------------------------------------------------------------------------
+// The private vault (Phase 16)
+// --------------------------------------------------------------------------
+
+/**
+ * What a locked vault will say about itself: that it exists, and that it is
+ * shut. Never how much is in it — a count is already a statement about the
+ * contents.
+ */
+export interface VaultState {
+  exists: boolean;
+  unlocked: boolean;
+  pin_enabled: boolean;
+  pin_failures: number;
+}
+
+export interface VaultItem {
+  document_id: string;
+  title: string | null;
+  original_filename: string | null;
+  byte_size: number;
+  page_count: number;
+  vaulted_at: string | null;
+  warnings: string[];
+}
+
+export interface VaultSearchHit {
+  document_id: string;
+  title: string | null;
+  page_number: number;
+  snippet: string;
+}
+
+export interface VaultSearchResults {
+  query: string;
+  total: number;
+  hits: VaultSearchHit[];
+  pages_scanned: number;
+  elapsed_ms: number;
+  slow: boolean;
+}
+
 export const fileUrl = {
   render: (id: string, page: number) => `/api/files/${id}/pages/${page}/render`,
   thumb: (id: string, page: number) => `/api/files/${id}/pages/${page}/thumb`,
   pdf: (id: string) => `/api/files/${id}/pdf`,
   /** Just this document's pages, extracted as a standalone PDF. */
   documentPdf: (documentId: string) => `/api/documents/${documentId}/pdf`,
+  /**
+   * The decrypted original of a vaulted document. Only answers while the vault
+   * is open, and the response carries `Cache-Control: no-store` so the browser
+   * does not keep a copy on disk after it closes again.
+   */
+  vaultOriginal: (documentId: string) => `/api/vault/items/${documentId}/original`,
 };
 
 

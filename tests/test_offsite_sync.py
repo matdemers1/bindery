@@ -14,6 +14,7 @@ what compares them.
 """
 
 import hashlib
+import io
 
 import pytest
 import sqlalchemy as sa
@@ -52,6 +53,22 @@ class FakeS3:
         self.put_calls.append(kwargs)
         self.objects[kwargs["Key"]] = data
         return {}
+
+    def get_object(self, **kwargs):
+        """Reads back what was put, and 404s the way S3 does for what was not.
+
+        A fake that returned None for a missing key would let a drill "pass"
+        against a bucket that has lost an object.
+        """
+        from botocore.exceptions import ClientError
+
+        key = kwargs["Key"]
+        if key not in self.objects:
+            raise ClientError(
+                {"Error": {"Code": "NoSuchKey", "Message": "does not exist"}},
+                "GetObject",
+            )
+        return {"Body": io.BytesIO(self.objects[key])}
 
     def head_object(self, **kwargs):
         # S3 omits ChecksumSHA256 unless ChecksumMode is ENABLED. The fake

@@ -26,6 +26,7 @@ import AccountPage from "./features/accounts/AccountPage";
 import AdminPage from "./features/accounts/AdminPage";
 import JoinPage from "./features/accounts/JoinPage";
 import HelpPage from "./features/help/HelpPage";
+import VaultPage from "./features/vault/VaultPage";
 
 type State = { status: "loading" } | { status: "out" } | { status: "in"; user: User };
 
@@ -129,6 +130,7 @@ export default function App() {
           <Route path="/archive" element={<ArchivePage />} />
           <Route path="/files" element={<FilesPage />} />
           <Route path="/photos" element={<PhotosPage />} />
+          <Route path="/vault" element={<VaultPage />} />
           <Route
             path="/add"
             element={<AddPage libraries={libraries} onUploaded={refresh} />}

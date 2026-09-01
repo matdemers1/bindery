@@ -5,6 +5,7 @@ import { Eye, Images, Search, Sparkles } from "lucide-react";
 import { api, type Photo, fileUrl } from "../../api";
 import PageHeader from "../../components/PageHeader";
 import { useLiveQuery } from "../../live/LiveProvider";
+import MoveToVault from "../vault/MoveToVault";
 
 /**
  * Every image in the archive, as pictures.
@@ -166,12 +167,29 @@ export default function PhotosPage() {
         </ul>
       )}
 
-      {selected && <Lightbox photo={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <Lightbox
+          photo={selected}
+          onClose={() => setSelected(null)}
+          onVaulted={() => {
+            setSelected(null);
+            void load();
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function Lightbox({ photo, onClose }: { photo: Photo; onClose: () => void }) {
+function Lightbox({
+  photo,
+  onClose,
+  onVaulted,
+}: {
+  photo: Photo;
+  onClose: () => void;
+  onVaulted: () => void;
+}) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/85 p-6"
@@ -205,12 +223,22 @@ function Lightbox({ photo, onClose }: { photo: Photo; onClose: () => void }) {
             <dt className="text-muted">Added</dt>
             <dd>{photo.received_at.slice(0, 10)}</dd>
           </dl>
-          <Link
-            to={`/document/${photo.document_id}/page/${photo.page}`}
-            className="inline-block rounded border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
-          >
-            Open in the viewer
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to={`/document/${photo.document_id}/page/${photo.page}`}
+              className="inline-block rounded border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
+            >
+              Open in the viewer
+            </Link>
+            {/* The picture you would not want on the wall is exactly the one
+                this is for, so the action belongs where you are looking at it. */}
+            <MoveToVault
+              documentId={photo.document_id}
+              title={photo.title ?? photo.original_filename}
+              onMoved={onVaulted}
+              className="flex items-center gap-1.5 rounded border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
+            />
+          </div>
         </div>
       </div>
     </div>

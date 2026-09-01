@@ -36,6 +36,7 @@ from api.export.integrity import IntegrityReport
 log = logging.getLogger("bindery.backup")
 
 MANIFEST_NAME = "manifest.json"
+VAULT_DIRNAME = "vault"
 
 
 @dataclass
@@ -46,6 +47,8 @@ class BackupResult:
     byte_size: int
     manifest: dict
     integrity_healthy: bool
+    vault_object_count: int = 0
+    vault_bytes: int = 0
 
 
 def backup_root() -> Path:
@@ -124,6 +127,50 @@ def copy_blobs(destination: Path) -> tuple[int, int]:
     return count, total
 
 
+def copy_vault(destination: Path) -> tuple[int, int]:
+    """Copy the vault's encrypted objects, and the host pepper (T-16.10).
+
+    Vault objects live outside the blob store — deliberately, since they are not
+    content-addressed — so `copy_blobs` never sees them. Without this, a
+    restore would bring back vault rows pointing at ciphertext that no backup
+    ever held, and the one part of the archive nobody can re-download would be
+    the only part not protected.
+
+    The pepper is included **here and not offsite**. It is what stops a stolen
+    database from being enough to brute-force a six-digit PIN, so putting it in
+    the same bucket as the database dump would defeat the only thing it does.
+    A local backup sits on the host that already has the pepper, so including it
+    there changes no threat model and makes a same-host restore whole.
+
+    Nothing in here is readable without the vault passphrase, which this
+    application does not have and cannot recover.
+    """
+    from api.vault import pepper, store
+
+    source = store.vault_root()
+    count = 0
+    total = 0
+    if source.is_dir():
+        target_root = destination / "objects"
+        target_root.mkdir(parents=True, exist_ok=True)
+        for path in sorted(source.rglob("*")):
+            if not path.is_file():
+                continue
+            target = target_root / path.relative_to(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not (target.exists() and target.stat().st_size == path.stat().st_size):
+                shutil.copy2(path, target)
+            count += 1
+            total += target.stat().st_size
+
+    pepper_path = get_settings().data_root / "vault" / pepper.PEPPER_NAME
+    if pepper_path.is_file():
+        destination.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(pepper_path, destination / pepper.PEPPER_NAME)
+        os.chmod(destination / pepper.PEPPER_NAME, 0o600)
+    return count, total
+
+
 def run_backup(
     integrity: IntegrityReport | None = None,
     *,
@@ -145,6 +192,7 @@ def run_backup(
 
     dump = dump_database(root / "bindery.dump")
     blob_count, byte_size = copy_blobs(root / "blobs")
+    vault_count, vault_bytes = copy_vault(root / VAULT_DIRNAME)
 
     manifest = {
         "created_at": datetime.now(UTC).isoformat(),
@@ -153,6 +201,24 @@ def run_backup(
         "blob_count": blob_count,
         "blob_bytes": byte_size,
         "integrity": integrity.as_dict() if integrity else None,
+        # Said plainly, in the file a restore reads first. Discovering that part
+        # of a backup cannot be opened is a thing to learn now, not during a
+        # restore.
+        "vault": {
+            "object_count": vault_count,
+            "object_bytes": vault_bytes,
+            "pepper_included": True,
+            "readable_without_passphrase": False,
+            "note": (
+                "These objects are encrypted with a key wrapped by a passphrase "
+                "that exists only in the head of whoever set the vault up. "
+                "Nothing in this backup, in the database dump, or in Bindery "
+                "itself can decrypt them. A restore brings them back still "
+                "sealed, and they open again the moment that passphrase is "
+                "entered. The pepper beside them protects the PIN only; losing "
+                "it costs the PIN and nothing else."
+            ),
+        },
         "restore_command": "scripts/restore-drill.sh <this directory>",
         "note": (
             "Postgres was dumped before blobs were copied. Blobs are immutable "
@@ -162,7 +228,10 @@ def run_backup(
     }
     (root / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2))
 
-    log.info("backup complete: %s (%s blobs, %s bytes)", root, blob_count, byte_size)
+    log.info(
+        "backup complete: %s (%s blobs, %s bytes, %s sealed vault objects)",
+        root, blob_count, byte_size, vault_count,
+    )
     return BackupResult(
         path=root,
         database_dump=dump,
@@ -170,6 +239,8 @@ def run_backup(
         byte_size=byte_size,
         manifest=manifest,
         integrity_healthy=integrity.healthy if integrity else True,
+        vault_object_count=vault_count,
+        vault_bytes=vault_bytes,
     )
 
 

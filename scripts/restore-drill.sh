@@ -161,8 +161,17 @@ docker exec "$CONTAINER" pg_restore \
 green "  restore completed without error"
 
 step "Verifying every original the restored database references is retrievable"
-docker exec "$CONTAINER" psql -U bindery -d bindery -At \
-  -c 'SELECT sha256 FROM source_file' > /tmp/drill-shas.txt
+# Vaulted documents are excluded on purpose. Moving one into the vault deletes
+# its plaintext original — that is the feature — so asking for it here would
+# report a MISSING BLOB and fail a backup that is in fact perfect. Their
+# ciphertext is checked in the step after this one instead.
+docker exec "$CONTAINER" psql -U bindery -d bindery -At -c "
+  SELECT f.sha256 FROM source_file f
+   WHERE NOT EXISTS (
+     SELECT 1 FROM document d
+      WHERE d.source_file_id = f.id AND d.vaulted_by IS NOT NULL
+   );
+" > /tmp/drill-shas.txt
 TOTAL=$(wc -l < /tmp/drill-shas.txt | tr -d ' ')
 
 if [ "$FROM_S3" = "1" ]; then
@@ -193,6 +202,48 @@ if [ "$MISSING" -gt 0 ]; then
   exit 1
 fi
 green "  all $TOTAL originals present"
+fi
+
+step "Verifying the sealed vault objects came back"
+# The vault is the only part of the archive with no second source: a blob can
+# be re-scanned, a sealed object exists once. So it is checked, and checked the
+# same way — against a hash the backup itself restored, not one this script
+# supplies. Nothing is decrypted; that needs the passphrase, which is the point.
+docker exec "$CONTAINER" psql -U bindery -d bindery -At -F$'\t' -c "
+  SELECT v.object_name, o.sha256
+    FROM vault_item v
+    LEFT JOIN offsite_object o
+      ON o.object_key = 'vault/' || substr(v.object_name,1,2) || '/'
+                                 || substr(v.object_name,3,2) || '/' || v.object_name;
+" > /tmp/drill-vault.txt 2>/dev/null || : > /tmp/drill-vault.txt
+SEALED=$(grep -c . /tmp/drill-vault.txt || true)
+
+if [ "${SEALED:-0}" -eq 0 ]; then
+  echo "  nothing is in the vault — nothing to check"
+elif [ "$FROM_S3" = "1" ]; then
+  docker cp /tmp/drill-vault.txt "$API:/tmp/drill-vault.txt" >/dev/null
+  if ! docker exec "$API" python -m api.cli offsite-vault \
+        --into /tmp/offsite-drill/vault --from-file /tmp/drill-vault.txt; then
+    red "  the offsite copy cannot supply every sealed vault object"
+    red "  the vault is not restorable from the bucket"
+    exit 1
+  fi
+  green "  all $SEALED sealed vault objects downloaded and hash-verified"
+else
+  VAULT_MISSING=0
+  while IFS=$'\t' read -r name _; do
+    [ -n "$name" ] || continue
+    if [ ! -f "$BACKUP/vault/objects/${name:0:2}/${name:2:2}/$name" ]; then
+      red "  MISSING VAULT OBJECT ${name:0:12}…"
+      VAULT_MISSING=$((VAULT_MISSING + 1))
+    fi
+  done < /tmp/drill-vault.txt
+  if [ "$VAULT_MISSING" -gt 0 ]; then
+    red "  $VAULT_MISSING of $SEALED sealed objects are not in this backup"
+    red "  these cannot be recovered from anywhere else — the vault is not restorable"
+    exit 1
+  fi
+  green "  all $SEALED sealed vault objects present (still encrypted)"
 fi
 
 step "Searching the restored archive for: $SEARCH_TERM"
@@ -241,5 +292,9 @@ if [ "$FROM_S3" = "1" ]; then
   echo "  Nothing local was used. Losing this building would have cost nothing."
 else
   green "DRILL PASSED — restored to a clean database and found \"$SEARCH_TERM\" ($HITS matches)."
+fi
+if [ "${SEALED:-0}" -gt 0 ]; then
+  echo "  $SEALED vaulted document(s) came back sealed. They open with the vault"
+  echo "  passphrase and with nothing else — not this script, not the database."
 fi
 echo "  Scratch container torn down. The live stack was never touched."

@@ -12,14 +12,14 @@
       "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
-      "route": "/search",
-      "screenshot": "search.png",
+      "route": "/account",
+      "screenshot": "account.png",
       "sources": [
-        "web/src/features/search",
+        "web/src/features/accounts/AccountPage.tsx",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "6743e7c6587e6079a8c38af50445648a9110195a"
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/add",
@@ -32,26 +32,6 @@
       "source_commit": "6743e7c6587e6079a8c38af50445648a9110195a"
     },
     {
-      "route": "/files",
-      "screenshot": "files.png",
-      "sources": [
-        "web/src/features/files",
-        "web/src/components/Shell.tsx",
-        "web/src/index.css"
-      ],
-      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
-    },
-    {
-      "route": "/review",
-      "screenshot": "review.png",
-      "sources": [
-        "web/src/features/review",
-        "web/src/components/Shell.tsx",
-        "web/src/index.css"
-      ],
-      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
-    },
-    {
       "route": "/archive",
       "screenshot": "archive.png",
       "sources": [
@@ -62,20 +42,10 @@
       "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
     },
     {
-      "route": "/photos",
-      "screenshot": "photos.png",
+      "route": "/files",
+      "screenshot": "files.png",
       "sources": [
-        "web/src/features/photos",
-        "web/src/components/Shell.tsx",
-        "web/src/index.css"
-      ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
-    },
-    {
-      "route": "/organise",
-      "screenshot": "organise.png",
-      "sources": [
-        "web/src/features/organise",
+        "web/src/features/files",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
@@ -92,34 +62,14 @@
       "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
     },
     {
-      "route": "/trust",
-      "screenshot": "trust.png",
+      "route": "/organise",
+      "screenshot": "organise.png",
       "sources": [
-        "web/src/features/trust",
+        "web/src/features/organise",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
       "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
-    },
-    {
-      "route": "/pipeline",
-      "screenshot": "pipeline.png",
-      "sources": [
-        "web/src/features/pipeline",
-        "web/src/components/Shell.tsx",
-        "web/src/index.css"
-      ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
-    },
-    {
-      "route": "/account",
-      "screenshot": "account.png",
-      "sources": [
-        "web/src/features/accounts/AccountPage.tsx",
-        "web/src/components/Shell.tsx",
-        "web/src/index.css"
-      ],
-      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
       "route": "/people",
@@ -132,6 +82,56 @@
       "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
+      "route": "/photos",
+      "screenshot": "photos.png",
+      "sources": [
+        "web/src/features/photos",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ],
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+    },
+    {
+      "route": "/pipeline",
+      "screenshot": "pipeline.png",
+      "sources": [
+        "web/src/features/pipeline",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ],
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+    },
+    {
+      "route": "/review",
+      "screenshot": "review.png",
+      "sources": [
+        "web/src/features/review",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ],
+      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
+    },
+    {
+      "route": "/rules",
+      "screenshot": "rules.png",
+      "sources": [
+        "web/src/features/rules",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ],
+      "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
+    },
+    {
+      "route": "/search",
+      "screenshot": "search.png",
+      "sources": [
+        "web/src/features/search",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ],
+      "source_commit": "6743e7c6587e6079a8c38af50445648a9110195a"
+    },
+    {
       "route": "/settings",
       "screenshot": "settings.png",
       "sources": [
@@ -142,10 +142,20 @@
       "source_commit": "77583612c24eabf07258c90a5b603729b1780cd4"
     },
     {
-      "route": "/rules",
-      "screenshot": "rules.png",
+      "route": "/trust",
+      "screenshot": "trust.png",
       "sources": [
-        "web/src/features/rules",
+        "web/src/features/trust",
+        "web/src/components/Shell.tsx",
+        "web/src/index.css"
+      ],
+      "source_commit": "a843eb1a14c816f2e07feff969cbd1412deb4eca"
+    },
+    {
+      "route": "/vault",
+      "screenshot": "vault.png",
+      "sources": [
+        "web/src/features/vault",
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],

@@ -27,9 +27,13 @@ from api.vault import crypto
 
 log = logging.getLogger("bindery.vault")
 
-# Under the data root but outside `blobs/`, which is the only directory the
-# backup copies and the only prefix offsite replication syncs. Deliberately not
-# in `blobs/`, and deliberately not somewhere `archive_export` walks.
+# Under the data root, beside `vault/objects/` rather than inside it. That
+# placement is what decides where it travels: the local backup copies this file
+# on purpose (T-16.10), and offsite replication walks `vault/objects/` only, so
+# the pepper never leaves the building. Widening the offsite walk to the parent
+# directory would start shipping it — `tests/test_vault_offsite.py` asserts
+# otherwise. Deliberately not in `blobs/`, and not somewhere `archive_export`
+# walks.
 PEPPER_NAME = "vault-pepper.key"
 
 
@@ -67,9 +71,9 @@ def load_or_create() -> bytes:
     finally:
         os.close(handle)
     log.warning(
-        "created a new vault pepper at %s — it is excluded from backups by "
-        "design, so keep a copy somewhere off this machine or PIN unlock cannot "
-        "be recovered", path,
+        "created a new vault pepper at %s — local backups carry it, offsite "
+        "copies deliberately do not. Losing it costs PIN unlock only; the vault "
+        "passphrase still opens everything.", path,
     )
     return pepper
 
