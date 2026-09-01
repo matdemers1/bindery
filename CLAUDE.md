@@ -494,6 +494,17 @@ in the archive at all. `api/vault/`, ADR-012.
   by both `api/db/scope.py` and `api/db/repository.py`. It exists because it was
   written twice and only one copy was updated — five of the leak suite's eleven
   failures had that one cause.
+- **A vaulted document is hidden whether the vault is open or shut.** The first
+  version let them back into every view while unlocked; the vault stays open
+  for fifteen minutes, and a privacy feature that depends on remembering to
+  lock it is not one anyone can rely on. Unlocked governs whether the vault can
+  be *read*, not whether its contents leak into the archive.
+- **Applying the boundary is not enough — a route has to be made to.**
+  `/api/photos` predated the vault and never gained the clause, so vaulted
+  photographs stayed on the wall in both states. The leak suite now runs every
+  assertion locked *and* unlocked, on an image fixture, and carries a
+  route-coverage guard. Same lesson as Phase 7's library boundary: the fix that
+  lasts is the test that fails when a new route forgets.
 - **Vault objects are not content-addressed.** The name is `secrets.token_hex(32)`,
   because a content address is an existence oracle: anyone holding a copy of a
   file could confirm the archive holds it without decrypting anything. They live

@@ -24,32 +24,38 @@ def is_unlocked(user_id: uuid.UUID) -> bool:
 
 
 def document_clause(user_id: uuid.UUID, *, unlocked: bool | None = None):
-    """Documents this caller may see, vault-wise.
+    """Documents this caller may see in an ordinary view, vault-wise.
 
-    Note what this is not: not `vaulted_by IS NULL OR vaulted_by = me`. A
-    vaulted document is invisible **to its owner too** until the PIN is
-    entered — that is the whole feature. Whose vault it is only matters once
-    the vault is actually open.
+    **A vaulted document is never one of them**, unlocked or not. It lives on
+    the vault screen and in vault search, and nowhere else — not the archive,
+    not photos, not files, not search, not Ask, not a count or a facet.
+
+    The first version let them back into every view while the vault was open,
+    on the reasoning that "unlocked, they behave like everything else". That is
+    wrong, and it is wrong in the way that matters: the reason to put a
+    document in the vault is that you do not want it on screen when somebody is
+    looking over your shoulder, and the vault is open for fifteen minutes after
+    you glance at it. A feature whose privacy depends on remembering to lock it
+    is not one people can rely on.
+
+    `unlocked` is still accepted so callers do not have to change and so the
+    session lookup can be avoided where the caller already knows — but it no
+    longer changes the answer. Being open governs whether the vault can be
+    *read*, not whether its contents leak into everything else.
     """
-    if unlocked is None:
-        unlocked = is_unlocked(user_id)
-    if unlocked:
-        return sa.or_(Document.vaulted_by.is_(None), Document.vaulted_by == user_id)
     return Document.vaulted_by.is_(None)
 
 
 def hidden_source_file_ids(user_id: uuid.UUID, *, unlocked: bool | None = None):
-    """Files to hide, as a subquery.
+    """Files to hide from ordinary views, as a subquery.
 
     A file and a document are different rows. Hiding the document and listing
     the file leaves the page images downloadable and the OCR text servable,
     which is most of what was being hidden.
+
+    Hidden whether or not the vault is open, for the reason `document_clause`
+    gives.
     """
-    if unlocked is None:
-        unlocked = is_unlocked(user_id)
-    query = sa.select(Document.source_file_id).where(
+    return sa.select(Document.source_file_id).where(
         Document.vaulted_by.is_not(None), live()
     )
-    if unlocked:
-        query = query.where(Document.vaulted_by != user_id)
-    return query

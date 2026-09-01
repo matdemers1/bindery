@@ -22,6 +22,7 @@ from api.db.models import AppUser, Document, Rule
 from api.db.session import get_session
 from api.schemas import RuleDryRunOut, RuleIn, RuleMatchOut, RuleOut
 from api.segments import live
+from api.vault import boundary as vault_boundary
 
 router = APIRouter(prefix="/rules", tags=["rules"])
 
@@ -111,7 +112,12 @@ async def dry_run(
     documents = (
         await session.execute(
             sa.select(Document)
-            .where(Document.library_id == rule.library_id, live())
+            .where(
+                Document.library_id == rule.library_id,
+                live(),
+                # A preview lists the documents a rule would touch, by title.
+                vault_boundary.document_clause(user.id),
+            )
             .order_by(Document.created_at.desc())
             .limit(DRY_RUN_LIMIT)
         )

@@ -47,6 +47,7 @@ from api.schemas import (
     UnifyProposalOut,
 )
 from api.segments import live
+from api.vault import boundary as vault
 
 log = logging.getLogger("bindery.entities")
 
@@ -78,7 +79,15 @@ async def list_correspondents(
             sa.select(
                 Correspondent,
                 sa.select(sa.func.count()).select_from(Document)
-                .where(Document.correspondent_id == Correspondent.id, live())
+                .where(
+                    Document.correspondent_id == Correspondent.id,
+                    live(),
+                    # A count is a statement about contents. A vaulted document
+                    # inflating "GEICO (12)" says one more exists than you can
+                    # see, which is the shape of leak this whole boundary is
+                    # about.
+                    vault.document_clause(user.id),
+                )
                 .scalar_subquery().label("document_count"),
             )
             .where(
@@ -133,6 +142,7 @@ async def list_tags(
                     DocumentTag.tag_id == Tag.id,
                     DocumentTag.removed_at.is_(None),
                     live(),
+                    vault.document_clause(user.id),
                 )
                 .scalar_subquery()
                 .label("document_count"),
@@ -161,7 +171,11 @@ async def list_document_types(
                 DocumentType,
                 sa.select(sa.func.count())
                 .select_from(Document)
-                .where(Document.document_type_id == DocumentType.id, live())
+                .where(
+                    Document.document_type_id == DocumentType.id,
+                    live(),
+                    vault.document_clause(user.id),
+                )
                 .scalar_subquery()
                 .label("document_count"),
             )

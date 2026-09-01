@@ -1,4 +1,4 @@
-"""A locked vault is invisible everywhere (T-16.11, REQ-180, REQ-187).
+"""A vaulted document is invisible everywhere (T-16.11, REQ-180, REQ-187).
 
 Written before anything could create a vaulted document, and deliberately: a
 leak suite written *after* the feature tends to test the paths the feature
@@ -8,6 +8,14 @@ progress row on a screen nobody associated with privacy.
 
 The rows here are marked vaulted by hand rather than by the real move, so this
 holds even before T-16.5 exists and keeps holding if the move changes.
+
+**Every test runs twice, locked and unlocked.** The first version of this suite
+only ran locked, and that gap is exactly what shipped a bug: unlocking put the
+vaulted documents back into the archive, photos, search and every count, and
+nothing here noticed. Being open governs whether the vault can be *read*, not
+whether its contents leak into everything else — the reason to vault something
+is not wanting it on screen when somebody is looking over your shoulder, and
+the vault stays open for fifteen minutes after you glance at it.
 """
 
 import hashlib
@@ -22,15 +30,19 @@ from api.db.models import Document, Page, SourceFile
 SECRET_PHRASE = "quetzalcoatlus northropi settlement"
 
 
-@pytest.fixture
-async def a_vaulted_document(session, signed_in):
+@pytest.fixture(params=["locked", "unlocked"], ids=["locked", "unlocked"])
+async def a_vaulted_document(request, session, signed_in):
     """A document whose text is distinctive enough to find anywhere it leaks."""
     user, library = await signed_in()
     source = SourceFile(
         library_id=library.id,
         sha256=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
         byte_size=2048,
-        original_filename="the-private-one.pdf",
+        # An image, deliberately: the photo wall filters on the extension, so
+        # a .pdf fixture would sail past that test without exercising it —
+        # which is how the photo-wall leak survived a suite that had eleven
+        # other assertions.
+        original_filename="the-private-one.jpg",
         ingest_source=IngestSource.WEB_UPLOAD,
         page_count=1,
         state=SourceFileState.PROCESSED,
@@ -51,6 +63,15 @@ async def a_vaulted_document(session, signed_in):
     )
     session.add(document)
     await session.commit()
+
+    if request.param == "unlocked":
+        # The state a person is actually in for fifteen minutes after opening
+        # the vault, and the one every surface below must survive.
+        from api.vault.session import sessions
+
+        sessions.unlock(user.id, b"\x00" * 32)
+        request.addfinalizer(lambda: sessions.lock(user.id))
+
     return user, library, document, source
 
 
@@ -144,3 +165,99 @@ async def test_an_api_token_can_never_see_it(client, a_vaulted_document):
 
     assert "vault_unlocked" in Scope.__dataclass_fields__
     assert Scope.__dataclass_fields__["vault_unlocked"].default is False
+
+
+# --------------------------------------------------------------------------
+# The photo wall, and the guard that should have caught it (REQ-187)
+# --------------------------------------------------------------------------
+
+
+async def test_the_photo_wall_does_not_show_it(client, a_vaulted_document):
+    """The surface that was actually leaking.
+
+    `/api/photos` had no vault boundary at all — not a wrong one, none — so a
+    vaulted photograph stayed on the wall whether the vault was open or shut.
+    Photographs are the likeliest thing anyone vaults, which made this the one
+    screen that most needed it and the one nobody wrote a test for.
+    """
+    _, _, document, _ = a_vaulted_document
+    response = await client.get("/api/photos")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert str(document.id) not in [photo["document_id"] for photo in body["photos"]]
+    assert SECRET_PHRASE not in response.text
+
+
+async def test_the_review_queue_does_not_list_it(client, session, a_vaulted_document):
+    """A document can be vaulted while it is still awaiting review, and the
+    queue is a list of titles on a screen like any other."""
+    from api.db.enums import ReviewState
+
+    _, _, document, _ = a_vaulted_document
+    document.review_state = ReviewState.NEEDS_REVIEW
+    await session.commit()
+
+    response = await client.get("/api/review")
+    assert SECRET_PHRASE not in response.text
+
+
+async def test_taxonomy_counts_do_not_include_it(client, session, a_vaulted_document):
+    """A count is a statement about contents. "GEICO (12)" when you can reach
+    eleven says one more exists, which is the shape of leak this is about."""
+    from api.db.models import Correspondent
+
+    _, library, document, _ = a_vaulted_document
+    who = Correspondent(library_id=library.id, name="Vaulted Sender", slug="vaulted-sender")
+    session.add(who)
+    await session.flush()
+    document.correspondent_id = who.id
+    await session.commit()
+
+    response = await client.get("/api/correspondents")
+    rows = {row["name"]: row["document_count"] for row in response.json()}
+    assert rows.get("Vaulted Sender") == 0, (
+        "a vaulted document was counted, so its existence is visible"
+    )
+
+
+def test_every_route_that_selects_documents_applies_the_vault_boundary() -> None:
+    """The guard the photo wall needed.
+
+    Phase 7 learned this lesson for libraries and built a route-coverage guard;
+    the vault got the boundary and not the guard, and a screen written before
+    the vault existed simply never gained the clause. A boundary that depends
+    on every author remembering is a boundary with a hole in it.
+
+    Structural on purpose: it asks whether the module names the boundary at
+    all, which is crude, and crude is what survives. A module that queries
+    documents and never mentions the vault cannot possibly be applying it.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    # Reached through `Scope` or `repository`, both of which apply it centrally.
+    VIA_SCOPE = {"documents.py", "files.py", "segments.py", "upload.py", "trust.py"}
+    # Vault routes are the one place vaulted rows are *supposed* to be visible.
+    EXEMPT = {"vault.py"}
+
+    offenders = []
+    for path in sorted((root / "api" / "routers").glob("*.py")):
+        if path.name in VIA_SCOPE or path.name in EXEMPT:
+            continue
+        source = path.read_text()
+        selects = re.search(
+            r"select\(Document\)|select_from\(Document\)|Document\.library_id", source
+        )
+        if not selects:
+            continue
+        if "document_clause" in source or "hidden_source_file_ids" in source:
+            continue
+        offenders.append(path.name)
+
+    assert not offenders, (
+        "these routers query documents without naming the vault boundary:\n  "
+        + "\n  ".join(offenders)
+        + "\nApply `boundary.document_clause(user.id)`, or add the module to "
+        "VIA_SCOPE with a reason."
+    )

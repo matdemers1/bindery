@@ -38,6 +38,7 @@ from api.schemas import (
     WhyPanelOut,
 )
 from api.segments import live
+from api.vault import boundary as vault_boundary
 
 router = APIRouter(tags=["review"])
 
@@ -61,6 +62,9 @@ async def review_queue(
         Document.library_id.in_(library_ids),
         live(),
         Document.review_state == ReviewState.NEEDS_REVIEW.value,
+        # A document can be vaulted while it is still awaiting review, and the
+        # queue is a list of titles on a screen like any other.
+        vault_boundary.document_clause(user.id),
     ]
     if not include_backlog:
         conditions.append(Document.is_backlog.is_(False))

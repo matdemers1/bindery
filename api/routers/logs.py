@@ -33,6 +33,7 @@ from api.schemas import (
     PhotoWallOut,
     PipelineFilesOut,
 )
+from api.vault import boundary as vault
 
 router = APIRouter(tags=["logs"])
 
@@ -294,6 +295,11 @@ async def photos(
     conditions: list[sa.ColumnElement[bool]] = [
         Document.library_id.in_(library_ids),
         Document.superseded_at.is_(None),
+        # This screen had no vault boundary at all, so a vaulted photograph
+        # stayed on the wall — locked or not. Photographs are the likeliest
+        # thing anyone vaults, which made this the one surface that most
+        # needed it.
+        vault.document_clause(user.id),
         sa.or_(
             *[SourceFile.original_filename.ilike(f"%{ext}") for ext in IMAGE_SUFFIXES]
         ),
