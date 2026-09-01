@@ -446,6 +446,40 @@ harness.
 `infra/zimaos/bindery.zimaos.yaml` is the CasaOS custom-app manifest. It must
 never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
 
+## The private vault (Phase 16)
+
+A second lock with its own passphrase, for documents that would otherwise not go
+in the archive at all. `api/vault/`, ADR-012.
+
+- **`api/vault/store.py` is the only file allowed to delete anything.**
+  `tests/test_no_destructive_paths.py` names it as the single exemption to
+  REQ-090 and asserts the exemption does not spread. The ordering is the whole
+  feature: encrypt → write → **read back from disk** → compare to the source
+  hash → only then unlink. It is asserted structurally, because a test that
+  proves it by deleting a real document is a test that can lose one.
+- **The read-back must fail closed.** Comparing hashes only catches a ciphertext
+  that decrypts to *different* bytes; the likelier corruption is a flipped bit,
+  which fails the AEAD tag. That escaped the refusal branch as an unhandled
+  error until the tests found it.
+- **`api/vault/boundary.py` is the single definition of what is hidden**, imported
+  by both `api/db/scope.py` and `api/db/repository.py`. It exists because it was
+  written twice and only one copy was updated — five of the leak suite's eleven
+  failures had that one cause.
+- **Vault objects are not content-addressed.** The name is `secrets.token_hex(32)`,
+  because a content address is an existence oracle: anyone holding a copy of a
+  file could confirm the archive holds it without decrypting anything. They live
+  outside `blobs/`, which is why `copy_blobs` and `sync_blobs` cannot see them
+  and both needed their own path.
+- **The pepper is in the local backup and never offsite.** It only stops a stolen
+  *database* from being enough to attack a six-digit PIN, so the bucket holding
+  the dump is the one place it must not be. Losing it costs the PIN, never data.
+- **Backup, offsite, export and the restore drill all had to learn about it.**
+  A vaulted document has no plaintext original, so the drill and the export both
+  reported a healthy archive as corrupt until they were taught the difference.
+- **Search decrypts and scans in memory.** A Postgres index would perform far
+  better and would write the plaintext back to disk, which is the thing the
+  vault exists to prevent. Linear cost, reported rather than hidden.
+
 ## Documentation is part of the change
 
 `web/public/help/guides.json` is the user-facing documentation, and

@@ -41,6 +41,37 @@ def _seal_two(data_root):
     return names
 
 
+async def _filed_document(session, signed_in):
+    """One real, filed document with its original on disk."""
+    import hashlib
+
+    from api.db.enums import IngestSource, ReviewState, SourceFileState
+    from api.db.models import Document, SourceFile
+    from api.storage.blobs import blob_path
+
+    user, library = await signed_in()
+    body = b"%PDF-1.7\nthe deed\n"
+    digest = hashlib.sha256(body).hexdigest()
+    path = blob_path(digest)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
+
+    source = SourceFile(
+        library_id=library.id, sha256=digest, byte_size=len(body),
+        original_filename="deed.pdf", ingest_source=IngestSource.WEB_UPLOAD,
+        page_count=1, state=SourceFileState.PROCESSED,
+    )
+    session.add(source)
+    await session.flush()
+    document = Document(
+        library_id=library.id, source_file_id=source.id, page_start=1, page_end=1,
+        title="Deed", review_state=ReviewState.FILED,
+    )
+    session.add(document)
+    await session.flush()
+    return user, library, document
+
+
 def test_the_backup_carries_the_sealed_objects(data_root, tmp_path):
     """Without this, a restore brings back vault rows pointing at ciphertext no
     backup ever held — the most protected part of the archive would be the only
@@ -251,3 +282,71 @@ async def test_a_sealed_object_missing_from_the_bucket_is_caught(session, data_r
 
     result = offsite.fetch_vault_objects(fake, CONFIG, wanted, data_root / "drill")
     assert result.missing == [names[1]]
+
+
+# --------------------------------------------------------------------------
+# The export names what it could not include (T-16.10, REQ-186)
+# --------------------------------------------------------------------------
+
+
+async def test_the_export_does_not_call_a_vaulted_document_corrupt(
+    session, signed_in, data_root
+):
+    """It has no plaintext original by design.
+
+    Leaving it in the export makes `_copy_originals` flag it `missing_original`
+    — an integrity failure — so the export would report the archive as corrupt
+    for working exactly as intended.
+    """
+    from api.export import archive_export
+
+    user, library, document = await _filed_document(session, signed_in)
+    document.vaulted_by = user.id
+    await session.commit()
+
+    result = await archive_export.full_export(
+        session, [library.id], destination=data_root / "export"
+    )
+
+    assert result.missing_blobs == [], "a vaulted document was reported as corrupt"
+    assert result.document_count == 0
+    assert result.vaulted_count == 1
+
+
+async def test_the_export_says_what_it_left_behind(session, signed_in, data_root):
+    """An export that omits things silently is the failure this guards against:
+    someone reads the tree in ten years, finds it complete, and never learns
+    there was more."""
+    from api.export import archive_export
+
+    user, library, document = await _filed_document(session, signed_in)
+    document.vaulted_by = user.id
+    await session.commit()
+
+    root = data_root / "export"
+    await archive_export.full_export(session, [library.id], destination=root)
+
+    index = (root / "index.html").read_text()
+    assert "private vault" in index
+    assert "1 document in the private vault is not here" in index
+
+    listing = json.loads((root / "documents.json").read_text())
+    assert listing["vaulted_and_not_exported"] == 1
+
+
+async def test_an_ordinary_export_says_nothing_about_a_vault(
+    session, signed_in, data_root
+):
+    """Most archives have no vault, and a note about one would be noise."""
+    from api.export import archive_export
+
+    _user, library, _document = await _filed_document(session, signed_in)
+    await session.commit()
+
+    root = data_root / "export"
+    result = await archive_export.full_export(
+        session, [library.id], destination=root
+    )
+
+    assert result.vaulted_count == 0
+    assert "private vault" not in (root / "index.html").read_text()

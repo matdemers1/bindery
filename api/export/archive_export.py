@@ -70,6 +70,9 @@ class ExportResult:
     byte_size: int
     encrypted: bool = False
     missing_blobs: list[str] = field(default_factory=list)
+    # Vaulted documents are not exported and are not missing. Counted so the
+    # index can say so — see `vaulted_count` (T-16.10, REQ-186).
+    vaulted_count: int = 0
 
 
 @dataclass
@@ -94,6 +97,12 @@ async def collect(
     conditions: list[sa.ColumnElement[bool]] = [
         Document.library_id.in_(library_ids),
         live(),
+        # Vaulted documents have no plaintext original to export. Leaving them
+        # in would make `_copy_originals` flag each one `missing_original` —
+        # an integrity failure — so the export would report the archive as
+        # corrupt for working exactly as designed. They are named in the index
+        # instead (`vaulted_count`), never silently dropped.
+        Document.vaulted_by.is_(None),
     ]
     if vital_only:
         conditions.append(Document.sensitivity == Sensitivity.VITAL)
@@ -176,6 +185,26 @@ async def collect(
             )
         )
     return entries
+
+
+async def vaulted_count(
+    session: AsyncSession, library_ids: list[uuid.UUID]
+) -> int:
+    """How many documents this export could not include (T-16.10, REQ-186).
+
+    An export that omits things without saying so is the failure mode this
+    whole phase is written against: someone reads the folder tree in ten years,
+    finds the archive complete, and never learns there was more.
+    """
+    return (
+        await session.execute(
+            sa.select(sa.func.count(Document.id)).where(
+                Document.library_id.in_(library_ids),
+                live(),
+                Document.vaulted_by.is_not(None),
+            )
+        )
+    ).scalar_one()
 
 
 def plan_layout(entries: list[_Entry]) -> dict[str, list[_Entry]]:
@@ -265,7 +294,9 @@ def _page(title: str, body: str) -> str:
     )
 
 
-def index_html(entries: list[_Entry], title: str, *, prefix: str = "") -> str:
+def index_html(
+    entries: list[_Entry], title: str, *, prefix: str = "", vaulted: int = 0
+) -> str:
     """A browsable index that needs nothing but a browser.
 
     Deliberately one self-contained file, inline styles, no scripts: it has to
@@ -300,6 +331,22 @@ def index_html(entries: list[_Entry], title: str, *, prefix: str = "") -> str:
             "</tr>"
         )
 
+    # Said in the index rather than left to be noticed. An export that omits
+    # things without saying so is the failure this is written against: someone
+    # reads the tree in ten years, finds it complete, and never learns there
+    # was more (REQ-186).
+    sealed_note = ""
+    if vaulted:
+        plural = "" if vaulted == 1 else "s"
+        verb = "is" if vaulted == 1 else "are"
+        sealed_note = (
+            "<p class='note'><strong>"
+            f"{vaulted} document{plural} in the private vault {verb} not here."
+            "</strong> They are encrypted with a passphrase this export does "
+            "not contain and Bindery cannot recover. They are in the backups, "
+            "still encrypted.</p>"
+        )
+
     body = (
         f"<h1>{html.escape(title)}</h1>"
         f"<p class='note'>{len(entries)} documents · exported "
@@ -311,7 +358,8 @@ def index_html(entries: list[_Entry], title: str, *, prefix: str = "") -> str:
         "same metadata for a machine.</p>"
         "<p class='note'><strong>This page needs nothing but a browser.</strong> "
         "Bindery does not have to exist, or run, for it to work.</p>"
-        "<table><thead><tr><th>Date</th><th>Document</th><th>From</th>"
+        + sealed_note
+        + "<table><thead><tr><th>Date</th><th>Document</th><th>From</th>"
         "<th>Type</th><th>Tags</th><th>Pages</th></tr></thead><tbody>"
         + "\n".join(rows)
         + "</tbody></table>"
@@ -395,6 +443,7 @@ async def full_export(
 ) -> ExportResult:
     """Originals in a semantic tree, metadata, and a static index (REQ-093)."""
     entries = await collect(session, library_ids)
+    sealed = await vaulted_count(session, library_ids)
     by_file = plan_layout(entries)
 
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
@@ -408,6 +457,7 @@ async def full_export(
             {
                 "exported_at": datetime.now(UTC).isoformat(),
                 "document_count": len(entries),
+                "vaulted_and_not_exported": sealed,
                 "documents": [
                     {**e.document, "path": e.relative_path} for e in entries
                 ],
@@ -415,12 +465,14 @@ async def full_export(
             indent=2,
         )
     )
-    (root / "index.html").write_text(index_html(entries, "Bindery archive"))
+    (root / "index.html").write_text(
+        index_html(entries, "Bindery archive", vaulted=sealed)
+    )
     (root / "README.txt").write_text(README)
 
     log.info(
-        "exported %s documents in %s files to %s (%s missing)",
-        len(entries), copied, root, len(missing),
+        "exported %s documents in %s files to %s (%s missing, %s vaulted)",
+        len(entries), copied, root, len(missing), sealed,
     )
     return ExportResult(
         path=root,
@@ -428,6 +480,7 @@ async def full_export(
         file_count=copied,
         byte_size=total_bytes,
         missing_blobs=missing,
+        vaulted_count=sealed,
     )
 
 
