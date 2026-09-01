@@ -12,6 +12,7 @@ from api.db.models.entities import (
     SavedSearch,
 )
 from api.db.models.event_log import EventLog, ServiceHeartbeat
+from api.db.models.field_source import FieldSource
 from api.db.models.importing import (
     ImportItem,
     ImportSession,
@@ -52,6 +53,7 @@ __all__ = [
     "DuplicatePair",
     "EventLog",
     "FieldProvenance",
+    "FieldSource",
     "ImportItem",
     "ImportSession",
     "Invitation",

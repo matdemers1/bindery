@@ -21,14 +21,14 @@ from dataclasses import dataclass, field
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.db.enums import TagSource
+from api.db.enums import ActorType, TagSource
 from api.db.models import (
+    AuditEvent,
     Correspondent,
     Document,
     DocumentTag,
     DocumentType,
     Tag,
-    live_tag_links,
 )
 from api.text import slugify
 from worker.ai.provider import ClassificationResult
@@ -184,31 +184,72 @@ async def resolve(
     return resolution
 
 
+async def removed_by_human(
+    session: AsyncSession, document_id: uuid.UUID
+) -> set[uuid.UUID]:
+    """Tags a person took off this document (T-17.6, REQ-191).
+
+    Taking a tag off is a decision, and re-applying it on the next
+    classification run is the same silent revert that overwriting a corrected
+    title would be. The link row survives its removal — that is the whole point
+    of `removed_at` — so the record of the decision is already there to read.
+    """
+    rows = await session.execute(
+        sa.select(DocumentTag.tag_id)
+        .join(AuditEvent, AuditEvent.id == DocumentTag.removed_by_event_id)
+        .where(
+            DocumentTag.document_id == document_id,
+            DocumentTag.removed_at.is_not(None),
+            AuditEvent.actor_type == ActorType.HUMAN,
+        )
+    )
+    return set(rows.scalars().all())
+
+
 async def apply_tags(
     session: AsyncSession,
     document: Document,
     tag_ids: list[uuid.UUID],
     source: TagSource,
+    *,
+    skip: set[uuid.UUID] | None = None,
 ) -> None:
     """Attach tags, recording provenance on the link row itself (REQ-078).
 
     Existing links are left alone rather than rewritten: a tag a human set must
     not silently become an AI-sourced one because the classifier agreed with it.
+
+    `skip` carries the tags a person has removed. Without it the model re-adds
+    them on the next run, which is the same silent revert this phase exists to
+    prevent — and the more infuriating version of it, because removing the tag
+    again does nothing.
     """
-    existing = set(
-        (
-            await session.execute(
-                sa.select(DocumentTag.tag_id).where(
-                    DocumentTag.document_id == document.id, live_tag_links()
-                )
-            )
-        ).scalars().all()
-    )
-    for tag_id in tag_ids:
-        if tag_id in existing:
-            continue
-        session.add(
-            DocumentTag(document_id=document.id, tag_id=tag_id, source=source)
+    # Every link, live or revoked. `document_tag` is keyed on
+    # `(document_id, tag_id)`, so a revoked link still occupies the row — and
+    # looking only at live ones means re-applying a revoked tag INSERTs over an
+    # existing primary key and raises. Reachable today: undo revokes a
+    # classification's tags, and the next run tries to put them back.
+    rows = (
+        await session.execute(
+            sa.select(DocumentTag).where(DocumentTag.document_id == document.id)
         )
-        existing.add(tag_id)
+    ).scalars().all()
+    links = {row.tag_id: row for row in rows}
+    live = {tag_id for tag_id, row in links.items() if row.removed_at is None}
+    refused = skip or set()
+
+    for tag_id in tag_ids:
+        if tag_id in live or tag_id in refused:
+            continue
+        if (revoked := links.get(tag_id)) is not None:
+            # Revived rather than re-inserted, and it keeps the source it was
+            # first given: a tag a human set must not silently become
+            # AI-sourced because the classifier later agreed with it.
+            revoked.removed_at = None
+            revoked.removed_by_event_id = None
+        else:
+            session.add(
+                DocumentTag(document_id=document.id, tag_id=tag_id, source=source)
+            )
+        live.add(tag_id)
     await session.flush()

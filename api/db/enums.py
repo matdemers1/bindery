@@ -130,3 +130,17 @@ class AssetKind(StrEnum):
     ACCOUNT = "account"
     PERSON = "person"
     OTHER = "other"
+
+
+class FieldSource(StrEnum):
+    """Who last set a document field — provenance of *authority* (REQ-188).
+
+    Distinct from `field_provenance`, which records the evidence behind an
+    AI-written value. Evidence answers "why does it say this"; authority answers
+    "who decided", and only the second can tell classification what it is not
+    allowed to touch.
+    """
+
+    AI = "ai"
+    RULE = "rule"
+    HUMAN = "human"

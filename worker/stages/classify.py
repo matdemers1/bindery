@@ -21,9 +21,10 @@ import sqlalchemy as sa
 from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import queue
+from api import field_source, queue
 from api.artifacts import derived_for, relative_to_data
 from api.db.enums import ActorType, JobStage, ReviewState, TagSource
+from api.db.enums import FieldSource as FieldSourceKind
 from api.db.models import Classification, Document, FieldProvenance, KnownForm, Page, SourceFile
 from api.queue import ClaimedJob
 from api.storage.blobs import blob_path
@@ -31,7 +32,7 @@ from worker.ai import ClassificationRequest, get_provider
 from worker.ai.provider import PageImage
 from worker.classify import candidates as candidate_builder
 from worker.classify import gate as gate_module
-from worker.classify.resolve import apply_tags, resolve
+from worker.classify.resolve import apply_tags, removed_by_human, resolve
 
 log = logging.getLogger("bindery.worker.classify")
 
@@ -255,21 +256,53 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
 
     resolution = await resolve(session, document, result, library_ids)
 
-    document.title = result.title or document.title
-    document.summary = result.summary or document.summary
-    document.correspondent_id = resolution.correspondent_id or document.correspondent_id
-    document.document_type_id = resolution.document_type_id or document.document_type_id
+    # A field a person has set is theirs (REQ-191). The model may still improve
+    # everything they did not touch — locking the whole document would forfeit
+    # AI help on the nine fields nobody corrected.
+    held = await field_source.held_by_human(session, document.id)
+    proposed: dict[str, object] = {}
+
+    if result.title:
+        proposed["title"] = result.title
+    if result.summary:
+        proposed["summary"] = result.summary
+    if resolution.correspondent_id:
+        proposed["correspondent_id"] = resolution.correspondent_id
+    if resolution.document_type_id:
+        proposed["document_type_id"] = resolution.document_type_id
     if result.document_date:
         try:
             from datetime import date
 
-            document.document_date = date.fromisoformat(result.document_date)
+            proposed["document_date"] = date.fromisoformat(result.document_date)
         except ValueError:
             # A malformed date is dropped rather than stored: a wrong date
             # nobody will check is worse than no date (REQ-052).
             log.warning("document %s: unusable date %r", document.id, result.document_date)
 
-    await apply_tags(session, document, resolution.tag_ids, TagSource.AI)
+    written: list[str] = []
+    for name, value in proposed.items():
+        if name in held:
+            continue
+        setattr(document, name, value)
+        written.append(name)
+
+    # Invariant 8: nothing fails silently. A model that wanted to change
+    # something and was refused is a fact worth being able to see — both to
+    # explain why re-running review "did nothing", and because a field held by
+    # a correction the model keeps disagreeing with is worth knowing about.
+    deferred = sorted(name for name in proposed if name in held)
+    if deferred:
+        log.info(
+            "document %s: left %s to the person who set them",
+            document.id, ", ".join(deferred),
+        )
+    await field_source.record(session, document.id, written, FieldSourceKind.AI)
+
+    await apply_tags(
+        session, document, resolution.tag_ids, TagSource.AI,
+        skip=await removed_by_human(session, document.id),
+    )
 
     signals = gate_module.collect(
         result,
