@@ -100,6 +100,13 @@ class Document(Base):
     # Set when a re-segmentation replaced this row. The exclusion constraint on
     # overlapping page ranges applies only to live rows, so history can overlap
     # freely while the current set stays coherent.
+    # Set when this document is in someone's private vault (ADR-012). The
+    # repository layer refuses to return a row carrying it without an unlocked
+    # session for that user — scoped there rather than at each call site, for
+    # the reason ADR-005 gives about boundaries that get forgotten.
+    vaulted_by: Mapped[uuid.UUID | None] = mapped_column(
+        sa.UUID(as_uuid=True), sa.ForeignKey("app_user.id")
+    )
     superseded_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     # The audit event that superseded it — what `undo` walks back.
     superseded_by_event_id: Mapped[uuid.UUID | None] = mapped_column(

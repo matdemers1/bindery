@@ -39,6 +39,10 @@ async def search(
         session,
         q,
         visible,
+        # Who is asking, so the vault filter applies. Without it search reads
+        # page text straight past the boundary — the one leak that surfaces as
+        # the actual words rather than a title.
+        viewer=user.id,
         filters=search_query.SearchFilters(
             library_ids=library_id,
             received_from=received_from,

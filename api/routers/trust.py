@@ -576,5 +576,10 @@ async def ask_the_archive(
     model = await settings_store.get(session, settings_store.BINDERY_MODEL) or "claude-opus-5"
     answerer = ai_ask.ClaudeAnswerer(key or "", model=model) if key else None
 
-    result = await ask.ask(session, body.question.strip(), library_ids, answerer)
+    # `user.id` so the vault boundary applies: Ask reads page text and sends it
+    # to a model, so a vaulted document reaching it would be quoted back *and*
+    # transmitted off the host.
+    result = await ask.ask(
+        session, body.question.strip(), library_ids, answerer, viewer=user.id
+    )
     return AskOut(**result.as_dict())

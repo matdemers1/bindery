@@ -122,17 +122,25 @@ class AskResult:
 
 
 async def gather_sources(
-    session: AsyncSession, question: str, library_ids: list[uuid.UUID]
+    session: AsyncSession,
+    question: str,
+    library_ids: list[uuid.UUID],
+    viewer: uuid.UUID | None = None,
 ) -> list[AskSource]:
-    """Find the pages worth reading, using search rather than the model."""
+    """Find the pages worth reading, using search rather than the model.
+
+    `viewer` carries the vault boundary. Ask reads page *text* and hands it to
+    a model, so a vaulted document reaching here would not merely be listed —
+    it would be quoted back, and sent to Anthropic.
+    """
     precise, broad = question_to_query(question)
     response = await search_query.search(
-        session, precise, library_ids, limit=MAX_SOURCE_PAGES
+        session, precise, library_ids, viewer=viewer, limit=MAX_SOURCE_PAGES
     )
     if not response.results and broad != precise:
         log.debug("broadening %r to an OR query", question[:60])
         response = await search_query.search(
-            session, broad, library_ids, limit=MAX_SOURCE_PAGES
+            session, broad, library_ids, viewer=viewer, limit=MAX_SOURCE_PAGES
         )
     if not response.results:
         return []
@@ -193,10 +201,14 @@ def _consulted(sources: list[AskSource]) -> list[dict]:
 
 
 async def ask(
-    session: AsyncSession, question: str, library_ids: list[uuid.UUID], provider
+    session: AsyncSession,
+    question: str,
+    library_ids: list[uuid.UUID],
+    provider,
+    viewer: uuid.UUID | None = None,
 ) -> AskResult:
     """Answer a question, or say honestly why there is no answer."""
-    sources = await gather_sources(session, question, library_ids)
+    sources = await gather_sources(session, question, library_ids, viewer)
     consulted = _consulted(sources)
 
     if not sources:

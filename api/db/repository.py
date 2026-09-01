@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.db.enums import MembershipRole
 from api.db.models import Document, Job, Library, Membership, Page, SourceFile
+from api.vault import boundary as vault
 
 WRITE_ROLES = (MembershipRole.OWNER, MembershipRole.CONTRIBUTOR)
 
@@ -61,7 +62,11 @@ async def list_documents(
         return []
     result = await session.execute(
         sa.select(Document)
-        .where(Document.library_id.in_(library_ids), Document.superseded_at.is_(None))
+        .where(
+            Document.library_id.in_(library_ids),
+            Document.superseded_at.is_(None),
+            vault.document_clause(user_id),
+        )
         .order_by(Document.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -81,6 +86,7 @@ async def get_document(
             Document.id == document_id,
             Document.library_id.in_(library_ids),
             Document.superseded_at.is_(None),
+            vault.document_clause(user_id),
         )
     )
     return result.scalar_one_or_none()
@@ -94,7 +100,10 @@ async def list_source_files(
         return []
     result = await session.execute(
         sa.select(SourceFile)
-        .where(SourceFile.library_id.in_(library_ids))
+        .where(
+            SourceFile.library_id.in_(library_ids),
+            SourceFile.id.not_in(vault.hidden_source_file_ids(user_id)),
+        )
         .order_by(SourceFile.received_at.desc())
         .limit(limit)
         .offset(offset)
@@ -139,7 +148,9 @@ async def get_source_file(
         return None
     result = await session.execute(
         sa.select(SourceFile).where(
-            SourceFile.id == source_file_id, SourceFile.library_id.in_(library_ids)
+            SourceFile.id == source_file_id,
+            SourceFile.id.not_in(vault.hidden_source_file_ids(user_id)),
+            SourceFile.library_id.in_(library_ids),
         )
     )
     return result.scalar_one_or_none()
@@ -158,6 +169,7 @@ async def get_page(
             Page.source_file_id == source_file_id,
             Page.page_number == page_number,
             SourceFile.library_id.in_(library_ids),
+            Page.source_file_id.not_in(vault.hidden_source_file_ids(user_id)),
         )
     )
     return result.scalar_one_or_none()
@@ -172,7 +184,11 @@ async def list_pages(
     result = await session.execute(
         sa.select(Page)
         .join(SourceFile, SourceFile.id == Page.source_file_id)
-        .where(Page.source_file_id == source_file_id, SourceFile.library_id.in_(library_ids))
+        .where(
+            Page.source_file_id == source_file_id,
+            SourceFile.library_id.in_(library_ids),
+            Page.source_file_id.not_in(vault.hidden_source_file_ids(user_id)),
+        )
         .order_by(Page.page_number)
     )
     return result.scalars().all()

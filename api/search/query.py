@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.db.enums import SourceFileState
 from api.db.models import Document, KnownForm, Page, SourceFile, Tag
+from api.vault import boundary as vault
 
 # ts_headline settings: two short fragments, marked up for the results list.
 HEADLINE_OPTIONS = (
@@ -133,11 +134,19 @@ def _form_names_the_query(query: str):
     return sa.and_(KnownForm.code.is_not(None), sa.or_(*predicates))
 
 
-def _filters(filters: SearchFilters, allowed: list[uuid.UUID]) -> list:
+def _filters(
+    filters: SearchFilters, allowed: list[uuid.UUID], viewer: uuid.UUID | None = None
+) -> list:
     conditions = [
         Document.library_id.in_(allowed),
         Document.superseded_at.is_(None),
     ]
+    # The vault, in the one place every search condition is assembled. Search
+    # is the path that matters most here: it reads page *text*, so a leak
+    # surfaces as the actual words rather than as a title — and it feeds the
+    # snippets, the facets and the hit count as well as the results.
+    if viewer is not None:
+        conditions.append(vault.document_clause(viewer))
     if filters.received_from:
         conditions.append(SourceFile.received_at >= filters.received_from)
     if filters.received_to:
@@ -198,7 +207,12 @@ def _joins(statement):
     )
 
 
-def _scoped_pages(query: str, visible: list[uuid.UUID], filters: SearchFilters):
+def _scoped_pages(
+    query: str,
+    visible: list[uuid.UUID],
+    filters: SearchFilters,
+    viewer: uuid.UUID | None = None,
+):
     """Every match the caller may see, from two independent branches.
 
     **Text** — pages whose `tsvector` matches the query. Page-granular, GIN
@@ -222,7 +236,7 @@ def _scoped_pages(query: str, visible: list[uuid.UUID], filters: SearchFilters):
     if not allowed:
         return None, allowed
 
-    shared = _filters(filters, allowed)
+    shared = _filters(filters, allowed, viewer)
 
     # A recognised document beats an unrecognised one on an otherwise equal hit.
     any_form_bonus = sa.case((KnownForm.code.is_not(None), ANY_FORM_BOOST), else_=0.0)
@@ -250,6 +264,7 @@ async def search(
     query: str,
     visible_library_ids: list[uuid.UUID],
     *,
+    viewer: uuid.UUID | None = None,
     filters: SearchFilters | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -259,7 +274,7 @@ async def search(
     if not query or not visible_library_ids:
         return SearchResponse(query=query, total=0, results=[], facets={}, suggestions=[])
 
-    pages, allowed = _scoped_pages(query, visible_library_ids, filters)
+    pages, allowed = _scoped_pages(query, visible_library_ids, filters, viewer)
     if pages is None:
         return SearchResponse(query=query, total=0, results=[], facets={}, suggestions=[])
     matches = pages.subquery("matches")
@@ -337,7 +352,7 @@ async def search(
     facets = await _facets(session, rolled)
     # Only offer a correction when the query found nothing — otherwise it is a
     # distraction from results the user already has.
-    suggestions = await suggest(session, query, allowed) if total == 0 else []
+    suggestions = await suggest(session, query, allowed, viewer) if total == 0 else []
 
     return SearchResponse(
         query=query, total=total, results=results, facets=facets, suggestions=suggestions
@@ -382,7 +397,10 @@ async def _facets(session: AsyncSession, rolled) -> dict[str, list[Facet]]:
 
 
 async def suggest(
-    session: AsyncSession, query: str, allowed: list[uuid.UUID]
+    session: AsyncSession,
+    query: str,
+    allowed: list[uuid.UUID],
+    viewer: uuid.UUID | None = None,
 ) -> list[str]:
     """Trigram "did you mean" over names (REQ-023).
 
@@ -397,6 +415,10 @@ async def suggest(
         Document.title.is_not(None),
         Document.library_id.in_(allowed),
         Document.superseded_at.is_(None),
+        # A vaulted document's *title* offered as a spelling suggestion is a
+        # leak that never touches a results list — exactly the shape the leak
+        # suite exists to find.
+        vault.document_clause(viewer) if viewer else sa.true(),
         similarity(Document.title, query) > SUGGESTION_THRESHOLD,
     )
     tags = sa.select(

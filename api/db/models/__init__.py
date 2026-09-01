@@ -35,6 +35,7 @@ from api.db.models.user import (
     RecoveryCode,
     RefreshToken,
 )
+from api.db.models.vault import Vault, VaultItem, VaultPage
 
 __all__ = [
     "ApiToken",
@@ -71,5 +72,8 @@ __all__ = [
     "Setting",
     "SourceFile",
     "Tag",
+    "Vault",
+    "VaultItem",
+    "VaultPage",
     "live_tag_links",
 ]

@@ -41,6 +41,7 @@ from api.db.models import (
     Tag,
 )
 from api.segments import live
+from api.vault import boundary as vault
 
 WRITE_ROLES = (MembershipRole.OWNER, MembershipRole.CONTRIBUTOR)
 
@@ -61,6 +62,16 @@ class Scope:
     visible: tuple[uuid.UUID, ...]
     writable: tuple[uuid.UUID, ...]
     roles: dict[uuid.UUID, MembershipRole]
+    # Whether this caller has an unlocked vault right now (ADR-012). Resolved
+    # once per request like everything else here, so a route cannot ask twice
+    # and get two different answers halfway through.
+    #
+    # It lives on `Scope` rather than being checked at each call site for the
+    # same reason the library filter does: a boundary enforced in 27 places is
+    # a boundary that will be forgotten in one of them, and the one that gets
+    # forgotten will be a facet count or a search snippet rather than the
+    # document endpoint anybody would think to guard.
+    vault_unlocked: bool = False
 
     # -- guards ------------------------------------------------------------
 
@@ -94,25 +105,54 @@ class Scope:
 
     # -- already-filtered queries -----------------------------------------
 
+    def _vault_clause(self):
+        return vault.document_clause(self.user_id, unlocked=self.vault_unlocked)
+
     def documents(self, *, include_superseded: bool = False):
-        query = sa.select(Document).where(Document.library_id.in_(self.visible))
+        query = sa.select(Document).where(
+            Document.library_id.in_(self.visible), self._vault_clause()
+        )
         return query if include_superseded else query.where(live())
 
     def source_files(self):
-        return sa.select(SourceFile).where(SourceFile.library_id.in_(self.visible))
+        """A file is hidden while any live document over it is vaulted.
+
+        Files and documents are different rows, and a vaulted document's file
+        would otherwise still be listable, downloadable and countable — the
+        page images are in it.
+        """
+        hidden = vault.hidden_source_file_ids(self.user_id, unlocked=self.vault_unlocked)
+        return sa.select(SourceFile).where(
+            SourceFile.library_id.in_(self.visible), SourceFile.id.not_in(hidden)
+        )
 
     def pages(self):
-        """Pages carry no library of their own; they inherit their file's."""
+        """Pages carry no library of their own; they inherit their file's.
+
+        And their file's vault state: a vaulted document's page text is what
+        search, snippets and facets read, so this is the query that decides
+        whether a locked vault leaks.
+        """
+        hidden = vault.hidden_source_file_ids(self.user_id, unlocked=self.vault_unlocked)
         return (
             sa.select(Page)
             .join(SourceFile, SourceFile.id == Page.source_file_id)
-            .where(SourceFile.library_id.in_(self.visible))
+            .where(
+                SourceFile.library_id.in_(self.visible),
+                Page.source_file_id.not_in(hidden),
+            )
         )
 
     def of(self, model):
         """Any library-scoped model, filtered. Raises rather than guessing."""
         if model not in LIBRARY_SCOPED:
             raise TypeError(f"{model.__name__} is not library-scoped")
+        if model is Document:
+            # Routed through `documents()` so the vault filter cannot be
+            # bypassed by asking for the model generically.
+            return self.documents()
+        if model is SourceFile:
+            return self.source_files()
         return sa.select(model).where(model.library_id.in_(self.visible))
 
     def audit(self):
@@ -160,4 +200,8 @@ async def resolve(session: AsyncSession, user_id: uuid.UUID) -> Scope:
         visible=tuple(roles),
         writable=tuple(lid for lid, role in roles.items() if role in WRITE_ROLES),
         roles=roles,
+        # Read once, here, from process memory. Resolving it per query would
+        # let a request that began locked finish unlocked, or the reverse, and
+        # a boundary that changes halfway through a request is not a boundary.
+        vault_unlocked=vault.is_unlocked(user_id),
     )
