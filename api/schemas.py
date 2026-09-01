@@ -127,6 +127,57 @@ class SourceFileDetailOut(BaseModel):
     pages: list[PageOut]
 
 
+class DocumentEditIn(BaseModel):
+    """A correction (REQ-188).
+
+    Every field is optional, and **absent is not the same as null**: a payload
+    that does not mention `title` leaves it alone, while one that sends
+    `"title": null` clears it. The route reads `model_fields_set` to tell them
+    apart, which is the only way "remove the wrong date" can be expressed.
+
+    Taxonomy is by id (invariant 6). Creating a new correspondent, type or tag
+    is a separate, explicit field — a name never becomes a link by resembling
+    something that already exists.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
+    summary: str | None = None
+    document_date: date | None = None
+    correspondent_id: uuid.UUID | None = None
+    document_type_id: uuid.UUID | None = None
+
+    # Explicit creation, not a fallback for an unmatched name.
+    create_correspondent: str | None = None
+    create_document_type: str | None = None
+
+    add_tag_ids: list[uuid.UUID] = []
+    remove_tag_ids: list[uuid.UUID] = []
+    create_tags: list[str] = []
+
+
+class DocumentEditOut(BaseModel):
+    """What actually changed, so the UI can say so rather than assume."""
+
+    document: "DocumentOut"
+    changed: list[str] = []
+    tags_added: list[str] = []
+    tags_removed: list[str] = []
+    created: dict[str, str] = {}
+    event_id: uuid.UUID | None = None
+
+
+class FieldSourceOut(BaseModel):
+    """Who set one field, for the visual distinction REQ-064 requires."""
+
+    field_name: str
+    source: str
+    set_by: uuid.UUID | None = None
+    set_at: datetime | None = None
+    event_id: uuid.UUID | None = None
+
+
 class DocumentDetailOut(BaseModel):
     """Everything the viewer needs to show a page range as a standalone document."""
 
@@ -134,6 +185,9 @@ class DocumentDetailOut(BaseModel):
     source_file: SourceFileOut
     known_form: KnownFormOut | None
     pages: list[PageOut]
+    # Who set each field. Empty for a document nobody has corrected and no
+    # classification has claimed — which is every document older than Phase 17.
+    field_sources: list[FieldSourceOut] = []
 
 
 class PageHitOut(BaseModel):
@@ -685,12 +739,15 @@ __all__ = [
     "ClassificationOut",
     "CorrespondentOut",
     "DocumentDetailOut",
+    "DocumentEditIn",
+    "DocumentEditOut",
     "DocumentOut",
     "DuplicatePairOut",
     "ExportOut",
     "ExportRequestIn",
     "FacetOut",
     "FieldProvenanceOut",
+    "FieldSourceOut",
     "FileTreeNodeOut",
     "FileTreeOut",
     "GoBagIn",

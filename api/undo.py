@@ -18,6 +18,7 @@ from datetime import date
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import field_source
 from api.audit import record
 from api.db.enums import ActorType, ReviewState, Sensitivity
 from api.db.models import AuditEvent, Document, DocumentTag
@@ -159,6 +160,41 @@ async def undo_event(
             "restored": restored,
             "tags_withdrawn": result.rowcount or 0,
         }
+
+    if event.action == "edit":
+        # Give the fields back, or the value stays frozen at something nobody
+        # chose: held by a person whose decision has just been reversed, and so
+        # still off limits to classification. Released rather than deleted, so
+        # "somebody set this and then took it back" stays answerable.
+        await field_source.release(
+            session, document.id, list(restored), event_id=undo_event_row.id
+        )
+        # Tags the edit revoked come back, and tags it added go away again,
+        # read from the manifest the edit recorded rather than inferred from
+        # timestamps — inference would sweep up tags a *later* edit added.
+        # Without this the removal stands, and the removal is exactly what
+        # stops classification re-applying the tag, so the undo would silently
+        # do half its job.
+        after = event.after or {}
+        if put_back := after.get("tag_ids_removed"):
+            await session.execute(
+                sa.update(DocumentTag)
+                .where(
+                    DocumentTag.document_id == document.id,
+                    DocumentTag.tag_id.in_([uuid.UUID(t) for t in put_back]),
+                )
+                .values(removed_at=None, removed_by_event_id=None)
+            )
+        if take_away := after.get("tag_ids_added"):
+            await session.execute(
+                sa.update(DocumentTag)
+                .where(
+                    DocumentTag.document_id == document.id,
+                    DocumentTag.tag_id.in_([uuid.UUID(t) for t in take_away]),
+                    DocumentTag.removed_at.is_(None),
+                )
+                .values(removed_at=sa.func.now(), removed_by_event_id=undo_event_row.id)
+            )
 
     await session.flush()
     return document

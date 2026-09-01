@@ -3,13 +3,17 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api import editing, events, field_source
 from api.auth.dependencies import current_user
 from api.db import repository
 from api.db.models import AppUser, KnownForm
 from api.db.session import get_session
 from api.schemas import (
     DocumentDetailOut,
+    DocumentEditIn,
+    DocumentEditOut,
     DocumentOut,
+    FieldSourceOut,
     KnownFormOut,
     LibraryOut,
     PageOut,
@@ -82,9 +86,93 @@ async def get_document(
         if document.page_start <= page.page_number <= document.page_end
     ]
 
+    sources = await field_source.sources_for(session, document.id)
+
     return DocumentDetailOut(
         document=DocumentOut.model_validate(document),
         source_file=SourceFileOut.model_validate(source_file),
         known_form=KnownFormOut.model_validate(known_form) if known_form else None,
         pages=[PageOut.model_validate(page) for page in pages],
+        field_sources=[
+            FieldSourceOut(
+                field_name=row.field_name,
+                source=row.source.value,
+                set_by=row.set_by,
+                set_at=row.set_at,
+                event_id=row.set_by_event_id,
+            )
+            for row in sources.values()
+        ],
+    )
+
+
+@router.patch("/documents/{document_id}", response_model=DocumentEditOut)
+async def edit_document(
+    document_id: uuid.UUID,
+    payload: DocumentEditIn,
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentEditOut:
+    """Correct a document by hand (REQ-188, REQ-189, REQ-190).
+
+    A field absent from the body is left alone; a field sent as `null` is
+    cleared. Without that distinction there is no way to remove a wrong date,
+    only to replace it with another wrong date.
+
+    404 rather than 403 for a document the caller cannot see, because a 403
+    confirms the thing exists and a probe should learn nothing (ADR-005). A
+    vaulted document is invisible while the vault is locked and 404s here for
+    the same reason, through the same repository scoping.
+    """
+    document = await repository.get_document(session, user.id, document_id)
+    if document is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    if not await repository.can_write_library(session, user.id, document.library_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "no write access to that library")
+
+    sent = payload.model_dump(exclude_unset=True)
+    created: dict[str, str] = {}
+
+    try:
+        # Creation first, so the ids it produces can be what the edit links to.
+        if name := sent.pop("create_correspondent", None):
+            made = await editing.create_correspondent(session, document.library_id, name)
+            sent["correspondent_id"] = made.id
+            created["correspondent"] = made.name
+        if name := sent.pop("create_document_type", None):
+            made = await editing.create_document_type(session, document.library_id, name)
+            sent["document_type_id"] = made.id
+            created["document_type"] = made.name
+
+        add_ids = list(sent.pop("add_tag_ids", []))
+        remove_ids = list(sent.pop("remove_tag_ids", []))
+        for name in sent.pop("create_tags", []):
+            made = await editing.create_tag(session, document.library_id, name)
+            add_ids.append(made.id)
+            created[f"tag:{made.name}"] = made.name
+
+        result = await editing.apply(
+            session, document, sent,
+            actor_id=user.id, add_tags=add_ids, remove_tags=remove_ids,
+        )
+    except editing.EditError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+    # The archive browser, the review badge and any open viewer are all showing
+    # a value that just changed.
+    await events.publish(
+        session,
+        [events.Topic.DOCUMENTS, events.Topic.REVIEW],
+        library_id=document.library_id,
+    )
+    await session.commit()
+    await session.refresh(document)
+
+    return DocumentEditOut(
+        document=DocumentOut.model_validate(document),
+        changed=sorted(result.changed),
+        tags_added=result.tags_added,
+        tags_removed=result.tags_removed,
+        created=created,
+        event_id=result.event_id,
     )
