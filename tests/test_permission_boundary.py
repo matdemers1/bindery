@@ -361,6 +361,13 @@ NOT_LIBRARY_SCOPED = {
     # is asserted separately below rather than assumed, because the version of
     # this that shipped first *did* carry blob hashes in its failure strings.
     "/api/offsite": "replication state; asserted to contain no archive data (ADR-009)",
+    # User-scoped rather than library-scoped, and asserted far more strictly in
+    # tests/test_vault_leak.py: a locked vault returns nothing anywhere, and an
+    # unlocked one is the caller's own by construction — there is no vault
+    # belonging to a library or shared with anyone.
+    "/api/vault": "the caller's own vault state; says nothing while locked (ADR-012)",
+    "/api/vault/items": "the caller's own vault; 423 while locked",
+    "/api/vault/search": "the caller's own vault; 423 while locked",
 }
 
 

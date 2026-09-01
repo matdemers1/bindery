@@ -34,6 +34,7 @@ from api.routers import (
     trust,
     upload,
 )
+from api.routers import vault as vault_router
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -79,6 +80,7 @@ app = FastAPI(
 )
 
 app.include_router(health.router, prefix="/api")
+app.include_router(vault_router.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(accounts_router.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")

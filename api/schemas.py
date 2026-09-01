@@ -568,6 +568,49 @@ class SettingsTestOut(BaseModel):
     output_tokens: int | None = None
 
 
+class VaultStateOut(BaseModel):
+    """What a locked vault is willing to say about itself.
+
+    Whether it exists and whether it is open, because the UI must render
+    something. Not how much is in it: a locked vault that reports a count has
+    already said something about its contents.
+    """
+
+    exists: bool
+    unlocked: bool
+    pin_enabled: bool = False
+    pin_failures: int = 0
+
+
+class VaultItemOut(BaseModel):
+    document_id: uuid.UUID
+    title: str | None = None
+    original_filename: str | None = None
+    byte_size: int = 0
+    page_count: int = 0
+    vaulted_at: datetime | None = None
+    warnings: list[str] = []
+
+
+class VaultSearchHitOut(BaseModel):
+    document_id: uuid.UUID
+    title: str | None = None
+    page_number: int
+    snippet: str
+
+
+class VaultSearchOut(BaseModel):
+    query: str
+    total: int
+    hits: list[VaultSearchHitOut] = []
+    # Reported rather than hidden: this search is linear in the size of the
+    # vault, and a search that quietly got slower every month is how people
+    # conclude the archive is broken (ADR-012).
+    pages_scanned: int = 0
+    elapsed_ms: int = 0
+    slow: bool = False
+
+
 class OffsiteRunOut(BaseModel):
     """One replication attempt, successful or not (REQ-164)."""
 
@@ -694,6 +737,10 @@ __all__ = [
     "TreeOut",
     "UploadResult",
     "UserOut",
+    "VaultItemOut",
+    "VaultSearchHitOut",
+    "VaultSearchOut",
+    "VaultStateOut",
     "WhyPanelOut",
 ]
 

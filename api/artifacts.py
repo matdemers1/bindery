@@ -72,3 +72,27 @@ def resolve_in_data(relative: str) -> Path:
     if not candidate.is_relative_to(root):
         raise ValueError(f"path escapes the data root: {relative!r}")
     return candidate
+
+
+def purge_derived(sha256: str) -> bool:
+    """Remove every derived artifact for one original (T-16.5).
+
+    The one place in this application that deletes derived files on purpose,
+    and safe for the same reason the mirror is: nothing here is an original.
+    Every byte under `derived/<sha>` — the normalised PDF, the page renders,
+    the thumbnails — is reproducible from the blob by re-running the pipeline.
+
+    It exists for the vault. Encrypting an original while leaving plaintext
+    renders of its pages beside it would hide the document and keep the
+    pictures of it, which is not hiding the document.
+
+    Returns whether the directory is gone, so a caller can say so rather than
+    assume it.
+    """
+    import shutil
+
+    directory = derived_for(sha256).root
+    if not directory.exists():
+        return True
+    shutil.rmtree(directory, ignore_errors=True)
+    return not directory.exists()

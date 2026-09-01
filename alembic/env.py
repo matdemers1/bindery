@@ -19,7 +19,11 @@ import api.db.models  # noqa: F401  isort:skip
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers` defaults to True, which switches off every
+    # logger that already exists — including all of `bindery.*` when migrations
+    # are run in-process. Anything that ran alembic and then kept going would
+    # carry on working in complete silence.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
