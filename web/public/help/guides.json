@@ -152,7 +152,7 @@
     {
       "route": "/photos",
       "title": "Photos",
-      "blurb": "Everything you recognise by looking rather than by reading.",
+      "blurb": "Photos and videos, as pictures — with what the files already knew about themselves.",
       "screenshot": "photos.png",
       "sections": [
         {
@@ -160,6 +160,19 @@
           "body": [
             "A photograph carries no text, so OCR finds nothing on it and a list of filenames is a poor way to look for one. A grid is not.",
             "**Nothing readable on these** finds the images OCR could not read. Bindery can look at those and describe them — that is what the button does, and it costs an API call each."
+          ]
+        },
+        {
+          "heading": "Videos",
+          "body": [
+            "Videos have their own tab. They are never OCR'd or sent to the model — there is nothing to read and nothing to say — so instead the archive reads what the file knows: how long it is, when it was shot, on what, and where. That becomes the searchable text, so *the clip from the lake in 2023* is findable.",
+            "Formats a browser plays — .mp4, .mov, .m4v, .webm — play here and seek. Others (.avi, .mkv, .wmv) are stored and offered as a download."
+          ]
+        },
+        {
+          "heading": "From the file",
+          "body": [
+            "A photograph's capture date, camera and location are read from its EXIF and shown beside it. The capture date fills the document date when nothing else has, marked **from the file** — a fact the file carried, not a guess, and still outranked by anything you set yourself."
           ]
         }
       ]
@@ -179,12 +192,13 @@
           ]
         },
         {
-          "heading": "Documents and photos",
+          "heading": "Documents, photos and videos",
           "body": [
             "The vault splits into two tabs, because a photograph in a table row is as unhelpful here as it is anywhere else. **Photos** shows them as pictures; **Documents** lists everything else. If everything you have vaulted is a picture, the vault opens on Photos.",
             "Once the vault is open, its contents are readable — pictures included. Clicking one opens it full size, with **Take out of the vault** beside it.",
             "These are the full originals, decrypted for you as the page loads. There are no thumbnails on purpose: a thumbnail is a plaintext copy of the thing you are hiding, and generating them would put that copy back on disk. Nothing here is cached, so locking the vault makes it unreadable again immediately.",
-            "A format your browser cannot draw — usually HEIC outside Safari — shows as a placeholder rather than an empty square. **Open original** still hands you the file."
+            "A format your browser cannot draw — usually HEIC outside Safari — shows as a placeholder rather than an empty square. **Open original** still hands you the file.",
+            "A **Videos** tab appears when the vault holds any. They play from inside the vault: the file is stored in independently encrypted pieces, so seeking to the middle of a long clip decrypts only the part you are watching — not the whole file into memory."
           ]
         },
         {
@@ -239,14 +253,29 @@
     {
       "route": "/import",
       "title": "Import",
-      "blurb": "Bring in a folder tree you already have.",
+      "blurb": "Bring a folder in — the inbox in one click — and see exactly what happened to every file.",
       "screenshot": "import.png",
       "sections": [
         {
-          "heading": "Two passes, on purpose",
+          "heading": "Three steps",
           "body": [
-            "A backlog arrives before the archive knows any of your vocabulary, so the first pass builds it and the second uses it. Between them you get to correct the taxonomy once instead of a thousand times.",
-            "Backlog documents never enter the daily review queue. They were unfindable before; anything is an improvement, and burying today's post under ten years of old paper is how people give up."
+            "**Where from.** *Scan the inbox* looks at the watched folder every other feature already knows about. Or type any folder the worker can see.",
+            "**What it found.** How many files, how many are already here, duplicates within the batch, what the formats are, and what AI review would cost — before anything is read in. OCR, search and videos cost nothing; the estimate is only the optional classification step.",
+            "**Go.** Import everything in slices, try a sample first, or pause. Each slice is committed, so stopping is always safe and resuming is one click."
+          ]
+        },
+        {
+          "heading": "Straight into the vault",
+          "body": [
+            "Tick **Straight into the vault** and every file is encrypted and taken out of the archive the moment its processing finishes. The archive itself does the sealing, so your vault has to be open while the import runs.",
+            "If the vault locks part-way — it does after fifteen minutes idle — the remaining files wait and the screen says **finished and waiting**, not done. Unlock it and they seal within a few seconds. The distinction is deliberate: a file sitting in the ordinary archive when you meant it for the vault should never look like success."
+          ]
+        },
+        {
+          "heading": "What happened",
+          "body": [
+            "Every previous import is listed with what it imported, what was already here, and what failed. Open one to see each file, with the reason it failed, and the worker's own log lines for those files — written at the time, not reconstructed later.",
+            "Everything imported here is flagged as backlog and kept out of your daily review queue. It is searchable immediately either way."
           ]
         }
       ]

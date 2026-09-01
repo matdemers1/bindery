@@ -1,4 +1,4 @@
-import { Bot, Pencil, Workflow } from "lucide-react";
+import { Bot, FileText, Pencil, Workflow } from "lucide-react";
 
 import type { FieldSourceRef } from "../../api";
 
@@ -15,6 +15,8 @@ const LOOK = {
   human: { icon: Pencil, label: "you set this", cls: "text-accent" },
   rule: { icon: Workflow, label: "a rule set this", cls: "text-sky-400" },
   ai: { icon: Bot, label: "AI set this", cls: "text-muted" },
+  // A fact the file carried — an EXIF capture date — not an inference.
+  file: { icon: FileText, label: "from the file", cls: "text-emerald-400" },
 } as const;
 
 export default function SourceBadge({

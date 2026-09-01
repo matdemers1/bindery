@@ -95,7 +95,7 @@ async def list_imports(
             .order_by(ImportSession.created_at.desc())
         )
     ).scalars().all()
-    return [_out(row, await progress_of(session, row)) for row in rows]
+    return [await _out(session, row, await progress_of(session, row)) for row in rows]
 
 
 @router.post("/imports", response_model=ImportSessionOut, status_code=status.HTTP_201_CREATED)

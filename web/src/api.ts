@@ -121,6 +121,8 @@ export interface DocumentDetail {
   /** Empty for a document nobody has corrected and no classifier has claimed. */
   field_sources: FieldSourceRef[];
   tags: TagRef[];
+  /** Present for photographs and videos; null for a scan of a form. */
+  media: MediaMetadata | null;
 }
 
 export interface SegmentList {
@@ -405,6 +407,12 @@ export interface ImportSession {
   progress: Record<string, number>;
   last_error: string | null;
   created_at: string;
+  /** Bound for the vault: sealed as each file's pipeline finishes, while unlocked. */
+  to_vault: boolean;
+  vaulted: number;
+  /** Finished, and waiting for the vault to be open. "Unlock to continue", not "done". */
+  awaiting_vault: number;
+  vault_unlocked: boolean;
 }
 
 export interface ImportItem {
@@ -604,7 +612,9 @@ export const api = {
   testOffsite: () => request<OffsiteTest>("/settings/test-offsite", { method: "POST" }),
 
   imports: () => request<ImportSession[]>("/imports"),
-  startImport: (body: { library_id: string; root_path: string; sample_size?: number }) =>
+  importPresets: () => request<ImportPresets>("/imports/presets"),
+  importLog: (id: string) => request<ImportLogLine[]>(`/imports/${id}/log`),
+  startImport: (body: { library_id: string; root_path: string; sample_size?: number; to_vault?: boolean }) =>
     request<ImportSession>("/imports", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -895,7 +905,9 @@ export const api = {
   },
 
 
-  photos: (params: { q?: string; undescribed?: boolean; limit?: number; offset?: number } = {}) => {
+  photos: (
+    params: { q?: string; undescribed?: boolean; limit?: number; offset?: number; kind?: "image" | "video" } = {},
+  ) => {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined && value !== "" && value !== false) query.set(key, String(value));
@@ -1171,6 +1183,8 @@ export interface Photo {
   document_date: string | null;
   text_chars: number;
   described: boolean;
+  kind: "image" | "video";
+  media: MediaMetadata | null;
 }
 
 export interface PhotoWall {
@@ -1223,6 +1237,8 @@ export interface VaultItem {
   warnings: string[];
   media_type: string | null;
   is_image: boolean;
+  is_video: boolean;
+  media: MediaMetadata | null;
 }
 
 export interface VaultSearchHit {
@@ -1248,7 +1264,7 @@ export interface VaultSearchResults {
 /** Who set one field. What makes an AI value look different from yours. */
 export interface FieldSourceRef {
   field_name: string;
-  source: "ai" | "rule" | "human";
+  source: "ai" | "rule" | "human" | "file";
   set_by: string | null;
   set_at: string | null;
   event_id: string | null;
@@ -1287,6 +1303,34 @@ export interface DocumentEditResult {
   event_id: string | null;
 }
 
+/** What the file said about itself (Phase 18). */
+export interface MediaMetadata {
+  kind: "image" | "video";
+  width: number | null;
+  height: number | null;
+  duration_seconds: number | null;
+  captured_at: string | null;
+  camera_make: string | null;
+  camera_model: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  codec: string | null;
+  frame_rate: number | null;
+  browser_playable: boolean;
+}
+
+export interface ImportPresets {
+  inbox: string;
+}
+
+export interface ImportLogLine {
+  at: string;
+  level: string;
+  message: string;
+  source_file_id: string | null;
+  stage: string | null;
+}
+
 export const fileUrl = {
   render: (id: string, page: number) => `/api/files/${id}/pages/${page}/render`,
   thumb: (id: string, page: number) => `/api/files/${id}/pages/${page}/thumb`,
@@ -1299,6 +1343,10 @@ export const fileUrl = {
    * does not keep a copy on disk after it closes again.
    */
   vaultOriginal: (documentId: string) => `/api/vault/items/${documentId}/original`,
+  /** The stored bytes with their own media type, ranges honoured — for playback. */
+  original: (fileId: string) => `/api/files/${fileId}/original`,
+  /** One frame of a video, for the wall. 404 for anything without one. */
+  poster: (fileId: string) => `/api/files/${fileId}/poster`,
 };
 
 

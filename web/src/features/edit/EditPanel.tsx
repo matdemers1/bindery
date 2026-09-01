@@ -7,6 +7,7 @@ import {
   type DocumentEdit,
   type TaxonomyOption,
 } from "../../api";
+import MetadataPanel from "../media/MetadataPanel";
 import SourceBadge from "./SourceBadge";
 
 /**
@@ -322,6 +323,13 @@ export default function EditPanel({
         </button>
       </div>
 
+      {detail.media && (
+        <div className="rounded-lg border border-edge bg-ink/30 p-3">
+          <p className="mb-2 text-xs text-muted">What the file says about itself</p>
+          <MetadataPanel media={detail.media} />
+        </div>
+      )}
+
       <p className="text-xs text-muted">
         What you set here is yours. AI review will keep improving the fields you
         have not touched and will leave the ones you have.
@@ -336,7 +344,7 @@ function Field({
   children,
 }: {
   label: string;
-  source?: { source: "ai" | "rule" | "human"; set_at: string | null };
+  source?: { source: "ai" | "rule" | "human" | "file"; set_at: string | null };
   children: React.ReactNode;
 }) {
   return (

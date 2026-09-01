@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
   FileLock2,
+  Film,
   Images,
   Lock,
   LockOpen,
@@ -14,6 +15,7 @@ import { api, fileUrl, type VaultItem, type VaultSearchResults, type VaultState 
 import PageHeader from "../../components/PageHeader";
 import SetupForm from "./SetupForm";
 import VaultGrid from "./VaultGrid";
+import VaultVideos from "./VaultVideos";
 import UnlockForm from "./UnlockForm";
 
 /**
@@ -36,7 +38,7 @@ export default function VaultPage() {
   // Null until the person picks one, so the default can follow what is
   // actually in the vault: opening on an empty Documents tab because
   // everything you vaulted was a photograph is the wrong first impression.
-  const [tab, setTab] = useState<"documents" | "photos" | null>(null);
+  const [tab, setTab] = useState<"documents" | "photos" | "videos" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (next: VaultState) => {
@@ -95,9 +97,22 @@ export default function VaultPage() {
     return <p className="text-sm text-muted">Loading…</p>;
   }
 
-  const photos = items.filter((item) => item.is_image);
-  const documents = items.filter((item) => !item.is_image);
-  const active = tab ?? (documents.length === 0 && photos.length > 0 ? "photos" : "documents");
+  const videos = items.filter((item) => item.is_video);
+  const photos = items.filter((item) => item.is_image && !item.is_video);
+  const documents = items.filter((item) => !item.is_image && !item.is_video);
+  // Videos is offered only when there are any: a third tab that is always
+  // empty is furniture. Photos and Documents are always there, because the
+  // action to fill them is one click away on every document.
+  type Tab = "documents" | "photos" | "videos";
+  const tabs: Tab[] = videos.length ? ["documents", "photos", "videos"] : ["documents", "photos"];
+  const active: Tab =
+    tab && tabs.includes(tab)
+      ? tab
+      : documents.length === 0 && photos.length === 0 && videos.length > 0
+        ? "videos"
+        : documents.length === 0 && photos.length > 0
+          ? "photos"
+          : "documents";
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -195,10 +210,12 @@ export default function VaultPage() {
               {/* Two kinds of thing, two shapes. A photograph in a table row is
                   as unhelpful here as it is on the Photos screen. */}
               <div className="flex gap-1 border-b border-edge">
-                {(["documents", "photos"] as const).map((which) => {
+                {tabs.map((which) => {
                   const count =
-                    which === "photos" ? photos.length : documents.length;
-                  const Icon = which === "photos" ? Images : FileLock2;
+                    which === "photos" ? photos.length
+                    : which === "videos" ? videos.length
+                    : documents.length;
+                  const Icon = which === "photos" ? Images : which === "videos" ? Film : FileLock2;
                   return (
                     <button
                       key={which}
@@ -218,7 +235,13 @@ export default function VaultPage() {
                 })}
               </div>
 
-              {active === "photos" ? (
+              {active === "videos" ? (
+                <VaultVideos
+                  items={videos}
+                  busy={busy}
+                  onTakeOut={(id) => void moveOut(id)}
+                />
+              ) : active === "photos" ? (
                 <VaultGrid
                   items={photos}
                   busy={busy}
@@ -226,7 +249,7 @@ export default function VaultPage() {
                 />
               ) : documents.length === 0 ? (
                 <p className="rounded-xl border border-edge bg-surface p-8 text-center text-sm text-muted">
-                  Everything in the vault is a picture — they are under Photos.
+                  Nothing here is a document — look under Photos{videos.length ? " or Videos" : ""}.
                 </p>
               ) : (
                 <ul className="space-y-2">

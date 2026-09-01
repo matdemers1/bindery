@@ -1,77 +1,127 @@
-import { useLiveQuery } from "../../live/LiveProvider";
-import { Import as ImportIcon } from "lucide-react";
-
-import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  FolderInput,
+  Import as ImportIcon,
+  Inbox,
+  Lock,
+  LockOpen,
+  ShieldCheck,
+} from "lucide-react";
 
-import { ApiError, api, type ImportItem, type ImportSession, type Library } from "../../api";
+import {
+  ApiError,
+  api,
+  type ImportItem,
+  type ImportLogLine,
+  type ImportSession,
+  type Library,
+  type VaultState,
+} from "../../api";
+import PageHeader from "../../components/PageHeader";
+import { useLiveQuery } from "../../live/LiveProvider";
+import UnlockForm from "../vault/UnlockForm";
 
 /**
- * Backlog import (T-4.1 to T-4.5).
+ * Import (T-4.1 to T-4.5; redesigned in Phase 18, REQ-196, REQ-197).
  *
- * Staged on purpose: scan → review → sample → curate → import. Nothing is
- * processed before you have seen how much there is, how much of it is already
- * here, and what it will cost.
+ * Three steps, in order, on one screen: **where** (the inbox in one click, or
+ * a path), **what it found** (the scan, and what it would cost), **go**. Then
+ * a history that answers the question the old screen could not: what happened
+ * — imported, duplicated, skipped, failed, with the reasons and the worker's
+ * own log lines.
  *
- * The risk this whole screen exists to manage is R-03 — that importing five
- * thousand documents floods the daily review queue and the project gets
- * abandoned. Imported documents are flagged and kept out of that queue, and the
- * screen says so rather than leaving you to discover it.
+ * The risk this screen exists to manage is R-03 — that importing five thousand
+ * documents floods the daily review queue and the project gets abandoned.
+ * Imported documents are flagged and kept out of that queue, and the screen
+ * says so.
+ *
+ * **Into the vault** seals every file as its pipeline finishes, while the
+ * vault is open. The worker cannot seal (the key never leaves the api), so the
+ * api does it on a short sweep — and if the vault locks mid-import the rest
+ * wait, visibly, as "unlock to continue" rather than looking done.
  */
-/** How many items are still waiting, from whatever the session reports. */
 function remainingOf(session: ImportSession): number {
   const progress = session.progress ?? {};
   return (progress.pending ?? 0) + (progress.sampled ?? 0);
 }
 
+const STATE_LABEL: Record<string, string> = {
+  ingested: "imported",
+  duplicate: "already here",
+  skipped: "skipped",
+  failed: "failed",
+  pending: "waiting",
+  sampled: "in the sample",
+};
 
 export default function ImportPage({ libraries }: { libraries: Library[] }) {
   const [sessions, setSessions] = useState<ImportSession[]>([]);
   const [active, setActive] = useState<ImportSession | null>(null);
-  const [failures, setFailures] = useState<ImportItem[]>([]);
+  const [inbox, setInbox] = useState<string | null>(null);
+  const [vault, setVault] = useState<VaultState | null>(null);
   const [path, setPath] = useState("");
+  const [toVault, setToVault] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [runningAll, setRunningAll] = useState(false);
-  // A ref, not state: the loop reads it between slices and must see the change
-  // immediately rather than on the next render.
   const stopRef = useRef(false);
 
   const load = useCallback(async () => {
-    const all = await api.imports();
+    const [all, presets, vaultState] = await Promise.all([
+      api.imports(),
+      api.importPresets(),
+      api.vault().catch(() => null),
+    ]);
     setSessions(all);
-    setActive((current) => (current ? all.find((s) => s.id === current.id) ?? null : all[0] ?? null));
+    setInbox(presets.inbox);
+    setVault(vaultState);
+    setActive((current) =>
+      current ? all.find((s) => s.id === current.id) ?? null : all[0] ?? null,
+    );
   }, []);
 
   useEffect(() => {
-    // An async data load: the state is genuinely unavailable on the first
-    // render, so the extra pass is the point rather than a mistake.
+    // Three loads the first render genuinely cannot have.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
-  // Refreshed when files actually move rather than on a timer. The timer
-  // version depended on `active`, and replacing `active` with a fresh object
-  // every tick tore the interval down and rebuilt it on every response.
   const activeId = active?.id;
-  const moving = Boolean(active && ["importing", "sampling"].includes(active.state));
+  const moving = Boolean(
+    active && (["importing", "sampling"].includes(active.state) || (active.to_vault && active.awaiting_vault > 0)),
+  );
   const refreshActive = useCallback(async () => {
     if (!activeId) return;
     setActive(await api.importSession(activeId));
   }, [activeId]);
+  useLiveQuery(moving ? ["files", "jobs", "documents"] : [], refreshActive, { fallbackMs: 5000 });
 
-  useLiveQuery(moving ? ["files", "jobs"] : [], refreshActive, { fallbackMs: 5000 });
+  async function scan(root: string) {
+    const library = libraries[0];
+    if (!library || !root.trim()) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const made = await api.startImport({
+        library_id: library.id,
+        root_path: root.trim(),
+        to_vault: toVault,
+      });
+      setActive(made);
+      setNotice("Scanned. Nothing has been imported yet — review what it found below.");
+      await load();
+    } catch (error) {
+      setNotice(error instanceof ApiError ? error.message : "That didn't work.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  /**
-   * Import everything, in slices.
-   *
-   * A loop rather than one enormous request: 526 files is minutes of OCR
-   * queueing, and a single call would hold a connection open long enough to be
-   * killed by a proxy and leave you guessing how far it got. Each slice is
-   * committed and idempotent, so stopping is always safe and resuming is just
-   * calling it again.
-   */
   async function importEverything() {
     setBusy(true);
     setNotice(null);
@@ -85,9 +135,7 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
         current = await api.runImport(current.id, 50);
         setActive(current);
         if (remainingOf(current) >= before) {
-          // No progress: something is refusing rather than finishing, and
-          // looping on it would spin forever.
-          setNotice("Stopped — that slice imported nothing. Check the failures.");
+          setNotice("Stopped — that slice imported nothing. See what failed below.");
           break;
         }
       }
@@ -116,245 +164,383 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
     }
   }
 
-  const dry = active?.dry_run ?? {};
-  const cost = active?.cost_estimate ?? {};
-  const done = (active?.progress.ingested ?? 0) + (active?.progress.duplicate ?? 0);
-  const total = Object.values(active?.progress ?? {}).reduce((a, b) => a + b, 0);
+  const vaultReady = Boolean(vault?.exists && vault.unlocked);
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <PageHeader icon={ImportIcon} title="Import a backlog">
-        Point this at a directory the <span className="font-mono text-xs">worker</span>{" "}
-        container can see. Nothing is read into the archive until you&apos;ve reviewed
-        what it found.
+    <div className="mx-auto max-w-5xl space-y-6">
+      <PageHeader icon={ImportIcon} title="Import">
+        Bring a folder of files into the archive. Nothing is read in until you have
+        seen what was found and what it would cost.
       </PageHeader>
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          const library = libraries[0];
-          if (!library || !path.trim()) return;
-          void act(
-            () => api.startImport({ library_id: library.id, root_path: path.trim() }),
-            "Scanned. Nothing has been imported yet.",
-          );
-        }}
-        className="flex flex-wrap gap-2 rounded-lg border border-edge bg-surface p-4"
-      >
-        <input
-          value={path}
-          onChange={(event) => setPath(event.target.value)}
-          placeholder="/media/Main-Storage/Documents"
-          className="min-w-0 flex-1 rounded-md border border-edge bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent"
-        />
-        <button
-          type="submit"
-          disabled={busy || !path.trim()}
-          className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
-        >
-          {busy ? "Scanning…" : "Scan"}
-        </button>
-      </form>
-
-      {notice && <p className="mt-3 text-sm text-accent">{notice}</p>}
-
-      {sessions.length > 1 && (
-        <div className="mt-4 flex flex-wrap gap-1">
-          {sessions.map((s) => (
+      {/* ---- 1. Where ------------------------------------------------------ */}
+      <section className="space-y-3 rounded-xl border border-edge bg-surface p-4">
+        <h2 className="text-xs tracking-wide text-muted uppercase">1 · Where from</h2>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => inbox && void scan(inbox)}
+            disabled={busy || !inbox}
+            title={inbox ?? ""}
+            className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
+          >
+            <Inbox size={15} />
+            {busy ? "Scanning…" : "Scan the inbox"}
+          </button>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void scan(path);
+            }}
+            className="flex min-w-0 flex-1 gap-2"
+          >
+            <input
+              value={path}
+              onChange={(event) => setPath(event.target.value)}
+              placeholder={`…or a folder the worker can see, e.g. ${inbox ?? "/data/inbox"}/2019`}
+              className="min-w-0 flex-1 rounded-lg border border-edge bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent"
+            />
             <button
-              key={s.id}
-              onClick={() => setActive(s)}
-              className={`rounded-md px-2 py-1 font-mono text-xs ${
-                active?.id === s.id ? "bg-surface text-neutral-100" : "text-muted"
-              }`}
+              type="submit"
+              disabled={busy || !path.trim()}
+              className="flex items-center gap-1.5 rounded-lg border border-edge px-3 py-2 text-sm disabled:opacity-40"
             >
-              {s.root_path.split("/").slice(-1)[0] || s.root_path} · {s.state}
+              <FolderInput size={14} /> Scan
             </button>
-          ))}
+          </form>
         </div>
+
+        {/* Into the vault. Only offered as a real choice when it can be honoured. */}
+        <label
+          className={`flex items-start gap-2 text-sm ${vaultReady ? "" : "text-muted"}`}
+        >
+          <input
+            type="checkbox"
+            checked={toVault && vaultReady}
+            disabled={!vaultReady}
+            onChange={(event) => setToVault(event.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="flex items-center gap-1.5">
+              <ShieldCheck size={14} /> Straight into the vault
+            </span>
+            <span className="block text-xs text-muted">
+              {vault?.exists === false
+                ? "You have no vault yet — set one up under Vault first."
+                : vaultReady
+                  ? "Every file is encrypted and taken out of the archive the moment its processing finishes, while your vault is open."
+                  : "Your vault is locked. Unlock it to import into it — files are sealed as they finish, and that needs the vault open."}
+            </span>
+          </span>
+        </label>
+        {vault?.exists && !vault.unlocked && (
+          <div className="max-w-sm">
+            <UnlockForm state={vault} onUnlocked={setVault} compact />
+          </div>
+        )}
+      </section>
+
+      {notice && <p className="text-sm text-accent">{notice}</p>}
+
+      {/* ---- 2 & 3. What it found, and go ---------------------------------- */}
+      {active && <ActiveRun run={active} busy={busy} runningAll={runningAll} stopRef={stopRef} act={act} importEverything={importEverything} />}
+
+      {/* ---- History -------------------------------------------------------- */}
+      {sessions.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-xs tracking-wide text-muted uppercase">Previous imports</h2>
+          <ul className="space-y-2">
+            {sessions.map((run) => (
+              <RunRow key={run.id} run={run} isActive={active?.id === run.id} onOpen={() => setActive(run)} />
+            ))}
+          </ul>
+        </section>
       )}
 
-      {active && (
-        <div className="mt-6 space-y-4">
-          <section className="rounded-lg border border-edge bg-surface p-5">
-            <div className="flex flex-wrap items-baseline justify-between gap-3">
-              <h2 className="font-mono text-sm">{active.root_path}</h2>
-              <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-muted">
-                {active.state.replace(/_/g, " ")}
-                {active.pass_number > 1 && ` · pass ${active.pass_number}`}
-              </span>
-            </div>
+      <p className="text-xs text-muted">
+        Everything imported here is flagged as backlog and stays out of your daily{" "}
+        <Link to="/review" className="underline underline-offset-2">
+          review queue
+        </Link>
+        . It is searchable immediately either way.
+      </p>
+    </div>
+  );
+}
 
-            {active.last_error && (
-              <p className="mt-3 rounded-md border border-red-500/40 p-3 text-sm text-red-300">
-                {active.last_error}
-              </p>
-            )}
+// ---------------------------------------------------------------------------
 
-            <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
-              <Stat label="Files found" value={dry.total_files ?? 0} />
-              <Stat label="Already here" value={dry.already_in_archive ?? 0} />
-              <Stat label="Duplicates" value={dry.duplicates_within_batch ?? 0} />
-              <Stat label="Pages (est.)" value={dry.estimated_pages ?? 0} />
-            </dl>
+function ActiveRun({
+  run,
+  busy,
+  runningAll,
+  stopRef,
+  act,
+  importEverything,
+}: {
+  run: ImportSession;
+  busy: boolean;
+  runningAll: boolean;
+  stopRef: React.MutableRefObject<boolean>;
+  act: (fn: () => Promise<ImportSession>, message?: string) => Promise<void>;
+  importEverything: () => Promise<void>;
+}) {
+  const dry = run.dry_run ?? {};
+  const cost = run.cost_estimate ?? {};
+  const done = (run.progress.ingested ?? 0) + (run.progress.duplicate ?? 0) + (run.progress.skipped ?? 0) + (run.progress.failed ?? 0);
+  const total = Object.values(run.progress ?? {}).reduce((a, b) => a + b, 0);
+  const remaining = remainingOf(run);
 
-            {dry.by_extension && Object.keys(dry.by_extension).length > 0 && (
-              <p className="mt-3 font-mono text-xs text-muted">
-                {Object.entries(dry.by_extension)
-                  .map(([extension, count]) => `${extension} ${count}`)
-                  .join("  ·  ")}
-                {dry.skipped_unsupported ? `  ·  ${dry.skipped_unsupported} unsupported` : ""}
-                {dry.skipped_hidden ? `  ·  ${dry.skipped_hidden} hidden` : ""}
-              </p>
-            )}
+  return (
+    <section className="space-y-4 rounded-xl border border-edge bg-surface p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="text-xs tracking-wide text-muted uppercase">2 · What it found</h2>
+        <span className="font-mono text-xs text-muted">{run.root_path}</span>
+      </div>
 
-            {cost.batch_usd !== undefined && (
-              <div
-                className={`mt-4 rounded-md border p-3 text-sm ${
-                  cost.exceeds_alarm ? "border-red-500/40" : "border-edge"
-                }`}
-              >
-                {/*
-                  Quote what this import will actually cost, which is the
-                  interactive price — that is the only mode wired up. It
-                  previously led with the batched figure, advertising a
-                  half-price option with no way to choose it.
-                */}
-                <p>
-                  Classifying this would cost about{" "}
-                  <strong>${cost.interactive_usd?.toFixed(2)}</strong>.
-                </p>
-                <p className="mt-1 text-xs text-muted">
-                  The Batch API would roughly halve that (about $
-                  {cost.batch_usd?.toFixed(2)}) in exchange for results arriving
-                  within a day instead of within minutes. It is not wired up yet,
-                  so this import will run at the price above.
-                </p>
-                {cost.exceeds_alarm ? (
-                  <p className="mt-1 text-red-300">
-                    That's over the ${cost.alarm_threshold_usd} threshold the plan
-                    set for this. The documented fallback is heuristics-only
-                    segmentation plus manual correction — worth considering before
-                    you run it.
-                  </p>
-                ) : (
-                  <p className="mt-1 text-xs text-muted">
-                    Estimated generously. OCR and search cost nothing — this is only
-                    the classification step, and it's optional.
-                  </p>
-                )}
-              </div>
-            )}
+      {run.last_error && (
+        <p className="rounded-md border border-red-500/40 p-3 text-sm text-red-300">{run.last_error}</p>
+      )}
 
-            {total > 0 && (
-              <div className="mt-4">
-                <div className="mb-1 flex justify-between text-xs text-muted">
-                  <span>
-                    {done} of {total} handled
-                  </span>
-                  <span>
-                    {Object.entries(active.progress)
-                      .map(([state, count]) => `${count} ${state}`)
-                      .join(" · ")}
-                  </span>
-                </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-edge">
-                  <div
-                    className="h-full rounded-full bg-accent transition-all"
-                    style={{ width: `${total ? (done / total) * 100 : 0}%` }}
-                  />
-                </div>
-              </div>
-            )}
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+        <Stat label="Files found" value={dry.total_files ?? 0} />
+        <Stat label="Already here" value={dry.already_in_archive ?? 0} />
+        <Stat label="Duplicates" value={dry.duplicates_within_batch ?? 0} />
+        <Stat label="Pages (est.)" value={dry.estimated_pages ?? 0} />
+      </dl>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                onClick={() => act(() => api.sampleImport(active.id), "Sample selected.")}
-                disabled={busy}
-                className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
-              >
-                Select a sample ({active.sample_size})
-              </button>
-              {runningAll ? (
-                <button
-                  onClick={() => {
-                    stopRef.current = true;
-                  }}
-                  className="rounded-md border border-accent/60 px-3 py-1.5 text-sm text-accent"
-                >
-                  Stop after this slice
-                </button>
-              ) : (
-                <button
-                  onClick={() => void importEverything()}
-                  disabled={busy || remainingOf(active) === 0}
-                  className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-                >
-                  Import all {remainingOf(active).toLocaleString()}
-                </button>
-              )}
-              <button
-                onClick={() => act(() => api.runImport(active.id), "Imported a slice.")}
-                disabled={busy}
-                className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
-              >
-                Just the next 50
-              </button>
-              <button
-                onClick={() => act(() => api.pauseImport(active.id), "Paused.")}
-                disabled={busy}
-                className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
-              >
-                Pause
-              </button>
-              <button
-                onClick={() =>
-                  act(
-                    () => api.curateImport(active.id),
-                    "Paused for curation. Tidy the taxonomy, then run pass two.",
-                  )
-                }
-                disabled={busy}
-                className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
-              >
-                Stop and curate
-              </button>
-              <button
-                onClick={async () => setFailures(await api.importItems(active.id, "failed"))}
-                className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted"
-              >
-                Show failures
-              </button>
-            </div>
+      {dry.by_extension && Object.keys(dry.by_extension).length > 0 && (
+        <p className="font-mono text-xs text-muted">
+          {Object.entries(dry.by_extension).map(([ext, n]) => `${ext} ${n}`).join("  ·  ")}
+          {dry.skipped_unsupported ? `  ·  ${dry.skipped_unsupported} unsupported` : ""}
+          {dry.skipped_hidden ? `  ·  ${dry.skipped_hidden} hidden` : ""}
+        </p>
+      )}
 
-            <p className="mt-3 text-xs text-muted">
-              Everything imported here is flagged as backlog and stays out of your
-              daily{" "}
-              <Link to="/review" className="underline underline-offset-2">
-                review queue
-              </Link>
-              . It's searchable immediately either way.
+      {cost.interactive_usd !== undefined && (
+        <div className={`rounded-md border p-3 text-sm ${cost.exceeds_alarm ? "border-red-500/40" : "border-edge"}`}>
+          <p>
+            AI review of these would cost about <strong>${cost.interactive_usd.toFixed(2)}</strong>.
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            OCR, search and videos cost nothing. This is only the classification step, and it is optional —
+            imported files are searchable before any of it runs.
+          </p>
+          {cost.exceeds_alarm && (
+            <p className="mt-1 text-red-300">
+              Over the ${cost.alarm_threshold_usd} threshold the plan set. Worth a look before you run it.
             </p>
-          </section>
-
-          {failures.length > 0 && (
-            <section className="rounded-lg border border-edge bg-surface p-4">
-              <h3 className="mb-2 text-xs tracking-wide text-muted uppercase">
-                Files that failed — {failures.length}
-              </h3>
-              <ul className="max-h-64 space-y-1 overflow-y-auto text-xs">
-                {failures.map((item) => (
-                  <li key={item.path} className="font-mono">
-                    <span className="text-neutral-300">{item.path}</span>
-                    <span className="ml-2 text-red-400/90">{item.error}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
           )}
         </div>
       )}
+
+      {run.to_vault && <VaultProgress run={run} />}
+
+      {total > 0 && (
+        <div>
+          <div className="mb-1 flex justify-between text-xs text-muted">
+            <span>{done} of {total} handled</span>
+            <span>{remaining} to go</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-edge">
+            <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+          </div>
+        </div>
+      )}
+
+      <div>
+        <h2 className="mb-2 text-xs tracking-wide text-muted uppercase">3 · Go</h2>
+        <div className="flex flex-wrap gap-2">
+          {runningAll ? (
+            <button
+              onClick={() => { stopRef.current = true; }}
+              className="rounded-md border border-accent/60 px-3 py-1.5 text-sm text-accent"
+            >
+              Stop after this slice
+            </button>
+          ) : (
+            <button
+              onClick={() => void importEverything()}
+              disabled={busy || remaining === 0}
+              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
+            >
+              Import all {remaining.toLocaleString()}
+            </button>
+          )}
+          <button onClick={() => act(() => api.runImport(run.id), "Imported a slice.")} disabled={busy || remaining === 0} className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40">
+            Just the next 50
+          </button>
+          <button onClick={() => act(() => api.sampleImport(run.id), "Sample selected.")} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40">
+            Try a sample of {run.sample_size}
+          </button>
+          <button onClick={() => act(() => api.pauseImport(run.id), "Paused.")} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40">
+            Pause
+          </button>
+          <button onClick={() => act(() => api.curateImport(run.id), "Paused for curation. Tidy the taxonomy, then run pass two.")} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted disabled:opacity-40">
+            Stop and curate
+          </button>
+        </div>
+      </div>
+
+      <RunDetail run={run} defaultOpen />
+    </section>
+  );
+}
+
+function VaultProgress({ run }: { run: ImportSession }) {
+  const imported = run.progress.ingested ?? 0;
+  const inFlight = Math.max(0, imported - run.vaulted - run.awaiting_vault);
+  return (
+    <div className="rounded-md border border-accent/40 bg-accent/5 p-3 text-sm">
+      <p className="flex items-center gap-1.5 text-accent">
+        <ShieldCheck size={14} /> Into the vault
+      </p>
+      <p className="mt-1 text-xs text-muted">
+        {run.vaulted} sealed
+        {inFlight > 0 && ` · ${inFlight} still being processed`}
+        {run.awaiting_vault > 0 && ` · ${run.awaiting_vault} finished and waiting`}
+      </p>
+      {run.awaiting_vault > 0 && !run.vault_unlocked && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-300">
+          <Lock size={12} /> Your vault is locked. {run.awaiting_vault} file{run.awaiting_vault === 1 ? " is" : "s are"} finished and waiting —
+          <Link to="/vault" className="underline underline-offset-2">unlock it</Link> and they seal within a few seconds.
+        </p>
+      )}
+      {run.awaiting_vault > 0 && run.vault_unlocked && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
+          <LockOpen size={12} /> Sealing now.
+        </p>
+      )}
     </div>
+  );
+}
+
+function RunRow({ run, isActive, onOpen }: { run: ImportSession; isActive: boolean; onOpen: () => void }) {
+  const [open, setOpen] = useState(false);
+  const p = run.progress ?? {};
+  const failed = p.failed ?? 0;
+  const label = run.root_path.split("/").filter(Boolean).slice(-1)[0] || run.root_path;
+  return (
+    <li className={`rounded-lg border bg-surface ${isActive ? "border-accent/60" : "border-edge"}`}>
+      <div className="flex flex-wrap items-center gap-3 px-3 py-2">
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-label={open ? "Hide details" : "Show details"}>
+          {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </button>
+        <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
+          <span className="block truncate font-mono text-sm">{label}</span>
+          <span className="block text-xs text-muted">
+            {run.created_at.slice(0, 16).replace("T", " ")} · {run.state.replace(/_/g, " ")}
+            {run.to_vault && " · into the vault"}
+          </span>
+        </button>
+        <span className="flex items-center gap-3 text-xs">
+          {(p.ingested ?? 0) > 0 && <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 size={12} /> {p.ingested} imported</span>}
+          {(p.duplicate ?? 0) > 0 && <span className="text-muted">{p.duplicate} already here</span>}
+          {failed > 0 && <span className="flex items-center gap-1 text-red-300"><AlertTriangle size={12} /> {failed} failed</span>}
+          {remainingOf(run) > 0 && <span className="text-muted">{remainingOf(run)} waiting</span>}
+        </span>
+      </div>
+      {open && <div className="border-t border-edge p-3"><RunDetail run={run} /></div>}
+    </li>
+  );
+}
+
+/** What happened, per file and in the worker's own words (REQ-196). */
+function RunDetail({ run, defaultOpen = false }: { run: ImportSession; defaultOpen?: boolean }) {
+  const [tab, setTab] = useState<"failed" | "ingested" | "duplicate" | "skipped" | "log">("failed");
+  const counts = run.progress ?? {};
+  void defaultOpen;
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1 text-xs">
+        {(["failed", "ingested", "duplicate", "skipped"] as const).map((state) => (
+          <button
+            key={state}
+            type="button"
+            onClick={() => setTab(state)}
+            className={`rounded-md px-2 py-1 ${tab === state ? "bg-ink text-neutral-100" : "text-muted hover:text-neutral-100"}`}
+          >
+            {STATE_LABEL[state]} <span className="text-muted">{counts[state] ?? 0}</span>
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setTab("log")}
+          className={`rounded-md px-2 py-1 ${tab === "log" ? "bg-ink text-neutral-100" : "text-muted hover:text-neutral-100"}`}
+        >
+          worker log
+        </button>
+      </div>
+      {/* Keyed on the tab so switching remounts the list: the previous tab's
+          rows can never show under the new tab's heading, and no effect has
+          to reset state by hand. */}
+      <RunDetailBody key={`${run.id}:${tab}`} run={run} tab={tab} />
+    </div>
+  );
+}
+
+function RunDetailBody({
+  run,
+  tab,
+}: {
+  run: ImportSession;
+  tab: "failed" | "ingested" | "duplicate" | "skipped" | "log";
+}) {
+  const [items, setItems] = useState<ImportItem[] | null>(null);
+  const [log, setLog] = useState<ImportLogLine[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load =
+      tab === "log"
+        ? api.importLog(run.id).then((rows) => {
+            if (!cancelled) setLog(rows);
+          })
+        : api.importItems(run.id, tab).then((rows) => {
+            if (!cancelled) setItems(rows);
+          });
+    load.catch((caught) => {
+      if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [run.id, tab]);
+
+  if (error) return <p className="text-xs text-red-300">{error}</p>;
+  if (tab === "log") {
+    if (log === null) return <p className="text-xs text-muted">Loading…</p>;
+    if (log.length === 0) {
+      return <p className="text-xs text-muted">The worker has not written anything about these files yet.</p>;
+    }
+    return (
+      <ul className="max-h-64 space-y-1 overflow-y-auto font-mono text-[11px]">
+        {log.map((line, i) => (
+          <li key={i} className={line.level === "ERROR" ? "text-red-300" : line.level === "WARNING" ? "text-amber-300" : "text-neutral-300"}>
+            <span className="text-muted">{line.at.slice(11, 19)}</span>{" "}
+            {line.stage && <span className="text-muted">[{line.stage}]</span>} {line.message}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (items === null) return <p className="text-xs text-muted">Loading…</p>;
+  if (items.length === 0) return <p className="text-xs text-muted">Nothing {STATE_LABEL[tab]}.</p>;
+  return (
+    <ul className="max-h-64 space-y-1 overflow-y-auto font-mono text-[11px]">
+      {items.map((item) => (
+        <li key={item.path} className="flex flex-wrap gap-x-2">
+          {item.source_file_id ? (
+            <Link to={`/file/${item.source_file_id}`} className="text-neutral-300 underline-offset-2 hover:underline">{item.path}</Link>
+          ) : (
+            <span className="text-neutral-300">{item.path}</span>
+          )}
+          {item.error && <span className="text-red-400/90">{item.error}</span>}
+        </li>
+      ))}
+    </ul>
   );
 }
 

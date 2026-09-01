@@ -452,6 +452,33 @@ harness.
 `infra/zimaos/bindery.zimaos.yaml` is the CasaOS custom-app manifest. It must
 never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
 
+## Media, metadata and the inbox (Phase 18)
+
+- **Vault objects are chunked** (ADR-013): 1 MiB AES-GCM chunks, each bound by
+  associated data to the document, its position and the file's shape. A range
+  request decrypts only the chunks it covers. v1 objects stay readable and are
+  re-sealed on the next unlock — with the seal's ordering rule, nothing retired
+  before its replacement has been read back and hashed. **The 423 for a locked
+  vault comes before any chunk is touched**; a range is never a way to read a
+  byte of a locked vault.
+- **`media_metadata` is what the file said about itself.** EXIF via Pillow,
+  video via ffprobe. A capture date fills `document_date` as source `file` when
+  nothing else has. A vaulted picture's metadata moves into `sealed_meta` with
+  the title, because "where and when this was taken" is the one thing about a
+  vaulted photograph that would otherwise stay readable.
+- **Videos never enter OCR or classification.** `normalize` probes, writes a
+  poster, creates one filed document, and cascades nothing. Formats a browser
+  plays stream via `/files/{id}/original` (FileResponse honours Range); the
+  rest are download-only and the screen says so.
+- **A vault-bound import is sealed by the api, not the worker** — the key never
+  leaves the api process. `api/vault/sweep.py` runs every 15 s and seals any
+  document from such an import whose pipeline has finished, while the owner's
+  vault is open. Refused up front if the vault is shut at creation. "Finished
+  and waiting" is a named state, because it looks like a bug otherwise.
+- **The watched folder reads `/data/inbox/<library-slug>/` only.** A file at the
+  inbox root is found by Import's inbox preset and ignored by the watcher. By
+  design — the folder is how a file knows its library.
+
 ## Corrections (Phase 17)
 
 `PATCH /documents/{id}`, `api/editing.py`, `api/field_source.py`. The archive
