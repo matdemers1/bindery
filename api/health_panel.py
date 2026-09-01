@@ -26,8 +26,9 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import models
+from api.db import repository
 from api.db.enums import JobState, SourceFileState
-from api.db.models import Classification, Job, SourceFile
+from api.db.models import Classification, Document, Job, SourceFile
 
 log = logging.getLogger("bindery.health")
 
@@ -209,12 +210,39 @@ async def _offsite_alerts(session: AsyncSession, now: datetime) -> list[Alert]:
 async def collect(
     session: AsyncSession, library_ids: list[uuid.UUID] | None = None
 ) -> HealthPanel:
+    """Queue depth, failures, stalls and spend.
+
+    `library_ids` narrows every count to what the caller can actually reach.
+    **It used to be accepted and then ignored** — every query here was global —
+    so `/api/health/panel` called the permission helper, threw the answer away,
+    and reported the whole archive to everyone. Not a content leak (these are
+    counts, job ids and worker ids, and the leak suite covers the route), but it
+    meant the sidebar badge could be lit by work in a library the viewer cannot
+    open, which is a warning nobody can answer.
+
+    `None` still means the whole archive, and that is the *system* watching
+    itself: the worker's health monitor and the webhook notifier pass nothing,
+    so a stalled pipeline in someone else's library is still noticed by the
+    thing whose job it is to notice.
+    """
     now = datetime.now(UTC)
     alerts: list[Alert] = []
 
+    # `sa.true()` rather than a branch at each of the eight call sites below.
+    # Every count is filtered the same way or the next one added quietly is not.
+    scoped = library_ids is not None
+    in_scope = (
+        Job.id.in_(repository.visible_job_ids(library_ids)) if scoped else sa.true()
+    )
+    files_in_scope = (
+        SourceFile.library_id.in_(library_ids) if scoped else sa.true()
+    )
+
     state_rows = (
         await session.execute(
-            sa.select(Job.state, Job.stage, sa.func.count()).group_by(Job.state, Job.stage)
+            sa.select(Job.state, Job.stage, sa.func.count())
+            .where(in_scope)
+            .group_by(Job.state, Job.stage)
         )
     ).all()
     queue_depth: dict[str, int] = {}
@@ -229,7 +257,11 @@ async def collect(
         await session.scalar(
             sa.select(sa.func.count())
             .select_from(Job)
-            .where(Job.state == JobState.FAILED, Job.updated_at >= now - timedelta(days=1))
+            .where(
+                Job.state == JobState.FAILED,
+                Job.updated_at >= now - timedelta(days=1),
+                in_scope,
+            )
         )
     ) or 0
     # Unacknowledged only. Acknowledging deletes nothing and hides nothing —
@@ -242,6 +274,7 @@ async def collect(
             .where(
                 Job.state == JobState.DEAD_LETTER,
                 Job.acknowledged_at.is_(None),
+                in_scope,
             )
         )
     ) or 0
@@ -252,7 +285,7 @@ async def collect(
         await session.scalar(
             sa.select(sa.func.count())
             .select_from(Job)
-            .where(Job.state == JobState.DECLINED)
+            .where(Job.state == JobState.DECLINED, in_scope)
         )
     ) or 0
 
@@ -266,6 +299,7 @@ async def collect(
                     Job.state == JobState.RUNNING,
                     Job.locked_at.is_not(None),
                     Job.locked_at < now - STALE_LOCK,
+                    in_scope,
                 )
                 .order_by(Job.locked_at)
                 .limit(20)
@@ -286,7 +320,9 @@ async def collect(
     ]
 
     oldest_queued = await session.scalar(
-        sa.select(sa.func.min(Job.scheduled_for)).where(Job.state == JobState.QUEUED)
+        sa.select(sa.func.min(Job.scheduled_for)).where(
+            Job.state == JobState.QUEUED, in_scope
+        )
     )
     oldest_seconds = (now - oldest_queued).total_seconds() if oldest_queued else None
 
@@ -300,17 +336,24 @@ async def collect(
 
     file_rows = (
         await session.execute(
-            sa.select(SourceFile.state, sa.func.count()).group_by(SourceFile.state)
+            sa.select(SourceFile.state, sa.func.count())
+            .where(files_in_scope)
+            .group_by(SourceFile.state)
         )
     ).all()
     files_by_state = {str(state): count for state, count in file_rows}
 
     spend_rows = (
         await session.execute(
+            # Spend follows the documents it was spent on. A household should
+            # not be shown, or billed against, another household's API usage.
             sa.select(
                 Classification.created_at, Classification.usage, Classification.model
-            ).where(
-                Classification.created_at >= now - timedelta(days=30)
+            )
+            .join(Document, Document.id == Classification.document_id)
+            .where(
+                Classification.created_at >= now - timedelta(days=30),
+                Document.library_id.in_(library_ids) if scoped else sa.true(),
             )
         )
     ).all()

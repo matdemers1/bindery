@@ -529,14 +529,26 @@ async def health_panel_view(
     session: AsyncSession = Depends(get_session),
     user: AppUser = Depends(current_user),
 ) -> HealthPanelOut:
-    """Queue depth, failures, stalls and spend.
+    """Queue depth, failures, stalls and spend, for what this caller can reach.
 
     Authenticated, unlike `/api/health`: queue contents and API spend are not
     facts to hand an unauthenticated caller. The unauthenticated endpoint stays
     a bare liveness probe for the container healthcheck.
+
+    The scope is passed rather than computed and discarded. This route called
+    `_visible` and then ignored it, which is the same shape of mistake the
+    Phase 6 audit endpoint made — and `collect` accepted a `library_ids`
+    argument it never used, so even a caller that passed one got the whole
+    archive. The effect was a sidebar badge that could be lit by work in a
+    library the viewer cannot open: a warning nobody is able to answer.
+
+    No administrator branch, deliberately (ADR-009). An admin sees their own
+    libraries here like everyone else. The archive is not left unwatched by
+    that: the worker's health monitor and the webhook notifier call `collect`
+    with no scope at all, so a stall anywhere is still noticed by the thing
+    whose job is noticing.
     """
-    await _visible(session, user)
-    panel = await health_panel.collect(session)
+    panel = await health_panel.collect(session, await _visible(session, user))
     return HealthPanelOut(**panel.as_dict())
 
 

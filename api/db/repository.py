@@ -203,3 +203,15 @@ def visible_jobs(library_ids: list[uuid.UUID]):
             )
         )
     )
+
+
+def visible_job_ids(library_ids: list[uuid.UUID]):
+    """The ids of `visible_jobs`, for use as a subquery inside an aggregate.
+
+    Derived from `visible_jobs` rather than restating its joins. Those joins
+    are subtle — a job reaches a library through *either* key, and the outer
+    joins are the reason a classify failure is reachable at all — and a second
+    copy would drift from this one silently, which is exactly how the pipeline
+    screen went blind to classification failures the first time.
+    """
+    return visible_jobs(library_ids).with_only_columns(Job.id)
