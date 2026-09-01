@@ -62,6 +62,23 @@ SOURCES: dict[str, list[str]] = {
 SHARED = ["web/src/components/Shell.tsx", "web/src/index.css"]
 
 
+def _uncommitted(paths: list[str]) -> list[str]:
+    """Which of these paths have uncommitted changes.
+
+    The staleness check compares a screenshot against the commit that last
+    touched its sources, so capturing before committing records the *previous*
+    commit and the picture is stale the moment you commit. That has now caught
+    three separate releases; a warning here costs nothing and ends it.
+    """
+    if not paths:
+        return []
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "--", *paths],
+        cwd=REPO, capture_output=True, text=True, check=False,
+    )
+    return [line[3:] for line in result.stdout.splitlines() if line.strip()]
+
+
 def _source_commit(paths: list[str]) -> str:
     """The commit that last changed any of these paths.
 
@@ -250,6 +267,15 @@ async def main() -> int:
 
             await page.screenshot(path=str(OUT / shot))
             sources = SOURCES.get(route, []) + SHARED
+            if dirty := _uncommitted(sources):
+                print(
+                    f"  ! {shot} was captured with uncommitted changes to "
+                    + ", ".join(sorted(set(dirty))[:3])
+                    + ".\n    Commit them first, then recapture — otherwise this "
+                    "records the previous\n    commit and the picture is stale "
+                    "as soon as you do.",
+                    file=sys.stderr,
+                )
             entries.append(
                 {
                     "route": route,
