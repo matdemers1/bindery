@@ -9,7 +9,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/account",
@@ -19,7 +19,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/add",
@@ -29,7 +29,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/archive",
@@ -39,7 +39,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/files",
@@ -49,7 +49,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/import",
@@ -59,7 +59,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "6daccc6b0a4417dcd80ebcaeb82b636dba444a07"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/organise",
@@ -69,7 +69,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/people",
@@ -79,7 +79,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/photos",
@@ -89,7 +89,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "f51c62fc17d6e066f8d21d53305c5c1d5571daf1"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/pipeline",
@@ -99,7 +99,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/review",
@@ -109,7 +109,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "0ed09283068541722d269a71edac3f30b14e1ad9"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/rules",
@@ -119,7 +119,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/search",
@@ -129,7 +129,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/settings",
@@ -139,7 +139,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "b7ea2bf49dc74bef56b6abedde7a0a25d5ab822f"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/trust",
@@ -149,7 +149,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "7cabe4500cab6492ae8c5994a8d35a82ceb0e8ad"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     },
     {
       "route": "/vault",
@@ -159,7 +159,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "f4ac422da5c2897e497ae6bc0d3caf4bda1e595a"
+      "source_commit": "b10258d200b90aaebcab6a1a22aaa9f5e625da5a"
     }
   ]
 }
