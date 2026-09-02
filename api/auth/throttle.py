@@ -22,6 +22,7 @@ a login attempt is a fact worth keeping anyway — `event_log` and this table ar
 what answer "was anyone trying?" after the fact.
 """
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -83,6 +84,30 @@ def _ip_backoff(failures: int) -> timedelta:
     return min(IP_BACKOFF_BASE * (2 ** (steps - 1)), IP_BACKOFF_CAP)
 
 
+async def _serialise_on(session: AsyncSession, ip: str) -> None:
+    """Hold a transaction-scoped advisory lock on this address until commit.
+
+    `check` counts rows and `record` writes one, and nothing used to sit between
+    them. Two hundred requests arriving together therefore all read the same
+    pre-attack count, all saw zero failures, and all proceeded: the backoff is
+    built for a sequential attacker and could not see a burst at all.
+
+    A Postgres advisory lock keyed on the address closes that. It is taken
+    before the count is read and released when the request's transaction ends —
+    which is *after* its own attempt row is committed — so the second request
+    from an address reads the first one's failure rather than racing it. The
+    cost is that concurrent logins from one address queue, which is the correct
+    behaviour for a login form and is also, incidentally, the thing that stops a
+    burst from running two hundred Argon2 derivations at once.
+
+    Keyed on a hash of the address rather than the address: the lock space is
+    64-bit integers, and a collision costs two unrelated addresses a little
+    waiting and nothing else.
+    """
+    key = int.from_bytes(hashlib.sha256(ip.encode()).digest()[:8], "big", signed=True)
+    await session.execute(sa.select(sa.func.pg_advisory_xact_lock(key)))
+
+
 async def check(session: AsyncSession, email: str, ip: str | None) -> None:
     """Raise `Throttled` if this attempt should not be tried at all.
 
@@ -92,6 +117,11 @@ async def check(session: AsyncSession, email: str, ip: str | None) -> None:
     """
     since = _now() - WINDOW
     email = email.strip().lower()
+
+    # Before anything is read, so the read is not racing a concurrent attempt
+    # from the same address. See `_serialise_on`.
+    if ip:
+        await _serialise_on(session, ip)
 
     user = (
         await session.execute(sa.select(AppUser).where(AppUser.email == email))

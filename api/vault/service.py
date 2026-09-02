@@ -53,14 +53,14 @@ async def create(
     host_pepper = pepper.load_or_create()
 
     passphrase_salt, pin_salt = os.urandom(crypto.SALT_BYTES), os.urandom(crypto.SALT_BYTES)
+    # Both derivations go through the bounded pool: half a gigabyte and a couple
+    # of seconds of blocking C, which must not happen on the event loop.
+    passphrase_key = await crypto.derive_from_passphrase_async(passphrase, passphrase_salt)
+    pin_key = await crypto.derive_from_pin_async(pin, pin_salt, host_pepper)
     vault = Vault(
         user_id=user_id,
-        passphrase_wrapped=crypto.wrap(
-            data_key, crypto.derive_from_passphrase(passphrase, passphrase_salt), passphrase_salt
-        ).as_dict(),
-        pin_wrapped=crypto.wrap(
-            data_key, crypto.derive_from_pin(pin, pin_salt, host_pepper), pin_salt
-        ).as_dict(),
+        passphrase_wrapped=crypto.wrap(data_key, passphrase_key, passphrase_salt).as_dict(),
+        pin_wrapped=crypto.wrap(data_key, pin_key, pin_salt).as_dict(),
     )
     session.add(vault)
     await session.flush()
@@ -76,10 +76,9 @@ async def unlock_with_pin(session: AsyncSession, vault: Vault, pin: str) -> byte
             "Use the passphrase, and you can set a new PIN afterwards."
         )
     wrapped = crypto.Wrapped.from_dict(vault.pin_wrapped)
+    pin_key = await crypto.derive_from_pin_async(pin, wrapped.salt, pepper.load_or_create())
     try:
-        data_key = crypto.unwrap(
-            wrapped, crypto.derive_from_pin(pin, wrapped.salt, pepper.load_or_create())
-        )
+        data_key = crypto.unwrap(wrapped, pin_key)
     except crypto.WrongSecret:
         vault.pin_failures += 1
         if vault.pin_failures >= MAX_PIN_FAILURES:
@@ -102,9 +101,8 @@ async def unlock_with_passphrase(
     session: AsyncSession, vault: Vault, passphrase: str
 ) -> bytes:
     wrapped = crypto.Wrapped.from_dict(vault.passphrase_wrapped)
-    data_key = crypto.unwrap(
-        wrapped, crypto.derive_from_passphrase(passphrase, wrapped.salt)
-    )
+    passphrase_key = await crypto.derive_from_passphrase_async(passphrase, wrapped.salt)
+    data_key = crypto.unwrap(wrapped, passphrase_key)
     vault.pin_failures = 0
     vault.unlocked_at = datetime.now(UTC)
     sessions.unlock(vault.user_id, data_key)
@@ -114,9 +112,8 @@ async def unlock_with_passphrase(
 async def set_pin(session: AsyncSession, vault: Vault, data_key: bytes, pin: str) -> None:
     """Re-wrap the existing key under a new PIN. Nothing is re-encrypted."""
     salt = os.urandom(crypto.SALT_BYTES)
-    vault.pin_wrapped = crypto.wrap(
-        data_key, crypto.derive_from_pin(pin, salt, pepper.load_or_create()), salt
-    ).as_dict()
+    pin_key = await crypto.derive_from_pin_async(pin, salt, pepper.load_or_create())
+    vault.pin_wrapped = crypto.wrap(data_key, pin_key, salt).as_dict()
     vault.pin_failures = 0
 
 

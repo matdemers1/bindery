@@ -19,6 +19,7 @@ import SettingsPage from "./features/settings/SettingsPage";
 import TrustPage from "./features/trust/TrustPage";
 import SegmentationPage from "./features/segmentation/SegmentationPage";
 import ViewerPage from "./features/viewer/ViewerPage";
+import RouteFocus from "./components/RouteFocus";
 import Shell from "./components/Shell";
 import { LiveProvider } from "./live/LiveProvider";
 import Login from "./pages/Login";
@@ -99,6 +100,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <LiveProvider>
+        <RouteFocus />
         <Shell
         user={state.user}
         libraries={libraries}

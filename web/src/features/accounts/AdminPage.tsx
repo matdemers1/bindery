@@ -311,6 +311,7 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
         <input
           type="email"
           required
+          aria-label="Their email address"
           placeholder="their@email.address"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
@@ -318,6 +319,7 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
         />
         <input
           required
+          aria-label="What their library is called"
           placeholder="What their library is called"
           value={libraryName}
           onChange={(event) => setLibraryName(event.target.value)}

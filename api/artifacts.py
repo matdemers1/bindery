@@ -8,6 +8,7 @@ Artifacts are addressed by the source file's content hash, not its id, so
 re-ingesting identical bytes reuses work already done.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,7 +59,17 @@ class DerivedPaths:
             directory.mkdir(parents=True, exist_ok=True)
 
 
+# A blob's name is a hex digest everywhere it is produced, so nothing today
+# reaches `derived_for` with anything else. It is validated anyway because the
+# only caller that deletes is `purge_derived`, and `purge_derived("../../blobs")`
+# would rmtree the blob store and report success. `resolve_in_data` below
+# already refuses traversal for the read path; the destructive path had nothing.
+_SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
+
+
 def derived_for(sha256: str) -> DerivedPaths:
+    if not _SHA256.match(sha256):
+        raise ValueError(f"not a blob digest: {sha256!r}")
     return DerivedPaths(get_settings().derived_root / sha256)
 
 

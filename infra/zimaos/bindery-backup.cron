@@ -1,0 +1,64 @@
+# Bindery — the nightly local backup (copy 2 of 3-2-1).
+#
+# Install on the ZimaOS host as root:
+#
+#     crontab -l > /tmp/crontab.now
+#     cat infra/zimaos/bindery-backup.cron >> /tmp/crontab.now
+#     crontab /tmp/crontab.now
+#     crontab -l          # confirm both lines are there
+#
+# It lives in the repository rather than in a `backup.sh` on the host for two
+# reasons, both of which have already bitten this project once:
+#
+#   1. A script that exists only on the host cannot be reviewed, cannot be
+#      tested, and does not survive the host rebuild it is there to protect
+#      against. This file does.
+#
+#   2. The host script dumped Postgres and rsynced blobs into flat files. The
+#      restore drill — "the deliverable, not the backup" — can only be pointed
+#      at a *generation*: a directory holding `bindery.dump`, `blobs/`, `vault/`
+#      and `manifest.json`. So the backups that actually ran every night were
+#      the ones the drill could not verify, and the backups the drill could
+#      verify only existed when somebody remembered to type `make backup`.
+#      `api.export.cli backup` produces exactly what the drill consumes.
+#
+# What it does that a `pg_dump` plus an rsync does not:
+#
+#   - Runs the integrity check first and **refuses** to write a generation over
+#     a failing one (the ordering rule: integrity → pg_dump → blobs, REQ-096).
+#     A backup taken over a corrupt blob is a corrupt backup, faithfully
+#     replicated into every generation you keep.
+#   - Copies the sealed vault objects. A blob can be re-scanned from paper; a
+#     sealed object exists exactly once and a plain blob rsync does not see it,
+#     because vault objects deliberately live outside `blobs/`.
+#   - Copies the vault pepper, which is in this copy and never in the offsite
+#     one.
+#   - Writes `manifest.json`, which is what makes the generation self-describing
+#     and what the drill reads.
+#   - Exits non-zero on failure (api/export/cli.py), so cron's own mail is a
+#     real signal rather than something that has to be parsed out of a log.
+#
+# Where it lands: `BINDERY_BACKUP_ROOT`, defaulting to `<DATA_ROOT>/backups`,
+# which on this host is /media/Main-Storage/bindery/data/backups — the RAID 5
+# array, a different device from the NVMe the database sits on.
+#
+# 03:30 is after the offsite replication window and well outside any plausible
+# scanning session, so the integrity check is not competing with OCR.
+#
+# `--last-run.log` is overwritten, not appended: it is the last run's output,
+# never a growing file, and the durable record of every generation is its own
+# manifest.json.
+#
+# RETENTION IS MANUAL, AND THAT IS DELIBERATE. `run_backup` writes a fresh full
+# generation per stamp and nothing prunes them, because invariant 3 is that
+# nothing is ever automatically deleted and no unattended destructive code path
+# may exist — a scheduled job that removes old generations is precisely that,
+# on the one tree that exists to survive a mistake. Watch the free space on the
+# array (`df -h /media/Main-Storage`) and remove generations by hand, oldest
+# first, keeping at least one you have actually drilled:
+#
+#     ls -1dt /media/Main-Storage/bindery/data/backups/*/     # newest first
+#     bash scripts/restore-drill.sh <the one you intend to keep>
+#     rm -rf <the ones you have decided to let go>
+
+30 3 * * * docker exec bindery-api python -m api.export.cli backup > /DATA/AppData/bindery/backup-last-run.log 2>&1

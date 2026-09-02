@@ -84,7 +84,11 @@ export default function SettingsPage() {
             if (key.trim()) void save(key.trim());
           }}
         >
+          <label htmlFor="claude-api-key" className="sr-only">
+            Claude API key
+          </label>
           <input
+            id="claude-api-key"
             type="password"
             value={key}
             onChange={(event) => setKey(event.target.value)}

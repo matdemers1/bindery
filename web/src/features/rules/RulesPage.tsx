@@ -208,6 +208,7 @@ function NewRuleForm({
       <div className="grid gap-2 sm:grid-cols-2">
         <input
           required
+          aria-label="Name for this rule"
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="Name — e.g. GEICO is vehicle insurance"
@@ -239,6 +240,7 @@ function NewRuleForm({
         </select>
         <input
           required
+          aria-label="Value to match"
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="Value — e.g. GEICO"
@@ -246,6 +248,7 @@ function NewRuleForm({
         />
         <input
           required
+          aria-label="Tags to add, comma separated"
           value={tags}
           onChange={(event) => setTags(event.target.value)}
           placeholder="Add tags, comma separated"

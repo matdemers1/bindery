@@ -54,6 +54,14 @@ RUN apt-get update \
  && apt-get purge -y curl gnupg && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
 
+# The account the shipped image runs as — same fixed uid as Dockerfile.api,
+# because both mount the same /data and a mismatch is an archive one of them
+# cannot write. Created in `base` so both stages have it; only `runtime`
+# switches to it, because the test container bind-mounts the working tree.
+RUN groupadd --gid 10001 bindery \
+ && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/bindery \
+      --shell /usr/sbin/nologin bindery
+
 WORKDIR /app
 # See Dockerfile.api for why the lock is copied here: it pins the transitive
 # closure to what was tested, and it puts that pin into this layer's cache key
@@ -66,6 +74,19 @@ RUN python extract-deps.py worker > /tmp/requirements.txt \
 FROM base AS runtime
 COPY api/ ./api/
 COPY worker/ ./worker/
+# Unprivileged, for the same reason as the api and with more at stake: this is
+# the process that writes to the archive. Invariant 1 is enforced here by mode
+# alone — blobs are 0444 — and uid 0 ignores the write bit, so as root a stray
+# `shutil` call in a future stage could overwrite an original without ever
+# hitting a permission error to warn anyone.
+#
+# What this process writes: /data (the bind mount), /tmp (the liveness
+# heartbeat, ocrmypdf's scratch, and the per-conversion LibreOffice profile that
+# worker/convert.py already points HOME at). All reachable unprivileged.
+#
+# **The host has to agree.** /data must be owned by 10001, or the worker starts,
+# claims a job and fails it. See docs/zimaos-deploy.md, step 3.
+USER bindery
 CMD ["python", "-m", "worker.runner"]
 
 # Stamped at the end of the *runtime* stage, on purpose. These change on every

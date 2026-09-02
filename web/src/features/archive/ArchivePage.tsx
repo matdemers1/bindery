@@ -184,7 +184,11 @@ export default function ArchivePage() {
 
         <div className="min-w-0">
           <div className="mb-3 flex flex-wrap items-center gap-2">
+            <label htmlFor="archive-filter" className="sr-only">
+              Filter by title or filename
+            </label>
             <input
+              id="archive-filter"
               defaultValue={filters.q}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -400,6 +404,7 @@ function BulkBar({
           {selected.size} selected
         </span>
         <input
+          aria-label="Tags to add, comma separated"
           value={tags}
           onChange={(event) => {
             setTags(event.target.value);

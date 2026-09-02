@@ -169,15 +169,51 @@ def offences(source: str, where: str) -> dict[str, str]:
 
 def scan() -> tuple[dict[str, str], int]:
     """The whole `api/` package. Returns the offences and how many files it read."""
+    found, read = _scan()
+    return found, len(read)
+
+
+def _scan() -> tuple[dict[str, str], list[str]]:
+    """As `scan`, but naming the modules rather than counting them."""
     found: dict[str, str] = {}
-    examined = 0
+    read: list[str] = []
     for path in sorted((ROOT / "api").rglob("*.py")):
         relative = path.relative_to(ROOT).as_posix()
         if relative in BOUNDARY_MODULES:
             continue
-        examined += 1
+        read.append(relative)
         found.update(offences(path.read_text(), relative))
-    return found, examined
+    return found, read
+
+
+# The modules that build document queries outside `api/routers/`, which the
+# router-shaped guard in `tests/test_vault_leak.py` structurally cannot see
+# (CR-039). `api/search/query.py` is the one that matters most: it is the
+# archive's primary retrieval surface, it reads page *text*, and it is reached
+# through a router that never mentions `Document` at all — so a guard that
+# globs `api/routers/*.py` filters it out in silence.
+#
+# Counting modules is not enough on its own: `examined > 50` stays true while
+# any fifty files are read, including fifty that build no queries. These are
+# named, so a reorganisation that moves retrieval out from under this scan
+# fails here instead of quietly halving what the guard covers.
+MUST_BE_SCANNED = (
+    "api/ask.py",
+    "api/search/query.py",
+    "api/reclassify.py",
+    "api/bulk.py",
+    "api/moves.py",
+    "api/entities.py",
+    "api/segments.py",
+    "api/taxonomy_health.py",
+    "api/health_panel.py",
+    "api/export/archive_export.py",
+    "api/vault/sweep.py",
+    "api/routers/search.py",
+    "api/routers/library.py",
+    "api/routers/logs.py",
+    "api/routers/review.py",
+)
 
 
 # Every call site that predates the guard, with the reason it is still here.
@@ -379,6 +415,26 @@ def test_the_guard_examined_the_whole_api_package() -> None:
     """Its first version passed while examining none. This is that assertion."""
     _, examined = scan()
     assert examined > 50, f"only {examined} modules were read"
+
+
+def test_the_scan_reaches_the_modules_that_actually_build_the_queries() -> None:
+    """A count is not coverage (CR-039).
+
+    The vault-boundary guard in `tests/test_vault_leak.py` examines
+    `api/routers/*.py` and, after its filters, five files — none of which is
+    `api/search/query.py`, `api/ask.py` or `api/reclassify.py`, which are where
+    documents are actually selected. This scan does reach them; that it still
+    does is asserted here by name rather than inferred from `examined > 50`,
+    which stays true however the retrieval code is rearranged.
+    """
+    _, read = _scan()
+    missing = [module for module in MUST_BE_SCANNED if module not in read]
+    assert not missing, (
+        "these modules build document queries and are no longer being scanned, "
+        "so nothing is watching the boundary in them:\n  " + "\n  ".join(missing)
+        + "\nIf one was genuinely removed, take it out of MUST_BE_SCANNED; if it "
+        "moved, follow it."
+    )
 
 
 # ---------------------------------------------------------------------------

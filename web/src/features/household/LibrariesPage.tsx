@@ -103,6 +103,7 @@ export default function LibrariesPage() {
           }}
         >
           <input
+            aria-label="Name for the new library"
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
             placeholder="Library name"
@@ -176,6 +177,7 @@ function LibraryCard({
           }}
         >
           <input
+            aria-label="Email address of the person to add"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="Add someone by email"

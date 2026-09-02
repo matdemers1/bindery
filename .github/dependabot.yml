@@ -40,10 +40,16 @@ updates:
         dependency-type: production
         update-types: [patch]
 
-  # The workflow actions themselves. checkout@v5, setup-python@v6,
-  # build-push-action@v6 and the rest run with `packages: write` against ghcr —
-  # they are as much a supply chain as anything pip installs, and until now
-  # nothing watched them at all.
+  # The workflow actions themselves. checkout, setup-python, build-push-action
+  # and the rest run with `packages: write` against ghcr — they are as much a
+  # supply chain as anything pip installs, and until now nothing watched them at
+  # all.
+  #
+  # Every `uses:` in build.yml names a full commit SHA with the version in a
+  # trailing comment. That is what makes this entry load-bearing rather than
+  # cosmetic: a SHA cannot be repointed, so the *only* way an action changes is
+  # a pull request Dependabot opens here — which it does, rewriting both the SHA
+  # and the comment, because it understands the pinned-SHA convention.
   - package-ecosystem: github-actions
     directory: /
     schedule:

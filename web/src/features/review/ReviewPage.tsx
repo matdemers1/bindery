@@ -130,7 +130,17 @@ export default function ReviewPage() {
         </div>
       </header>
 
-      {notice && <p className="mb-3 text-sm text-accent">{notice}</p>}
+      {/* Always in the DOM, `sr-only` while empty: a live region inserted at
+          the same moment as its text is not reliably announced — and on this
+          screen the confirmation is the only evidence that Accept did
+          anything, because the card silently advances to the next one. */}
+      <p
+        role="status"
+        aria-live="polite"
+        className={notice ? "mb-3 text-sm text-accent" : "sr-only"}
+      >
+        {notice}
+      </p>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_24rem]">
         <div>
@@ -151,6 +161,7 @@ export default function ReviewPage() {
                   so "this is right except the date" meant accepting something
                   wrong or rejecting something mostly right. */}
               <button
+                aria-pressed={Boolean(correcting)}
                 onClick={() => {
                   if (correcting) {
                     setCorrecting(null);

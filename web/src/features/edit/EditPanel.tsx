@@ -52,6 +52,12 @@ export default function EditPanel({
   const [tagIds, setTagIds] = useState<string[]>(detail.tags.map((t) => t.id));
   const [newTags, setNewTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  // Adding and removing a chip changed the form and said nothing. Its own
+  // region rather than a shared one, so it can never overwrite the count of
+  // suggestions mid-announcement.
+  const [chipNote, setChipNote] = useState("");
+  const suggestionsId = useId();
 
   const [correspondents, setCorrespondents] = useState<{ id: string; name: string }[]>([]);
   const [types, setTypes] = useState<TaxonomyOption[]>([]);
@@ -152,6 +158,26 @@ export default function EditPanel({
       )
     : [];
   const exact = tagOptions.some((t) => t.name.toLowerCase() === draft.toLowerCase());
+  const offered = matches.slice(0, 6);
+  const active = offered.length ? Math.min(highlight, offered.length - 1) : -1;
+
+  function addExisting(tag: TaxonomyOption) {
+    setTagIds((ids) => [...ids, tag.id]);
+    setTagDraft("");
+    setHighlight(0);
+    setChipNote(`${tag.name} added`);
+  }
+
+  // The suggestion list is the safeguard against a near-duplicate (invariant
+  // 6), and it was sighted-only: it appeared with no role, no announcement and
+  // no way in but Tab into a group whose existence was never mentioned.
+  const suggestionNote = !draft
+    ? ""
+    : offered.length
+      ? `${offered.length} matching tag${offered.length === 1 ? "" : "s"}`
+      : exact
+        ? ""
+        : `No tag matches ${draft}`;
 
   return (
     <div className="space-y-4 rounded-xl border border-edge bg-surface p-4">
@@ -242,7 +268,10 @@ export default function EditPanel({
             <Chip
               key={id}
               label={known.get(id)?.name ?? detail.tags.find((t) => t.id === id)?.name ?? "tag"}
-              onRemove={() => setTagIds((ids) => ids.filter((each) => each !== id))}
+              onRemove={(label) => {
+                setTagIds((ids) => ids.filter((each) => each !== id));
+                setChipNote(`${label} removed`);
+              }}
             />
           ))}
           {newTags.map((name) => (
@@ -250,40 +279,84 @@ export default function EditPanel({
               key={`new:${name}`}
               label={name}
               isNew
-              onRemove={() => setNewTags((names) => names.filter((each) => each !== name))}
+              onRemove={(label) => {
+                setNewTags((names) => names.filter((each) => each !== name));
+                setChipNote(`${label} removed`);
+              }}
             />
           ))}
         </div>
         <input
           aria-label="Find a tag, or type a new name"
+          role="combobox"
+          aria-expanded={offered.length > 0}
+          aria-autocomplete="list"
+          aria-controls={suggestionsId}
+          aria-activedescendant={
+            active >= 0 ? `${suggestionsId}-${offered[active].id}` : undefined
+          }
           value={tagDraft}
-          onChange={(event) => setTagDraft(event.target.value)}
+          onChange={(event) => {
+            setTagDraft(event.target.value);
+            setHighlight(0);
+          }}
+          onKeyDown={(event) => {
+            if (offered.length === 0) return;
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setHighlight(Math.min(active + 1, offered.length - 1));
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setHighlight(Math.max(active - 1, 0));
+            } else if (event.key === "Enter" && active >= 0) {
+              // Only ever an existing tag. Creating stays the explicit button
+              // below, because a name that did not match must not become a new
+              // one by reflex (invariant 6).
+              event.preventDefault();
+              addExisting(offered[active]);
+            }
+          }}
           placeholder="Find a tag, or type a new name…"
           className="mt-2 w-full rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
         />
+        <p role="status" aria-live="polite" className="sr-only">
+          {suggestionNote}
+        </p>
+        <p role="status" aria-live="polite" className="sr-only">
+          {chipNote}
+        </p>
         {draft && (
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {matches.slice(0, 6).map((tag) => (
-              <button
-                key={tag.id}
-                type="button"
-                onClick={() => {
-                  setTagIds((ids) => [...ids, tag.id]);
-                  setTagDraft("");
-                }}
-                className="rounded-full border border-edge px-2.5 py-1 text-xs hover:border-accent/60"
-              >
-                {tag.name} <span className="text-muted">({tag.document_count})</span>
-              </button>
-            ))}
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {offered.length > 0 && (
+              <ul id={suggestionsId} role="listbox" className="flex flex-wrap gap-1.5">
+                {offered.map((tag, index) => (
+                  <li
+                    key={tag.id}
+                    id={`${suggestionsId}-${tag.id}`}
+                    role="option"
+                    aria-selected={index === active}
+                    onMouseEnter={() => setHighlight(index)}
+                    onClick={() => addExisting(tag)}
+                    className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs ${
+                      index === active ? "border-accent/60" : "border-edge"
+                    }`}
+                  >
+                    {tag.name} <span className="text-muted">({tag.document_count})</span>
+                  </li>
+                ))}
+              </ul>
+            )}
             {/* Creating is its own action, never a fallback for a name that
-                did not match something (invariant 6). */}
+                did not match something (invariant 6). Outside the listbox for
+                the same reason: it is not one of the things you matched. */}
             {!exact && (
               <button
                 type="button"
                 onClick={() => {
                   setNewTags((names) => [...new Set([...names, draft])]);
                   setTagDraft("");
+                  setHighlight(0);
+                  setChipNote(`${draft} added as a new tag`);
                 }}
                 className="flex items-center gap-1 rounded-full border border-accent/60 bg-accent/10 px-2.5 py-1 text-xs text-accent"
               >
@@ -397,7 +470,7 @@ function Chip({
   isNew = false,
 }: {
   label: string;
-  onRemove: () => void;
+  onRemove: (label: string) => void;
   isNew?: boolean;
 }) {
   return (
@@ -407,7 +480,7 @@ function Chip({
       }`}
     >
       {label}
-      <button type="button" onClick={onRemove} aria-label={`Remove ${label}`}>
+      <button type="button" onClick={() => onRemove(label)} aria-label={`Remove ${label}`}>
         <X size={11} />
       </button>
     </span>

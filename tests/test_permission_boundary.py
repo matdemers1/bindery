@@ -28,6 +28,9 @@ import sqlalchemy as sa
 
 from api.db.enums import (
     ActorType,
+    AssetKind,
+    ImportItemState,
+    ImportState,
     IngestSource,
     LibraryKind,
     MembershipRole,
@@ -35,10 +38,13 @@ from api.db.enums import (
     SourceFileState,
 )
 from api.db.models import (
+    Asset,
     AuditEvent,
     Correspondent,
     Document,
     DocumentTag,
+    ImportItem,
+    ImportSession,
     Library,
     Membership,
     Page,
@@ -122,6 +128,27 @@ async def household(session, client, user_factory):
     session.add(AuditEvent(entity_type="document", entity_id=private_document.id,
                            action="filed", actor_type=ActorType.AI,
                            after={"title": SECRET}))
+
+    # The two remaining ids the parameterised sweep below substitutes. Without
+    # them `/api/assets/{id}/timeline` and the three `/api/imports/{id}` routes
+    # would be probed with an id belonging to nothing, and a 404 would prove
+    # only that the row does not exist — not that the boundary refused it.
+    private_asset = Asset(
+        library_id=alice_library.id, kind=AssetKind.PERSON,
+        name=SECRET, slug=f"onc-asset-{uuid.uuid4().hex[:6]}",
+    )
+    private_import = ImportSession(
+        library_id=alice_library.id, root_path=f"/data/inbox/{SECRET}",
+        state=ImportState.COMPLETED, created_by=alice.id,
+    )
+    session.add_all([private_asset, private_import])
+    await session.flush()
+    session.add(
+        ImportItem(
+            session_id=private_import.id, path=f"/data/inbox/{SECRET}/oncology.pdf",
+            byte_size=100, state=ImportItemState.PENDING,
+        )
+    )
     await session.commit()
 
     async def sign_in(user):
@@ -136,7 +163,19 @@ async def household(session, client, user_factory):
         "private_document": private_document, "shared_document": shared_document,
         "private_file": private_file, "shared_file": shared_file,
         "clinic": clinic, "private_tag": private_tag,
+        "private_asset": private_asset, "private_import": private_import,
         "sign_in": sign_in,
+        # Every path parameter the OpenAPI schema uses on a GET route, pointed
+        # at something of Alice's. `test_no_parameterised_route_leaks` formats
+        # the route template with this, so a new route naming a parameter that
+        # is not here fails with a KeyError rather than being quietly skipped.
+        "ids": {
+            "document_id": private_document.id,
+            "source_file_id": private_file.id,
+            "asset_id": private_asset.id,
+            "session_id": private_import.id,
+            "page_number": 1,
+        },
     }
 
 
@@ -259,6 +298,111 @@ async def test_no_read_path_leaks_another_library(client, household, label, path
         assert SECRET not in body, f"{label} leaked Alice's document to Bob"
         assert "dana-farber" not in body, f"{label} leaked Alice's correspondent to Bob"
         assert "oncology.pdf" not in body, f"{label} leaked Alice's filename to Bob"
+
+
+# --------------------------------------------------------------------------
+# The routes with an id in them (CR-038)
+# --------------------------------------------------------------------------
+#
+# The sweep above cannot reach these: their paths need an id, so the coverage
+# guard used to skip every path containing `{` and nine parameterised GET
+# routes were in neither leak suite. `/api/files/{id}/original` serves the raw
+# stored bytes of another household member's document, and it was one of them.
+#
+# So the list is *derived from the route table* rather than written out. A route
+# added next year is swept the day it is added, and there is no list for anyone
+# to forget to update — which is the failure this whole file exists to prevent,
+# repeated three times now.
+
+
+def _parameterised_get_paths() -> list[str]:
+    from api.main import app
+
+    return sorted(
+        path
+        for path, operations in app.openapi()["paths"].items()
+        if "get" in operations and path.startswith("/api") and "{" in path
+    )
+
+
+# The only parameterised GET routes that may sit outside the sweep, each with
+# the reason. Same contract as `NOT_LIBRARY_SCOPED`: an addition is a claim.
+EXEMPT_PARAMETERISED = {
+    "/api/invitations/{token}": (
+        "an unauthenticated invitation lookup keyed on a secret token; it "
+        "belongs to no library and returns no archive data"
+    ),
+    "/api/vault/items/{document_id}/original": (
+        "the caller's own vault, never a library's — 423 while locked, and "
+        "asserted far more strictly in tests/test_vault_leak.py (ADR-012)"
+    ),
+}
+
+PARAMETERISED_SWEEP = [
+    path for path in _parameterised_get_paths() if path not in EXEMPT_PARAMETERISED
+]
+
+
+@pytest.mark.parametrize("path", PARAMETERISED_SWEEP, ids=PARAMETERISED_SWEEP)
+async def test_no_parameterised_route_leaks_another_library(
+    client, household, path
+) -> None:
+    """Every id-bearing GET route, probed as the household member who must not
+    see the thing the id names.
+
+    404 rather than 403 for the same reason as everywhere else: a 403 confirms
+    the row exists, and Bob learning that Alice has a document with this id is
+    already more than nothing.
+    """
+    await household["sign_in"](household["bob"])
+    target = path.format(**household["ids"])
+
+    response = await client.get(target)
+    assert response.status_code == 404, (
+        f"{target} answered {response.status_code} to a caller with no "
+        "membership in the library that owns it"
+    )
+    body = response.text.lower()
+    assert SECRET not in body, f"{target} leaked Alice's document to Bob"
+    assert "dana-farber" not in body, f"{target} leaked Alice's correspondent"
+    assert "oncology.pdf" not in body, f"{target} leaked Alice's filename"
+
+
+async def test_the_parameterised_sweep_is_looking_at_something(household) -> None:
+    """The guard's guard.
+
+    `PARAMETERISED_SWEEP` is built at import time from the OpenAPI schema. If
+    that introspection ever stops matching FastAPI, the parametrisation empties
+    and this whole section reports green while probing nothing — which is
+    exactly how the route-coverage guard first passed while examining zero
+    routes.
+    """
+    assert len(PARAMETERISED_SWEEP) >= 15, (
+        f"only {len(PARAMETERISED_SWEEP)} parameterised routes were found — the "
+        "route introspection has stopped matching this version of FastAPI"
+    )
+    # The blob endpoints are the highest-consequence leak in the application,
+    # so they are named rather than merely counted.
+    for must_be_swept in (
+        "/api/files/{source_file_id}/original",
+        "/api/files/{source_file_id}/pdf",
+        "/api/files/{source_file_id}/text",
+        "/api/documents/{document_id}/pdf",
+    ):
+        assert must_be_swept in PARAMETERISED_SWEEP, f"{must_be_swept} is not swept"
+
+    # And every parameter the schema uses is one the fixture can fill, or the
+    # sweep above would be probing an id that names nothing anywhere.
+    for path in PARAMETERISED_SWEEP:
+        path.format(**household["ids"])
+
+
+def test_the_parameterised_exemptions_are_still_real_routes() -> None:
+    """An exemption for a route that no longer exists is a hole held open for
+    whichever route is next given that path."""
+    live = set(_parameterised_get_paths())
+    orphaned = sorted(path for path in EXEMPT_PARAMETERISED if path not in live)
+    assert not orphaned, f"exempted routes that no longer exist: {orphaned}"
 
 
 async def test_a_direct_document_url_is_not_a_way_in(client, household) -> None:
@@ -391,8 +535,10 @@ def test_every_document_returning_route_is_in_the_leak_suite() -> None:
     from api.main import app
 
     covered = {path.split("?")[0] for _, path in EVERY_READ_PATH}
+    covered |= set(PARAMETERISED_SWEEP) | set(EXEMPT_PARAMETERISED)
     uncovered: list[str] = []
     considered = 0
+    parameterised = 0
 
     # The OpenAPI document rather than `app.routes`: included routers nest
     # their routes behind an opaque wrapper, and a naive walk of `app.routes`
@@ -402,24 +548,37 @@ def test_every_document_returning_route_is_in_the_leak_suite() -> None:
     for path, operations in app.openapi()["paths"].items():
         if "get" not in operations or not path.startswith("/api"):
             continue
-        # Routes with path parameters are exercised individually above (direct
-        # document URLs, blob URLs) rather than by the parametrised sweep.
-        if "{" in path or path in NOT_LIBRARY_SCOPED or path.startswith("/api/docs"):
+        if path in NOT_LIBRARY_SCOPED or path.startswith("/api/docs"):
             continue
-        considered += 1
+        # Routes with path parameters used to be skipped outright here — the
+        # `if "{" in path: continue` that left nine of them, including the one
+        # that serves raw stored bytes, in neither leak suite (CR-038). They are
+        # counted separately because they are covered by a separate sweep, not
+        # because they are covered less.
+        if "{" in path:
+            parameterised += 1
+        else:
+            considered += 1
         if path not in covered:
             uncovered.append(path)
 
     # A guard that silently examines nothing is worse than no guard: it reads
-    # green forever while the route table grows underneath it.
+    # green forever while the route table grows underneath it. Both halves are
+    # asserted, because the parameterised half is the one that was invisible.
     assert considered >= len(EVERY_READ_PATH), (
         f"only {considered} routes were examined — the route introspection has "
         "stopped matching this version of FastAPI"
     )
+    assert parameterised >= len(PARAMETERISED_SWEEP), (
+        f"only {parameterised} parameterised routes were examined, against "
+        f"{len(PARAMETERISED_SWEEP)} in the sweep — the two have stopped "
+        "reading the same route table"
+    )
     assert not uncovered, (
         "these GET routes can return library-scoped data and are not exercised "
-        "by the leak suite. Add them to EVERY_READ_PATH, or to "
-        "NOT_LIBRARY_SCOPED with a reason:\n  " + "\n  ".join(sorted(uncovered))
+        "by the leak suite. Add them to EVERY_READ_PATH, or — if they carry a "
+        "path parameter the `ids` fixture cannot fill — to EXEMPT_PARAMETERISED "
+        "or NOT_LIBRARY_SCOPED with a reason:\n  " + "\n  ".join(sorted(uncovered))
     )
 
 

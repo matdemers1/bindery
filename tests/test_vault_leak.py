@@ -19,10 +19,10 @@ the vault stays open for fifteen minutes after you glance at it.
 """
 
 import hashlib
+import json
 import uuid
 
 import pytest
-import sqlalchemy as sa
 
 from api.db.enums import IngestSource, ReviewState, SourceFileState
 from api.db.models import Document, Page, SourceFile
@@ -139,16 +139,148 @@ async def test_it_does_not_appear_in_the_pipeline_progress(client, a_vaulted_doc
 
 async def test_it_is_absent_from_counts_and_facets(client, a_vaulted_document, session):
     """The subtle one. A hidden document that still contributes to a total says
-    'there is something here you cannot see', which is more than nothing."""
-    visible = (
-        await session.execute(
-            sa.select(sa.func.count(Document.id)).where(Document.vaulted_by.is_(None))
+    'there is something here you cannot see', which is more than nothing.
+
+    Pinned to an exact number, and compared like with like. The first version of
+    this asserted `reported <= visible`, where `visible` counted every
+    non-vaulted document in the whole shared test database — hundreds by the
+    time this file runs — and `reported` was one library's total. Removing the
+    vault boundary entirely moved `reported` from 1 to 2 and left it three
+    orders of magnitude under `visible`, so the one assertion guarding the
+    hardest-to-spot leak in the suite could not fail. It also hid behind
+    `if reported is not None`, which meant reshaping `ArchiveStatsOut` would
+    have skipped it silently rather than failing.
+    """
+    _user, library, _document, _source = a_vaulted_document
+
+    # One ordinary filed document in the *same* library, so the expected total
+    # is a number rather than an inequality.
+    ordinary_file = SourceFile(
+        library_id=library.id,
+        sha256=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+        byte_size=1024,
+        original_filename="the-ordinary-one.jpg",
+        ingest_source=IngestSource.WEB_UPLOAD,
+        page_count=1,
+        state=SourceFileState.PROCESSED,
+    )
+    session.add(ordinary_file)
+    await session.flush()
+    session.add(Page(source_file_id=ordinary_file.id, page_number=1, text="nothing secret"))
+    session.add(
+        Document(
+            library_id=library.id,
+            source_file_id=ordinary_file.id,
+            page_start=1,
+            page_end=1,
+            title="Ordinary — the one that should be counted",
+            review_state=ReviewState.FILED,
         )
-    ).scalar_one()
+    )
+    await session.commit()
+
     body = (await client.get("/api/archive")).json()
-    reported = body.get("stats", {}).get("total") or body.get("total")
-    if reported is not None:
-        assert reported <= visible
+
+    assert body["total"] == 1, (
+        "the archive total counts the vaulted document. A hidden row that still "
+        f"moves a total says there is something here you cannot see: {body['total']}"
+    )
+    stats = body["stats"]
+    assert stats["documents"] == 1, f"stats.documents counted the vault: {stats}"
+    assert stats["files"] == 1, f"stats.files counted the vaulted file: {stats}"
+    assert stats["pages"] == 1, f"stats.pages counted the vaulted page: {stats}"
+    # And the entries agree with the counts, so a total that is right by
+    # coincidence while the list is wrong still fails.
+    assert [entry["title"] for entry in body["entries"]] == [
+        "Ordinary — the one that should be counted"
+    ]
+
+
+# --------------------------------------------------------------------------
+# Q&A — the one surface that returns page text verbatim (CR-040)
+# --------------------------------------------------------------------------
+#
+# Every other leak here exposes a title, a count or a thumbnail. Ask quotes the
+# *contents* of the page back, with a citation, and — with a key configured —
+# transmits it to Anthropic on the way. It is the surface a vaulted medical or
+# discharge record must reach least, and it was in neither leak suite: the
+# protection is one keyword argument, `viewer=`, and dropping it while
+# refactoring would have broken nothing that any test or guard observed.
+#
+# The question deliberately does not contain SECRET_PHRASE. The response echoes
+# the question back, so a body-substring assertion on a phrase we just sent is
+# trivially false however well the boundary works — the same trap
+# `test_search_finds_nothing` documents.
+
+ASK_QUESTION = "What settlement did the northropi paperwork describe?"
+
+
+async def test_ask_does_not_quote_a_vaulted_page(client, a_vaulted_document):
+    """The endpoint, both locked and unlocked."""
+    _user, _library, document, source = a_vaulted_document
+
+    response = await client.post("/api/ask", json={"question": ASK_QUESTION})
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["consulted"] == [], (
+        "Ask retrieved the vaulted document as a source. Its page text is what "
+        "gets sent to the model and quoted back on screen."
+    )
+    assert body["citations"] == []
+    assert body["answer"] is None, "there was nothing citable to answer from"
+
+    # Everything except the echoed question, so the assertion is about what the
+    # archive said rather than about what we asked.
+    payload = json.dumps({key: value for key, value in body.items() if key != "question"})
+    assert SECRET_PHRASE not in payload
+    assert "the-private-one" not in payload
+    assert str(document.id) not in payload
+    assert str(source.id) not in payload
+
+
+async def test_ask_retrieval_hides_the_vault_from_the_service_layer(
+    session, a_vaulted_document
+):
+    """One layer down, where the boundary actually is.
+
+    `gather_sources` runs two queries: a vault-filtered search, and then a
+    second `select(Document)` narrowed to the ids that search returned. The
+    second is safe only transitively, so it is asserted here directly — a
+    refactor that widened it would still pass the route test above for as long
+    as the first query kept the ids out.
+    """
+    from api import ask as ask_module
+
+    user, library, _document, _source = a_vaulted_document
+
+    sources = await ask_module.gather_sources(
+        session, ASK_QUESTION, [library.id], viewer=user.id
+    )
+    assert sources == [], (
+        "gather_sources returned the vaulted page to the layer that builds the "
+        "prompt: " + str([source.title for source in sources])
+    )
+
+
+async def test_ask_fails_closed_when_the_caller_forgets_the_viewer(
+    session, a_vaulted_document
+):
+    """`viewer` defaults to `None`, and the default must not mean 'no filter'.
+
+    This is the shape of the defect that put five read paths on the wrong side
+    of the boundary: an opt-in whose default was fail-open. A new caller of
+    `gather_sources` that says nothing about who is asking must get nothing
+    from the vault, not everything.
+    """
+    from api import ask as ask_module
+
+    _user, library, _document, _source = a_vaulted_document
+
+    sources = await ask_module.gather_sources(session, ASK_QUESTION, [library.id])
+    assert sources == [], (
+        "a caller that did not pass `viewer=` was handed vaulted page text"
+    )
 
 
 async def test_the_audit_log_does_not_replay_its_title(client, a_vaulted_document):
@@ -220,6 +352,26 @@ async def test_taxonomy_counts_do_not_include_it(client, session, a_vaulted_docu
     )
 
 
+# Routers that reach documents through `Scope` or `repository`, both of which
+# apply the boundary centrally — each with the reason, so an addition is a
+# written claim rather than a name appearing in a set. `library.py` and
+# `logs.py` were originally passing this guard on a substring match against the
+# word "vault" in a *comment*, which is why the reasons are here at all.
+VIA_SCOPE = {
+    "documents.py": "every query goes through `repository`, which carries both halves",
+    "files.py": "`repository.get_source_file` / `list_pages`; no query of its own",
+    "segments.py": "reaches one file the caller already resolved through `Scope`",
+    "upload.py": "writes; it selects nothing it did not just create",
+    "trust.py": "asks `Scope` for the rows the export and the vital list read",
+    "library.py": "the archive browser, built entirely on `scope.only(Document)`",
+    "logs.py": "the photo wall since REQ-187; it names the boundary and asks for it",
+}
+# Vault routes are the one place vaulted rows are *supposed* to be visible.
+EXEMPT_FROM_VAULT_BOUNDARY = {
+    "vault.py": "the vault's own routes — reading vaulted rows is what they are for",
+}
+
+
 def test_every_route_that_selects_documents_applies_the_vault_boundary() -> None:
     """The guard the photo wall needed.
 
@@ -231,25 +383,27 @@ def test_every_route_that_selects_documents_applies_the_vault_boundary() -> None
     Structural on purpose: it asks whether the module names the boundary at
     all, which is crude, and crude is what survives. A module that queries
     documents and never mentions the vault cannot possibly be applying it.
+
+    **Scope, stated plainly:** this covers `api/routers/` only, and it is the
+    weaker of the two guards over this boundary.
+    `tests/test_boundary_guard.py` is the one that walks every module of `api/`
+    as an AST and catches a hand-built boundary anywhere in the package,
+    including `api/ask.py` and `api/search/query.py`, which this one cannot see.
+    Both are kept: this one fires on a *router* that queries documents without
+    mentioning the vault at all, which is the `/api/photos` shape, and it does
+    so on a text match that survives a rewrite of the query.
     """
     import re
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
-    # Reached through `Scope` or `repository`, both of which apply it centrally.
-    # `library.py` and `logs.py` were passing this guard on a substring match
-    # against the word in a *comment*, not on any filtering they did. They
-    # route through `Scope` like the rest of this set, so name them.
-    VIA_SCOPE = {
-        "documents.py", "files.py", "segments.py", "upload.py", "trust.py",
-        "library.py", "logs.py",
-    }
-    # Vault routes are the one place vaulted rows are *supposed* to be visible.
-    EXEMPT = {"vault.py"}
 
     offenders = []
+    read = 0
+    considered = 0
     for path in sorted((root / "api" / "routers").glob("*.py")):
-        if path.name in VIA_SCOPE or path.name in EXEMPT:
+        read += 1
+        if path.name in VIA_SCOPE or path.name in EXEMPT_FROM_VAULT_BOUNDARY:
             continue
         source = path.read_text()
         selects = re.search(
@@ -257,15 +411,46 @@ def test_every_route_that_selects_documents_applies_the_vault_boundary() -> None
         )
         if not selects:
             continue
+        considered += 1
         if "document_clause" in source or "hidden_source_file_ids" in source:
             continue
         offenders.append(path.name)
+
+    # A guard that silently examines nothing is worse than no guard. This one
+    # had no such assertion, so reorganising `api/routers/` into subpackages
+    # would have left it green forever while inspecting zero files — the same
+    # failure the Phase 7 route-coverage guard had in its first version.
+    assert read >= 15, (
+        f"only {read} router modules were read — `api/routers/*.py` has stopped "
+        "matching the tree, and this guard is now inspecting nothing"
+    )
+    assert considered >= 3, (
+        f"only {considered} routers were found to query documents at all, which "
+        "is fewer than there have ever been. Either the query spellings this "
+        "guard matches have changed, or the routers moved."
+    )
 
     assert not offenders, (
         "these routers query documents without naming the vault boundary:\n  "
         + "\n  ".join(offenders)
         + "\nApply `boundary.document_clause(user.id)`, or add the module to "
         "VIA_SCOPE with a reason."
+    )
+
+
+def test_the_vault_boundary_exemptions_are_all_still_real_modules() -> None:
+    """An exemption naming a file that is gone is a hole held open for whichever
+    module is next given that name."""
+    from pathlib import Path
+
+    routers = Path(__file__).resolve().parent.parent / "api" / "routers"
+    present = {path.name for path in routers.glob("*.py")}
+    orphaned = sorted(
+        (set(VIA_SCOPE) | set(EXEMPT_FROM_VAULT_BOUNDARY)) - present
+    )
+    assert not orphaned, (
+        f"these modules are exempted from the vault-boundary guard and no "
+        f"longer exist: {orphaned}"
     )
 
 

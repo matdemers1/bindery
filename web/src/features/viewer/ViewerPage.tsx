@@ -200,6 +200,7 @@ function Viewer({
             </NavButton>
             {mode === "document" && (
               <button
+                aria-pressed={showWhy}
                 onClick={() => setShowWhy((open) => !open)}
                 className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted hover:border-accent/60"
               >
@@ -208,6 +209,7 @@ function Viewer({
             )}
             {mode === "document" && (
               <button
+                aria-pressed={editing}
                 onClick={() => setEditing((open) => !open)}
                 className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm ${
                   editing
@@ -246,11 +248,20 @@ function Viewer({
           </div>
         </header>
 
-        {saved && (
-          <p className="mb-3 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-sm text-accent">
-            {saved}
-          </p>
-        )}
+        {/* Always in the DOM, `sr-only` while empty — a live region inserted
+            at the same moment as its text is not reliably announced, and this
+            message is the list of fields the edit actually changed. */}
+        <p
+          role="status"
+          aria-live="polite"
+          className={
+            saved
+              ? "mb-3 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-sm text-accent"
+              : "sr-only"
+          }
+        >
+          {saved}
+        </p>
 
         {editing && document_ && (
           <div className="mb-4">

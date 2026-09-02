@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { api, type SearchResult } from "../../api";
+import Modal from "../../components/Modal";
 
 // ⌘K → type → Enter → the viewer opens on the page. That path is the product.
 // Everything here is in service of keeping it under a second.
@@ -56,7 +57,8 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === "Escape") return onClose();
+    // Escape, Tab and Shift+Tab belong to the dialog: it owns the trap and
+    // hands focus back to whatever opened it.
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setSelected((index) => Math.min(index + 1, results.length - 1));
@@ -75,74 +77,78 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 pt-[12vh]"
-      onClick={onClose}
+    // `aria-modal` promised that the page behind was unavailable and nothing
+    // enforced it: Tab walked out of the seven rows into a sidebar hidden
+    // under the overlay, and Escape left focus on `<body>` so the next Tab
+    // restarted at the skip link. Modal traps both ends and gives focus back
+    // to whatever opened the palette — including the ⌘K path, where that is
+    // wherever the reader was working.
+    <Modal
+      label="Command palette"
+      onClose={onClose}
+      backdropClassName="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 pt-[12vh]"
+      className="w-full max-w-xl overflow-hidden rounded-xl border border-edge bg-surface shadow-2xl"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        onClick={(event) => event.stopPropagation()}
-        className="w-full max-w-xl overflow-hidden rounded-xl border border-edge bg-surface shadow-2xl"
-      >
-        <input
-          ref={input}
-          // Synchronous autoFocus, not a deferred focus() call: the input mounts
-          // fresh each time the palette opens, and anyone who presses ⌘K starts
-          // typing immediately — a focus deferred to the next frame loses those
-          // first keystrokes to whatever was focused before.
-          autoFocus
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Jump to a page…"
-          role="combobox"
-          aria-expanded={results.length > 0}
-          aria-controls="palette-results"
-          aria-activedescendant={
-            results[selected] ? `palette-result-${results[selected].document_id}` : undefined
-          }
-          className="w-full border-b border-edge bg-transparent px-4 py-3.5 text-base outline-none"
-        />
+      <input
+        ref={input}
+        // Synchronous autoFocus, not a deferred focus() call: the input mounts
+        // fresh each time the palette opens, and anyone who presses ⌘K starts
+        // typing immediately — a focus deferred to the next frame loses those
+        // first keystrokes to whatever was focused before.
+        autoFocus
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder="Jump to a page…"
+        aria-label="Jump to a page"
+        role="combobox"
+        aria-expanded={results.length > 0}
+        aria-autocomplete="list"
+        aria-controls="palette-results"
+        aria-activedescendant={
+          results[selected] ? `palette-result-${results[selected].document_id}` : undefined
+        }
+        className="w-full border-b border-edge bg-transparent px-4 py-3.5 text-base outline-none"
+      />
 
-        {results.length > 0 ? (
-          <ul id="palette-results" role="listbox" className="max-h-80 overflow-y-auto py-1">
-            {results.map((result, index) => (
-              <li key={result.document_id}>
-                <button
-                  id={`palette-result-${result.document_id}`}
-                  role="option"
-                  aria-selected={index === selected}
-                  onMouseEnter={() => setSelected(index)}
-                  onClick={() => openResult(result)}
-                  className={`flex w-full items-baseline gap-3 px-4 py-2.5 text-left ${
-                    index === selected ? "bg-accent/15" : ""
-                  }`}
-                >
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    {result.title ?? result.original_filename ?? "(untitled)"}
-                  </span>
-                  {result.known_form_code && (
-                    <span className="shrink-0 rounded-full border border-accent/50 px-1.5 text-xs text-accent">
-                      {result.known_form_code}
-                    </span>
-                  )}
-                  <span className="shrink-0 font-mono text-xs text-muted">
-                    p.{result.best_page.document_page_number}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : query.trim() ? (
-          <p className="px-4 py-6 text-center text-sm text-muted">No pages matched.</p>
-        ) : (
-          <p className="px-4 py-6 text-center text-sm text-muted">
-            Type to search every page in the archive.
-          </p>
-        )}
-      </div>
-    </div>
+      {results.length > 0 ? (
+        <ul id="palette-results" role="listbox" className="max-h-80 overflow-y-auto py-1">
+          {results.map((result, index) => (
+            // An option, not a button. `aria-activedescendant` already says
+            // which row is current, and a focusable row alongside it means Tab
+            // walks the list the arrow keys are for.
+            <li
+              key={result.document_id}
+              id={`palette-result-${result.document_id}`}
+              role="option"
+              aria-selected={index === selected}
+              onMouseEnter={() => setSelected(index)}
+              onClick={() => openResult(result)}
+              className={`flex cursor-pointer items-baseline gap-3 px-4 py-2.5 text-left ${
+                index === selected ? "bg-accent/15" : ""
+              }`}
+            >
+              <span className="min-w-0 flex-1 truncate text-sm">
+                {result.title ?? result.original_filename ?? "(untitled)"}
+              </span>
+              {result.known_form_code && (
+                <span className="shrink-0 rounded-full border border-accent/50 px-1.5 text-xs text-accent">
+                  {result.known_form_code}
+                </span>
+              )}
+              <span className="shrink-0 font-mono text-xs text-muted">
+                p.{result.best_page.document_page_number}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : query.trim() ? (
+        <p className="px-4 py-6 text-center text-sm text-muted">No pages matched.</p>
+      ) : (
+        <p className="px-4 py-6 text-center text-sm text-muted">
+          Type to search every page in the archive.
+        </p>
+      )}
+    </Modal>
   );
 }

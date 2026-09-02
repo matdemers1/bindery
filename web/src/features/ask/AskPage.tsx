@@ -383,7 +383,12 @@ function SourcesPanel({
 }) {
   return (
     <aside
-      aria-hidden={!open}
+      // `width: 0`, `overflow: hidden` and `opacity: 0` hide the panel from
+      // the eye and from nothing else: its links and its close button stay in
+      // the tab order. `aria-hidden` over a focusable subtree is exactly the
+      // combination ARIA forbids — Tab off "3 sources" and focus vanishes into
+      // a zero-width strip that announces nothing. `inert` removes both.
+      inert={!open}
       className={`sticky top-8 hidden h-[calc(100vh-6rem)] shrink-0 overflow-hidden transition-[width,opacity] duration-200 lg:block ${
         open ? "w-96 opacity-100" : "w-0 opacity-0"
       }`}

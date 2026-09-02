@@ -168,6 +168,7 @@ function TwoFactor({ account, onChanged }: { account: Account; onChanged: () => 
             </button>
           </div>
           <input
+            aria-label="Code from your authenticator"
             inputMode="numeric"
             autoComplete="one-time-code"
             required
@@ -250,6 +251,7 @@ function ChangePassword() {
         <input
           type="password"
           required
+          aria-label="Your current password"
           autoComplete="current-password"
           placeholder="Current password"
           value={current}
@@ -260,6 +262,7 @@ function ChangePassword() {
           type="password"
           required
           minLength={12}
+          aria-label="Your new password"
           autoComplete="new-password"
           placeholder="New password — at least 12 characters"
           value={next}

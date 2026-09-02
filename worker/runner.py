@@ -341,7 +341,21 @@ async def _health_monitor(stopping: asyncio.Event) -> None:
             if notifier is None or notifier.webhook_url != (webhook or "").strip():
                 notifier = notify.Notifier(webhook)
 
-            for delivery in notifier.dispatch(panel.alerts):
+            # On a worker thread, not this loop. `Notifier.send` is
+            # `urllib.request.urlopen`, which is fully synchronous: every alert
+            # costs up to ten seconds of frozen event loop, several critical
+            # alerts are dispatched in one pass, and the `timeout` argument does
+            # not cover DNS — a webhook host that stops resolving can block in
+            # `getaddrinfo` for far longer than that. Frozen here means the OCR
+            # slots, the reclaimer, the inbox watcher and the log drain are all
+            # frozen with it, which is precisely the outcome notify.py's own
+            # rule forbids: "an ingest that stopped because a notification
+            # failed is worse".
+            #
+            # One call, not one per alert, so the notifier's cooldown state is
+            # still only ever touched from a single thread at a time.
+            deliveries = await asyncio.to_thread(notifier.dispatch, panel.alerts)
+            for delivery in deliveries:
                 if delivery.sent:
                     log.warning("notified: %s", delivery.code)
                 elif delivery.reason not in ("within cooldown", "no webhook configured"):

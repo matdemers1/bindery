@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import kdf
 from api.auth.passwords import decoy_hash, verify_password
 from api.auth.tokens import hash_refresh_secret, issue_access_token, new_refresh_secret
 from api.db.models import AppUser, RefreshToken
@@ -17,6 +18,23 @@ from api.db.models import AppUser, RefreshToken
 
 class AuthError(Exception):
     """Authentication failed. The message is safe to show to the caller."""
+
+
+async def _verify(password_hash: str, password: str) -> bool:
+    """`verify_password`, off the event loop and behind the bounded pool.
+
+    Argon2 at the default parameters is 64 MiB and tens of milliseconds of
+    blocking C. Called inline from an `async def` handler it stopped every other
+    request in the process, and two hundred simultaneous POSTs to a login form
+    that has faced the open internet since ADR-008 were twelve gigabytes of
+    transient allocation on a sixteen-gigabyte host. `api/auth/kdf.py` explains
+    why the pool is small and fixed rather than `asyncio.to_thread`'s thirty-two.
+
+    The hasher is looked up as a module global rather than captured, so a test
+    that patches `api.auth.service.verify_password` still sees both calls — the
+    decoy path included, which is the one that keeps the timings equal.
+    """
+    return await kdf.derive(verify_password, password_hash, password)
 
 
 async def authenticate(session: AsyncSession, email: str, password: str) -> AppUser:
@@ -29,11 +47,12 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> AppU
     # do the same Argon2 work. Argon2 is deliberately slow — that is its job —
     # which made the short-circuit a clean timing oracle: a wrong password took
     # tens of milliseconds and an unknown address took none. The message was
-    # already identical (REQ-135); the clock was not.
+    # already identical (REQ-135); the clock was not. Both branches go through
+    # `_verify`, so both are also off the event loop.
     if user is None:
-        verify_password(decoy_hash(), password)
+        await _verify(decoy_hash(), password)
         raise AuthError("invalid credentials")
-    if not verify_password(user.password_hash, password):
+    if not await _verify(user.password_hash, password):
         raise AuthError("invalid credentials")
     if not user.is_active:
         raise AuthError("account is disabled")
@@ -43,13 +62,19 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> AppU
 async def issue_session(
     session: AsyncSession, user: AppUser, *, replaces: RefreshToken | None = None
 ) -> tuple[str, str]:
-    """Mint an access token and a fresh refresh token. Returns (access, refresh)."""
-    access_token, _ = issue_access_token(user.id)
+    """Mint an access token and a fresh refresh token. Returns (access, refresh).
+
+    The refresh row is created *first*, because the access token carries its id
+    as `sid` — that is what makes the access token revocable rather than a
+    thirty-minute bearer credential nobody can withdraw.
+    """
     secret, secret_hash, expires_at = new_refresh_secret()
 
     refresh = RefreshToken(user_id=user.id, token_hash=secret_hash, expires_at=expires_at)
     session.add(refresh)
     await session.flush()
+
+    access_token, _ = issue_access_token(user.id, refresh.id)
 
     if replaces is not None:
         replaces.revoked_at = datetime.now(UTC)
@@ -95,6 +120,32 @@ async def revoke_session(session: AsyncSession, refresh_secret: str) -> None:
     token = result.scalar_one_or_none()
     if token is not None and token.revoked_at is None:
         token.revoked_at = datetime.now(UTC)
+
+
+async def revoke_session_by_id(session: AsyncSession, session_id: uuid.UUID) -> bool:
+    """Revoke one session by its row id — the `sid` an access token carries.
+
+    Lets sign-out end the session server-side even when the refresh cookie did
+    not arrive, which is the case that made "sign out" on a borrowed machine
+    mean nothing but "forget my copy of the cookie".
+    """
+    token = await session.get(RefreshToken, session_id)
+    if token is None or token.revoked_at is not None:
+        return False
+    token.revoked_at = datetime.now(UTC)
+    return True
+
+
+async def session_is_live(session: AsyncSession, session_id: uuid.UUID) -> bool:
+    """Whether the session an access token names still exists and is not revoked.
+
+    One indexed primary-key lookup on a request that already loads the user.
+    Without it, `logout`, `change_password`, `redeem_reset_code` and `suspend`
+    all revoke refresh tokens that the access token never consults, and the
+    access token outlives every one of them by up to its full lifetime.
+    """
+    token = await session.get(RefreshToken, session_id)
+    return token is not None and token.revoked_at is None
 
 
 async def revoke_all_for_user(session: AsyncSession, user_id: uuid.UUID) -> None:

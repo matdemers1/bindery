@@ -411,10 +411,21 @@ function Tab({
   badge: string | null;
 }) {
   const Icon = item.icon;
+  // ADR-011 makes a lit badge mean "there is work here", and that meaning was
+  // carried entirely by hue plus one punctuation mark: the accessible name of
+  // the Trust link read "Trust !" and of Review "3", with no unit. The pill
+  // keeps its exact appearance and stops being the only channel.
+  const meaning =
+    badge === null
+      ? null
+      : badge === "!"
+        ? "the pipeline needs attention"
+        : `${badge} waiting for review`;
   return (
     <NavLink
       to={item.to}
       end={item.to === "/"}
+      aria-label={meaning ? `${item.label} — ${meaning}` : undefined}
       title={collapsed ? item.label : item.hint}
       className={({ isActive }) =>
         `group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors ${
@@ -428,6 +439,7 @@ function Tab({
       {!collapsed && <span className="truncate">{item.label}</span>}
       {badge && (
         <span
+          aria-hidden
           className={`ml-auto rounded-full px-1.5 text-[11px] font-medium ${
             badge === "!"
               ? "bg-red-500/20 text-red-300"

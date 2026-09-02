@@ -197,6 +197,7 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
             className="flex min-w-0 flex-1 gap-2"
           >
             <input
+              aria-label="A folder the worker can see"
               value={path}
               onChange={(event) => setPath(event.target.value)}
               placeholder={`…or a folder the worker can see, e.g. ${inbox ?? "/data/inbox"}/2019`}
@@ -260,7 +261,16 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
         )}
       </section>
 
-      {notice && <p className="text-sm text-accent">{notice}</p>}
+      {/* Always in the DOM, `sr-only` while empty — a live region inserted at
+          the same moment as its text is not reliably announced, and one of the
+          things this says is that 309 files just changed destination. */}
+      <p
+        role="status"
+        aria-live="polite"
+        className={notice ? "text-sm text-accent" : "sr-only"}
+      >
+        {notice}
+      </p>
 
       {/* ---- 2 & 3. What it found, and go ---------------------------------- */}
       {active && <ActiveRun run={active} busy={busy} runningAll={runningAll} stopRef={stopRef} act={act} importEverything={importEverything} />}
@@ -443,8 +453,13 @@ function RunRow({ run, isActive, onOpen }: { run: ImportSession; isActive: boole
   return (
     <li className={`rounded-lg border bg-surface ${isActive ? "border-accent/60" : "border-edge"}`}>
       <div className="flex flex-wrap items-center gap-3 px-3 py-2">
-        <button type="button" onClick={() => setOpen((v) => !v)} aria-label={open ? "Hide details" : "Show details"}>
-          {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={open ? "Hide details" : "Show details"}
+        >
+          {open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
         </button>
         <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
           <span className="block truncate font-mono text-sm">{label}</span>
@@ -477,6 +492,10 @@ function RunDetail({ run, defaultOpen = false }: { run: ImportSession; defaultOp
           <button
             key={state}
             type="button"
+            // Which filter is applied was a background fill and nothing else.
+            // `aria-pressed` rather than the tab pattern because these narrow
+            // a list in place; they do not swap a panel.
+            aria-pressed={tab === state}
             onClick={() => setTab(state)}
             className={`rounded-md px-2 py-1 ${tab === state ? "bg-ink text-neutral-100" : "text-muted hover:text-neutral-100"}`}
           >
@@ -485,6 +504,7 @@ function RunDetail({ run, defaultOpen = false }: { run: ImportSession; defaultOp
         ))}
         <button
           type="button"
+          aria-pressed={tab === "log"}
           onClick={() => setTab("log")}
           className={`rounded-md px-2 py-1 ${tab === "log" ? "bg-ink text-neutral-100" : "text-muted hover:text-neutral-100"}`}
         >

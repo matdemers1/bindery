@@ -21,6 +21,18 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends postgresql-client-16 \
  && apt-get purge -y curl gnupg && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
+# The account the shipped image runs as. Created in `base` so both stages have
+# it and only `runtime` switches to it — `dev` stays root, because the test
+# container bind-mounts the working tree from whatever uid the developer's
+# checkout happens to use.
+#
+# A fixed uid, not one the distro picks: it has to match the ownership of
+# /media/Main-Storage/bindery/data on the host, and a uid that moves between
+# base-image rebuilds is a uid that silently stops matching. 10001 is above
+# Debian's system range and above ZimaOS's own accounts.
+RUN groupadd --gid 10001 bindery \
+ && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/bindery \
+      --shell /usr/sbin/nologin bindery
 # requirements.lock is copied alongside pyproject.toml for two reasons. It pins
 # the whole transitive closure, so this image and the one CI tested are the same
 # software — and it puts the lock's content hash into this layer's cache key, so
@@ -39,6 +51,23 @@ FROM base AS runtime
 COPY api/ ./api/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
+# Unprivileged from here on. Invariant 1 says originals are never modified, and
+# in this deployment that is enforced by file mode: every blob is written 0444.
+# A process running as uid 0 ignores the write bit entirely, so as root that
+# invariant was a convention rather than a guarantee — and the whole 11 TB
+# archive is bind-mounted read-write at /data, under a login page that has faced
+# the open internet since Cloudflare Access was removed (invariant 9). Now a
+# stray write, a traversal in an upload filename or a compromise of the api
+# lands as a permission error against a 0444 file instead of overwriting the
+# original.
+#
+# It listens on 8000, above 1024, so no capability is needed. Nothing is written
+# under /app (Python simply skips the __pycache__ it cannot create); everything
+# the process writes is /data or /tmp.
+#
+# **The host has to agree.** /data must be owned by 10001, or the api comes up
+# healthy and fails on the first write. See docs/zimaos-deploy.md, step 3.
+USER bindery
 # `python -m` puts /app first on sys.path. Do not switch to the bare `uvicorn`
 # console script: it would resolve `api` from site-packages instead.
 CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

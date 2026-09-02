@@ -17,6 +17,16 @@
   --color-field: #606c7e;
 }
 
+/* The parts of a control the browser paints itself read this and nothing else:
+   the calendar button and picker of an `input type=date`, an unstyled
+   checkbox, a `<select>`'s option popup, scrollbars, the autofill highlight.
+   Without it they are drawn light on a near-black page — which is how the
+   "I have written the passphrase down" checkbox, the gate on a vault whose
+   passphrase cannot be recovered, ended up a pale grey box on #141821. */
+:root {
+  color-scheme: dark;
+}
+
 html,
 body,
 #root {

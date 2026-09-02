@@ -46,6 +46,18 @@ class DocumentTag(Base):
     Links are **superseded, never deleted** — the same answer this project gives
     everywhere else. Undoing a classification takes back the tags it applied
     without erasing the fact that it applied them.
+
+    **That holds exactly once, and the primary key is why** (CR-075). `(document_id,
+    tag_id)` admits one row per pair, so re-applying a tag cannot append: every
+    write path — `api/editing.py`, `api/entities.py`, `api/undo.py`,
+    `api/bulk.py` — clears the tombstone in place instead, and the sequence
+    "AI applied it, a person removed it, a person put it back" collapses into a
+    single row saying a person applied it. The events in `audit_event` still
+    hold the history; this table, which is what every screen reads, does not.
+    Fixing it means a surrogate key plus a partial unique index on
+    `(document_id, tag_id) WHERE removed_at IS NULL` — and, in the same change,
+    teaching those four modules to address the *live* row rather than every row
+    matching the pair. Half of that change is worse than none.
     """
 
     __tablename__ = "document_tag"

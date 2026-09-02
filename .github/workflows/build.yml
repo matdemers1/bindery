@@ -22,20 +22,33 @@ on:
 # corpus, drive a browser — to tell you about a lint error. The gates are
 # ordered cheapest-first so the common failure is also the fastest one.
 #
-# `actions/checkout@v5` and `setup-python@v6` run on Node 24. The v4/v5 pair
+# `actions/checkout` v5 and `setup-python` v6 run on Node 24. The v4/v5 pair
 # targeted Node 20, which GitHub now force-upgrades and warns about on every
 # run — a warning on every green build is one nobody reads.
+#
+# Every `uses:` names a full commit SHA, with the version it was in a trailing
+# comment. `v5` and `v6` are branch-like refs the action's owner can repoint at
+# any commit, and the `images` job below holds `packages: write` and hands
+# `docker/build-push-action` a live ghcr token — so a rewritten tag is
+# attacker-controlled code inside a runner that can publish the images this
+# household's archive pulls, with nobody reviewing a line of Bindery's source.
+# That is not hypothetical; it is what happened to tj-actions. First-party
+# `actions/` and `docker/` are lower risk, not no risk.
+#
+# Do not "simplify" one back to a tag. `.github/dependabot.yml` bumps these
+# weekly and rewrites the comment with the SHA, so the pins stay current on
+# their own; a test asserts every `uses:` is a 40-character SHA.
 
 jobs:
   lint:
     name: lint (ruff, eslint, tsc)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "22"
           cache: npm
@@ -108,14 +121,14 @@ jobs:
       JWT_SECRET: ci-only-not-a-real-secret
       COOKIE_SECURE: "true"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # `test_docs.py` asks git when a screen last changed, to catch a
           # documentation screenshot that is quietly out of date. A shallow
           # clone has no history to ask, and the check would pass by knowing
           # nothing — which is exactly the failure it exists to prevent.
           fetch-depth: 0
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
       - name: Install
@@ -133,7 +146,7 @@ jobs:
     needs: unit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
       - name: Run the slow suite in the worker image
@@ -167,7 +180,7 @@ jobs:
     needs: integration
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Write a coherent .env
         # Not `cp .env.example .env`. Compose interpolates `${POSTGRES_PASSWORD}`
         # from the *shell* environment, so Postgres came up with `ci` while the
@@ -195,6 +208,13 @@ jobs:
           OCR_CLEAN=true
           ENV
           mkdir -p /tmp/bindery-ci-data/inbox/household
+          # The api and worker runtime images run as uid 10001 (see
+          # infra/Dockerfile.api). The runner creates this tree as itself, so
+          # without this the containers come up healthy and fail on the first
+          # write — which is exactly the failure the deploy runbook's step 3
+          # tells the operator to prevent on the real host. Same command, so
+          # this gate exercises it.
+          sudo chown -R 10001:10001 /tmp/bindery-ci-data
       - name: Stand up the stack
         run: |
           docker compose --env-file .env -f infra/docker-compose.yml up -d --build
@@ -320,7 +340,7 @@ jobs:
         if: failure()
         run: |
           docker compose --env-file .env -f infra/docker-compose.yml logs --tail 120 api worker web
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-report
@@ -341,22 +361,22 @@ jobs:
       matrix:
         service: [api, worker, web]
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository }}/${{ matrix.service }}
           tags: |
             type=raw,value=main,enable={{is_default_branch}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=long
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: infra/Dockerfile.${{ matrix.service }}

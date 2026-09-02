@@ -5,17 +5,27 @@ here: no destructive database path may exist in the application or the worker
 outside the one the vault was granted. Migrations are exempt (they are applied
 explicitly by a human) and so are the tests themselves.
 
-Two things are guarded, because the requirement has two halves. *What* deletes
-is the pattern search below, exempting one file. *Who can reach it* is
-`SEALING_CALLERS` — the half that was missing, and the half that moved when
-Phase 18 put the vault seal on a fifteen-second timer without touching the
-exemption list at all.
+Four things are guarded, because the requirement has more halves than it looks.
+
+- *What deletes rows* is the pattern search below, exempting one file.
+- *Who can reach it* is `SEALING_CALLERS` — the half that was missing, and the
+  half that moved when Phase 18 put the vault seal on a fifteen-second timer
+  without touching the exemption list at all.
+- *What deletes files* is `FILESYSTEM_DELETION` (CR-125). `DELETE FROM` is not
+  how an original is destroyed on this system; `shutil.rmtree` and
+  `path.unlink()` are, and seven such sites existed outside the vault exemption
+  while this guard could see none of them.
+- *What deletes without being asked* is `ORM_CASCADES` — an eager
+  `cascade="all, delete-orphan"` or `ondelete="CASCADE"`, which the module
+  docstring has always named as a threat and which no pattern here could match.
 
 If this fails, the fix is to revoke, tombstone, or supersede — not to loosen the
 pattern list.
 """
 
+import ast
 import re
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -40,10 +50,57 @@ FORBIDDEN = (
     re.compile(r"\bTRUNCATE\b", re.IGNORECASE),
 )
 
-# Scope, stated so the green is read for what it is: this guard is about
-# *database* deletion. Filesystem deletion — `unlink`, `rmtree` — is not
-# searched here, and the vault's own unlink ordering is asserted separately by
-# `test_the_vault_verifies_before_it_destroys`.
+# The other two spellings of the same requirement (CR-125).
+#
+# The docstring above names the threats REQ-090 exists to stop — "a scheduled
+# prune, a cleanup job, an eager cascade" — and until this section existed the
+# patterns above could see none of them. `DELETE FROM` is not how an original
+# gets destroyed on this system: `shutil.rmtree` is, and `path.unlink()` is, and
+# a `cascade="all, delete-orphan"` added to a relationship in passing is the
+# quietest of the three, because it deletes rows nobody wrote a delete for.
+#
+# Seven filesystem-deletion sites already existed outside the vault exemption
+# when this was written. Each was argued safe in a docstring; none was asserted
+# safe, and nothing stopped the eighth. They are named below by
+# `path::function`, not by file, so a *new* deleting function in an
+# already-listed module is still caught — the shape `test_boundary_guard.py`
+# settled on for the same reason.
+_FS_FUNCTIONS = {"unlink", "rmtree", "remove", "rmdir", "removedirs", "rmtree_errors"}
+_CASCADE_KEYWORDS = {"cascade", "ondelete"}
+
+FILESYSTEM_DELETION = {
+    "api/artifacts.py::purge_derived": (
+        "removes `derived/<sha256>/` when a document is sealed. Safe because "
+        "nothing under `derived/` is an original — every byte is reproducible "
+        "from the blob by re-running the pipeline — and leaving plaintext page "
+        "renders beside an encrypted original would not be hiding it"
+    ),
+    "api/storage/blobs.py::store_stream": (
+        "unlinks its own temp file: the upload it just wrote, when the content "
+        "address already exists or when the write failed. It never touches a "
+        "stored blob"
+    ),
+    "api/export/mirror.py::_link_or_copy": (
+        "replaces one mirror entry, which is a hardlink to an immutable blob"
+    ),
+    "api/export/mirror.py::_prune": (
+        "the mirror is a derived index regenerated from the database on every "
+        "rebuild; every entry is a hardlink to a 0444 blob that is not touched. "
+        "REQ-090 is about originals and records, not about tidying an index — "
+        "and `test_the_mirror_prune_stays_inside_the_tree_it_was_given` below "
+        "asserts it cannot reach outside the root it was handed"
+    ),
+    "api/export/backup.py::encrypt_for_offsite": (
+        "removes the intermediate tarball it created a moment earlier, after "
+        "the ciphertext beside it has been written"
+    ),
+}
+
+# Nothing in the tree declares an ORM cascade today, and that is the point: the
+# first one to appear should be argued for rather than noticed later. An eager
+# cascade is the deletion nobody wrote — a `document` row going away taking its
+# pages, its tags, its classifications and its audit history with it.
+ORM_CASCADES: dict[str, str] = {}
 
 
 # The single documented exception (ADR-012, T-16.5). Moving a document into the
@@ -195,6 +252,224 @@ def test_the_vault_is_reached_only_from_declared_callers() -> None:
 
     unused = set(SEALING_CALLERS) - set(found)
     assert not unused, f"declared as a caller but no longer calls anything: {sorted(unused)}"
+
+
+# ---------------------------------------------------------------------------
+# Filesystem deletion and ORM cascades (CR-125)
+# ---------------------------------------------------------------------------
+
+
+def _enclosing_functions(tree: ast.AST) -> dict[ast.AST, ast.AST | None]:
+    parents: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+
+    resolved: dict[ast.AST, ast.AST | None] = {}
+    for node in ast.walk(tree):
+        walker: ast.AST | None = node
+        while walker is not None and not isinstance(
+            walker, ast.FunctionDef | ast.AsyncFunctionDef
+        ):
+            walker = parents.get(walker)
+        resolved[node] = walker
+    return resolved
+
+
+def _destructive_sites(source: str, where: str) -> tuple[dict[str, str], dict[str, str]]:
+    """`(filesystem deletions, ORM cascades)` in one module, keyed `path::function`."""
+    tree = ast.parse(source)
+    enclosing = _enclosing_functions(tree)
+
+    def key(node: ast.AST) -> str:
+        function = enclosing.get(node)
+        return f"{where}::{function.name if function else '<module>'}"
+
+    filesystem: dict[str, str] = {}
+    cascades: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else getattr(node.func, "id", None)
+            )
+            if name in _FS_FUNCTIONS:
+                filesystem.setdefault(key(node), f"calls {name}()")
+            for keyword in node.keywords:
+                if keyword.arg in _CASCADE_KEYWORDS:
+                    value = ast.unparse(keyword.value)
+                    # `ondelete="RESTRICT"` / `"SET NULL"` refuse or blank a
+                    # reference; they do not remove a record.
+                    if "DELETE" in value.upper() or "delete" in value:
+                        cascades.setdefault(key(node), f"{keyword.arg}={value}")
+    return filesystem, cascades
+
+
+def _scan_destructive() -> tuple[dict[str, str], dict[str, str], int]:
+    filesystem: dict[str, str] = {}
+    cascades: dict[str, str] = {}
+    read = 0
+    for package in SEARCHED:
+        for path in sorted((ROOT / package).rglob("*.py")):
+            relative = path.relative_to(ROOT).as_posix()
+            if relative == VAULT_EXCEPTION:
+                continue
+            read += 1
+            found_fs, found_cascade = _destructive_sites(path.read_text(), relative)
+            filesystem.update(found_fs)
+            cascades.update(found_cascade)
+    return filesystem, cascades, read
+
+
+def test_no_undeclared_path_deletes_a_file() -> None:
+    """REQ-090's other half: the filesystem.
+
+    `purge_derived` recursively removes a directory. `mirror._prune` walks a
+    caller-supplied root and unlinks everything not in a `keep` set. Both are
+    correct today, and both are correct by *prose* — the guard the project
+    relies on for this exact promise could not see either of them, and could not
+    see the eighth one either.
+    """
+    filesystem, _, read = _scan_destructive()
+
+    assert read > 50, (
+        f"only {read} modules were read — the package scan has stopped matching "
+        "the tree, and this guard is inspecting almost nothing"
+    )
+
+    undeclared = {
+        site: why for site, why in filesystem.items() if site not in FILESYSTEM_DELETION
+    }
+    assert not undeclared, (
+        "these delete files and are not declared (REQ-090):\n  "
+        + "\n  ".join(f"{site}: {why}" for site, why in sorted(undeclared.items()))
+        + "\nRevoke, tombstone, or supersede. If the bytes genuinely are derived "
+        "and reproducible, add the site to FILESYSTEM_DELETION with the argument "
+        "for why it is not an original — and expect to be asked."
+    )
+
+
+def test_the_filesystem_exemptions_do_not_outlive_their_call_sites() -> None:
+    """It may only shrink. A stale entry is a hole left open for the next author,
+    exactly as in `test_the_vault_exception_stays_one_file`."""
+    filesystem, _, _ = _scan_destructive()
+    stale = sorted(set(FILESYSTEM_DELETION) - set(filesystem))
+    assert not stale, (
+        "these no longer delete anything; remove them from FILESYSTEM_DELETION "
+        "so the next site that does is caught:\n  " + "\n  ".join(stale)
+    )
+    # Every exemption is an argument, not a name. An empty reason is a name.
+    thin = sorted(site for site, why in FILESYSTEM_DELETION.items() if len(why) < 40)
+    assert not thin, f"these exemptions carry no argument: {thin}"
+
+
+def test_no_relationship_cascades_a_delete() -> None:
+    """The quietest of the three threats the module docstring names.
+
+    `cascade="all, delete-orphan"` on a relationship, or `ondelete="CASCADE"` on
+    a foreign key, deletes rows nobody wrote a delete for — and neither is
+    visible to a pattern list looking for `DELETE FROM`. Segments are superseded
+    and tags are removed by timestamp precisely so that nothing has to cascade.
+    """
+    _, cascades, _ = _scan_destructive()
+    undeclared = {site: why for site, why in cascades.items() if site not in ORM_CASCADES}
+    assert not undeclared, (
+        "these declare a deleting cascade, so rows will be removed without any "
+        "code asking for it (REQ-090):\n  "
+        + "\n  ".join(f"{site}: {why}" for site, why in sorted(undeclared.items()))
+        + "\nUse `removed_at` / `superseded_at` / `released_at` instead — the "
+        "pattern the rest of the schema uses."
+    )
+
+
+def test_the_guard_catches_the_two_spellings_it_was_blind_to() -> None:
+    """The guard, tested on itself. A detection nobody has seen fire is a
+    detection nobody should trust — Phase 7 learned this the expensive way."""
+    filesystem, cascades = _destructive_sites(
+        textwrap.dedent(
+            """
+            import shutil
+            import sqlalchemy as sa
+            from sqlalchemy.orm import relationship
+
+            def nightly_cleanup(root):
+                shutil.rmtree(root / 'old')
+
+            def tidy(path):
+                path.unlink()
+
+            class Thing:
+                pages = relationship('Page', cascade='all, delete-orphan')
+                owner = sa.Column(sa.ForeignKey('x.id', ondelete='CASCADE'))
+            """
+        ),
+        "api/pretend.py",
+    )
+    assert filesystem == {
+        "api/pretend.py::nightly_cleanup": "calls rmtree()",
+        "api/pretend.py::tidy": "calls unlink()",
+    }, filesystem
+    assert set(cascades) == {"api/pretend.py::<module>"}, cascades
+
+    # And it does not fire on the spellings that remove nothing.
+    harmless, no_cascade = _destructive_sites(
+        textwrap.dedent(
+            """
+            import sqlalchemy as sa
+
+            class Thing:
+                owner = sa.Column(sa.ForeignKey('x.id', ondelete='SET NULL'))
+                other = sa.Column(sa.ForeignKey('y.id', ondelete='RESTRICT'))
+
+            def read(path):
+                return path.read_text()
+            """
+        ),
+        "api/pretend.py",
+    )
+    assert harmless == {} and no_cascade == {}
+
+
+def test_the_mirror_prune_stays_inside_the_tree_it_was_given() -> None:
+    """The one exempted function that walks a caller-supplied directory.
+
+    `_prune(root, keep)` unlinks everything under `root` that is not in `keep`.
+    Pointed at the wrong directory — or handed a `keep` set built from
+    differently-normalised paths — it is a recursive delete over user data. The
+    exemption above argues it is safe; this asserts the one property that
+    argument rests on, which is that it cannot reach outside `root`.
+    """
+    import tempfile
+
+    from api.export import mirror
+
+    with tempfile.TemporaryDirectory() as temporary:
+        base = Path(temporary)
+        root = base / "mirror"
+        (root / "2024").mkdir(parents=True)
+        kept = root / "2024" / "keep-me.pdf"
+        doomed = root / "2024" / "orphan.pdf"
+        kept.write_text("kept")
+        doomed.write_text("orphan")
+
+        # A real original, sitting beside the mirror rather than inside it.
+        outside = base / "blobs" / "ab"
+        outside.mkdir(parents=True)
+        original = outside / "an-original.pdf"
+        original.write_text("irreplaceable")
+
+        removed = mirror._prune(root, {kept})
+
+        assert kept.is_file(), "_prune removed an entry it was told to keep"
+        assert not doomed.exists(), "_prune kept an entry no document maps to"
+        assert removed >= 1
+        assert original.is_file(), (
+            "_prune deleted a file outside the root it was given — the mirror is "
+            "exempt from REQ-090 only because everything it touches is a derived "
+            "hardlink inside its own tree"
+        )
+        assert original.read_text() == "irreplaceable"
 
 
 def test_the_sweep_seals_only_what_a_person_asked_for() -> None:

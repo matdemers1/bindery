@@ -242,6 +242,7 @@ function AliasForm({ correspondentId, onAdded }: { correspondentId: string; onAd
       }}
     >
       <input
+        aria-label="Another spelling of this name"
         value={alias}
         onChange={(event) => setAlias(event.target.value)}
         placeholder="Add another spelling…"
@@ -289,6 +290,7 @@ function Assets({ libraryId }: { libraryId?: string }) {
           ))}
         </select>
         <input
+          aria-label="What this thing is called"
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="2020 Honda Accord"

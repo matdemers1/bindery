@@ -95,7 +95,11 @@ export default function PhotosPage() {
         when and how long.
       </PageHeader>
 
-      <div className="flex gap-1 border-b border-edge">
+      <div
+        role="tablist"
+        aria-label="Photos or videos"
+        className="flex gap-1 border-b border-edge"
+      >
         {(["image", "video"] as const).map((which) => {
           const Icon = which === "image" ? Images : Film;
           const count = which === "image" ? imageCount : videoCount;
@@ -103,6 +107,10 @@ export default function PhotosPage() {
             <button
               key={which}
               type="button"
+              role="tab"
+              id={`photos-tab-${which}`}
+              aria-selected={kind === which}
+              aria-controls="photos-panel"
               onClick={() => {
                 setChosen(which);
                 setSelected(null);
@@ -142,6 +150,7 @@ export default function PhotosPage() {
         {kind === "image" && (
           <button
             type="button"
+            aria-pressed={undescribed}
             onClick={() => setUndescribed((value) => !value)}
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm ${
               undescribed
@@ -169,64 +178,74 @@ export default function PhotosPage() {
         </span>
       </div>
 
-      {outcome && (
-        <p className="rounded-lg border border-edge bg-surface px-3 py-2 text-sm text-muted">
-          {outcome}
-        </p>
-      )}
+      {/* Always in the DOM, `sr-only` while empty — a live region inserted at
+          the same moment as its text is not reliably announced. */}
+      <p
+        role="status"
+        aria-live="polite"
+        className={
+          outcome
+            ? "rounded-lg border border-edge bg-surface px-3 py-2 text-sm text-muted"
+            : "sr-only"
+        }
+      >
+        {outcome}
+      </p>
 
-      {photos.length === 0 ? (
-        <p className="rounded-xl border border-edge bg-surface p-8 text-center text-sm text-muted">
-          {kind === "video"
-            ? "No videos yet. Drop one in the inbox or import a folder — they are stored and described by their own metadata, never OCR'd."
-            : undescribed
-              ? "Every image had something readable on it."
-              : "No images match that."}
-        </p>
-      ) : (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {photos.map((photo) => (
-            <li key={photo.document_id}>
-              <button
-                type="button"
-                onClick={() => setSelected(photo)}
-                className="group w-full overflow-hidden rounded-xl border border-edge bg-surface text-left transition-colors hover:border-accent/60"
-              >
-                {photo.kind === "video" ? (
-                  <VideoCard photo={photo} />
-                ) : (
-                  <img
-                    src={fileUrl.thumb(photo.source_file_id, photo.page)}
-                    alt={photo.title ?? photo.original_filename ?? "Untitled image"}
-                    loading="lazy"
-                    className="aspect-square w-full bg-ink object-contain"
-                  />
-                )}
-                <span className="block px-2.5 py-2">
-                  <span className="block truncate text-xs font-medium">
-                    {photo.title ?? photo.original_filename ?? "Untitled"}
+      <div id="photos-panel" role="tabpanel" aria-labelledby={`photos-tab-${kind}`}>
+        {photos.length === 0 ? (
+          <p className="rounded-xl border border-edge bg-surface p-8 text-center text-sm text-muted">
+            {kind === "video"
+              ? "No videos yet. Drop one in the inbox or import a folder — they are stored and described by their own metadata, never OCR'd."
+              : undescribed
+                ? "Every image had something readable on it."
+                : "No images match that."}
+          </p>
+        ) : (
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {photos.map((photo) => (
+              <li key={photo.document_id}>
+                <button
+                  type="button"
+                  onClick={() => setSelected(photo)}
+                  className="group w-full overflow-hidden rounded-xl border border-edge bg-surface text-left transition-colors hover:border-accent/60"
+                >
+                  {photo.kind === "video" ? (
+                    <VideoCard photo={photo} />
+                  ) : (
+                    <img
+                      src={fileUrl.thumb(photo.source_file_id, photo.page)}
+                      alt={photo.title ?? photo.original_filename ?? "Untitled image"}
+                      loading="lazy"
+                      className="aspect-square w-full bg-ink object-contain"
+                    />
+                  )}
+                  <span className="block px-2.5 py-2">
+                    <span className="block truncate text-xs font-medium">
+                      {photo.title ?? photo.original_filename ?? "Untitled"}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-muted">
+                      {photo.kind === "video" ? (
+                        photo.media?.captured_at?.slice(0, 10) ??
+                        photo.document_date ??
+                        photo.received_at.slice(0, 10)
+                      ) : photo.described ? (
+                        photo.document_date ?? photo.received_at.slice(0, 10)
+                      ) : (
+                        <span className="text-amber-400">
+                          {photo.text_chars === 0
+                            ? "nothing readable on this"
+                            : `only ${photo.text_chars} characters read`}
+                        </span>
+                      )}
+                    </span>
                   </span>
-                  <span className="mt-0.5 block text-[11px] text-muted">
-                    {photo.kind === "video" ? (
-                      photo.media?.captured_at?.slice(0, 10) ??
-                      photo.document_date ??
-                      photo.received_at.slice(0, 10)
-                    ) : photo.described ? (
-                      photo.document_date ?? photo.received_at.slice(0, 10)
-                    ) : (
-                      <span className="text-amber-400">
-                        {photo.text_chars === 0
-                          ? "nothing readable on this"
-                          : `only ${photo.text_chars} characters read`}
-                      </span>
-                    )}
-                  </span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {selected && (
         <Lightbox

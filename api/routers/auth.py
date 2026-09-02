@@ -4,30 +4,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import accounts
 from api.audit import record
 from api.auth import service, throttle
-from api.auth.cookies import REFRESH_COOKIE, clear_auth_cookies, set_auth_cookies
+from api.auth.client import client_ip
+from api.auth.cookies import ACCESS_COOKIE, REFRESH_COOKIE, clear_auth_cookies, set_auth_cookies
 from api.auth.dependencies import current_user
+from api.auth.tokens import TokenError, decode_access_claims
 from api.db.enums import ActorType
 from api.db.models import AppUser
 from api.db.session import get_session
 from api.schemas import LoginRequest, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-def _client_ip(request: Request) -> str | None:
-    """The address the request came from, as far as we can honestly tell.
-
-    Behind the Cloudflare tunnel every request arrives from the tunnel
-    container, so `request.client` is useless. `CF-Connecting-IP` is set by
-    Cloudflare and cannot be spoofed by the client *because* the tunnel is the
-    only route in — there is no published port to reach the origin directly
-    (REQ-104). If that ever stops being true, this header stops being trustworthy
-    and the throttle stops being per-attacker.
-    """
-    forwarded = request.headers.get("cf-connecting-ip") or request.headers.get(
-        "x-forwarded-for", ""
-    ).split(",")[0].strip()
-    return forwarded or (request.client.host if request.client else None)
 
 
 @router.post("/login", response_model=UserOut)
@@ -37,7 +23,7 @@ async def login(
     response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> AppUser:
-    ip = _client_ip(request)
+    ip = client_ip(request)
     try:
         await throttle.check(session, payload.email, ip)
     except throttle.Throttled as limited:
@@ -129,9 +115,34 @@ async def logout(
     response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    """End the session server-side, not merely on this browser.
+
+    Deleting the cookies used to be all this did when the refresh cookie was
+    absent — a same-site navigation, a client that dropped it, a curl session.
+    "Sign out" then meant "forget my copy", and anyone who already had the
+    access token carried on for the rest of its lifetime. The access token names
+    its session (`sid`), so it can be revoked on its own.
+    """
     secret = request.cookies.get(REFRESH_COOKIE)
+    revoked = False
     if secret:
         await service.revoke_session(session, secret)
+        revoked = True
+
+    if not revoked:
+        access = request.cookies.get(ACCESS_COOKIE)
+        if access:
+            try:
+                claims = decode_access_claims(access)
+            except TokenError:
+                # Nothing to revoke, and nothing to say about it: a sign-out
+                # never reports on the token it was handed.
+                pass
+            else:
+                await service.revoke_session_by_id(session, claims.session_id)
+                revoked = True
+
+    if revoked:
         await session.commit()
     clear_auth_cookies(response)
 

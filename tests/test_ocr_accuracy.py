@@ -116,15 +116,35 @@ async def test_deskew_and_clean_help_a_bad_scan(workspace) -> None:
     assert result.accuracy >= 0.70, "preprocessing no longer rescues a bad scan"
 
 
+@pytest.mark.xfail(
+    condition=not real_fixtures(),
+    reason=(
+        "R-01 HAS NEVER BEEN MEASURED. tests/corpus/ holds no real fixtures, so "
+        "this gate is reported as a known failure rather than as a pass. It was "
+        "a `pytest.skip` for three phases, and a skip in a run of a thousand "
+        "passes is invisible — which is how Phase 3 shipped with REQ-058 "
+        "unscored. Add tests/corpus/<name>/source.* plus a hand-corrected "
+        "expected.txt (the real military and house bundles) and this becomes a "
+        "real measurement; there is nothing to fabricate here."
+    ),
+    strict=True,
+    run=True,
+)
 async def test_golden_corpus_word_accuracy(workspace) -> None:
-    """The report. **This is the R-01 gate.**"""
+    """The report. **This is the R-01 gate.**
+
+    The gate no longer passes while measuring nothing. With no corpus it fails
+    on the assertion below and is reported as `xfailed`; the moment real
+    fixtures land the marker's condition is false, the gate runs for real, and
+    a corpus that scores under 90% fails the build outright.
+    """
     fixtures = real_fixtures()
-    if not fixtures:
-        pytest.skip(
-            "No real corpus fixtures found in tests/corpus/. The R-01 gate is NOT "
-            "cleared by a synthetic run — add tests/corpus/<name>/source.* plus "
-            "expected.txt for the real military and house bundles and re-run."
-        )
+    assert fixtures, (
+        "the R-01 gate has no corpus: tests/corpus/ contains no directory with "
+        "source.* plus expected.txt, so this test measures nothing. A synthetic "
+        "run does not clear R-01 — REQ-058 and REQ-035 stay unscored until real "
+        "fixtures are staged (scripts/stage-corpus-fixture.py)."
+    )
 
     scores: list[Score] = []
     for directory in fixtures:

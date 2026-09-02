@@ -23,9 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import accounts, events, quota
 from api.audit import record
 from api.auth import service, throttle, totp
+from api.auth.client import client_ip
 from api.auth.cookies import set_auth_cookies
 from api.auth.dependencies import current_user
-from api.auth.passwords import WeakPassword, verify_password
+from api.auth.passwords import WeakPassword, verify_password_async
 from api.db.enums import ActorType
 from api.db.models import AppUser, Invitation
 from api.db.session import get_session
@@ -57,13 +58,6 @@ async def require_admin(user: AppUser = Depends(current_user)) -> AppUser:
         # confirms the route exists and that someone somewhere is an admin.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     return user
-
-
-def _client_ip(request: Request) -> str | None:
-    header = request.headers.get("cf-connecting-ip") or request.headers.get(
-        "x-forwarded-for", ""
-    ).split(",")[0].strip()
-    return header or (request.client.host if request.client else None)
 
 
 # --------------------------------------------------------------------------
@@ -98,7 +92,7 @@ async def change_my_password(
     user: AppUser = Depends(current_user),
 ) -> Response:
     """Change your own password, ending every other session (REQ-137)."""
-    if not verify_password(user.password_hash, body.current_password):
+    if not await verify_password_async(user.password_hash, body.current_password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "current password is wrong")
     try:
         await accounts.change_password(session, user=user, new_password=body.new_password)
@@ -230,7 +224,7 @@ async def accept_invitation(
     session: AsyncSession = Depends(get_session),
 ) -> AppUser:
     """Create the account and sign it in."""
-    ip = _client_ip(request)
+    ip = client_ip(request)
     try:
         await throttle.check(session, f"invite:{token[:12]}", ip)
     except throttle.Throttled as limited:
@@ -269,7 +263,7 @@ async def redeem_reset(
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     """Spend an administrator-issued code and set a new password (REQ-136)."""
-    ip = _client_ip(request)
+    ip = client_ip(request)
     try:
         await throttle.check(session, body.email, ip)
     except throttle.Throttled as limited:

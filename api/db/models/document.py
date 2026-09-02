@@ -114,6 +114,10 @@ class Document(Base):
     )
 
     created_at: Mapped[datetime] = created_at()
+    # Maintained by the `document_set_updated_at` trigger (migration 0029), not
+    # by `onupdate=`: half the writes that matter here are bulk
+    # `sa.update(Document)` statements that never load an object, and a
+    # client-side default would leave exactly those silently stale.
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )

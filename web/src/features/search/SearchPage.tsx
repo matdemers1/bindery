@@ -104,6 +104,24 @@ export default function SearchPage({
   const libraryName = (id: string) =>
     libraries.find((library) => library.id === id)?.name ?? "Unknown library";
 
+  // Submitting the form only rewrites the URL, and the tree quietly swaps a
+  // skeleton for a list: nothing said whether the query had run, failed or
+  // found nothing, and focus stays in the box (which is right — refining is
+  // the next thing you do). One region, mounted from the first paint rather
+  // than inserted with its own text, because a live region that appears at the
+  // same moment as its content is not reliably read.
+  const announcement = !query.trim()
+    ? ""
+    : error
+      ? "That search did not work."
+      : loading
+        ? "Searching every page in the archive…"
+        : response
+          ? response.total === 0
+            ? `Nothing matched ${response.query}.`
+            : `${response.total} ${response.total === 1 ? "file" : "files"} found`
+          : "";
+
   return (
     <div className="mx-auto max-w-5xl">
       {/* Visually hidden: the search box is self-evidently a search box, and a
@@ -123,7 +141,14 @@ export default function SearchPage({
             aria-hidden
             className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"
           />
+          {/* A placeholder is a hint, not a name: it is gone the moment a
+              character is typed, and the <h1> above names the page rather than
+              the control. */}
+          <label htmlFor="search-query" className="sr-only">
+            Search every page in the archive
+          </label>
           <input
+            id="search-query"
             autoFocus
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -132,6 +157,10 @@ export default function SearchPage({
           />
         </div>
       </form>
+
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
 
       {!query.trim() ? (
         <EmptyPrompt />
@@ -184,7 +213,9 @@ function Kbd({ children }: { children: React.ReactNode }) {
 
 function Skeleton() {
   return (
-    <ul className="mt-8 space-y-3">
+    // Three grey rectangles say nothing a screen reader can use, and the
+    // status region above has already said "searching".
+    <ul aria-hidden className="mt-8 space-y-3">
       {[0, 1, 2].map((n) => (
         <li key={n} className="h-24 animate-pulse rounded-lg border border-edge bg-surface" />
       ))}
@@ -232,28 +263,48 @@ function Results({
     );
   }
 
+  const facets = (
+    <>
+      <FacetGroup
+        title="Library"
+        facets={response.facets.library ?? []}
+        selected={libraryFilter}
+        label={libraryName}
+        onToggle={(value) => onToggle("library", value)}
+      />
+      <FacetGroup
+        title="Known form"
+        facets={response.facets.known_form ?? []}
+        selected={formFilter}
+        label={(value) =>
+          response.facets.known_form?.find((facet) => facet.value === value)?.label ?? value
+        }
+        onToggle={(value) => onToggle("form", value)}
+      />
+    </>
+  );
+  const anyFacets =
+    (response.facets.library ?? []).length > 0 ||
+    (response.facets.known_form ?? []).length > 0;
+
   return (
     <div className="mt-6 flex gap-8">
-      <aside className="hidden w-48 shrink-0 md:block">
-        <FacetGroup
-          title="Library"
-          facets={response.facets.library ?? []}
-          selected={libraryFilter}
-          label={libraryName}
-          onToggle={(value) => onToggle("library", value)}
-        />
-        <FacetGroup
-          title="Known form"
-          facets={response.facets.known_form ?? []}
-          selected={formFilter}
-          label={(value) =>
-            response.facets.known_form?.find((facet) => facet.value === value)?.label ?? value
-          }
-          onToggle={(value) => onToggle("form", value)}
-        />
-      </aside>
+      <aside className="hidden w-48 shrink-0 md:block">{facets}</aside>
 
       <div className="min-w-0 flex-1">
+        {/* The rail is `display: none` below md, and 320px — a 1280px window
+            at 400% zoom, which is where 1.4.10 is measured — is below md. The
+            same controls, in a disclosure, so narrowing survives both the
+            phone and the zoom. Only one of the two is ever in the tab order:
+            whichever is not display:none. */}
+        {anyFacets && (
+          <details className="mb-3 rounded-lg border border-edge bg-surface px-3 py-2 md:hidden">
+            <summary className="cursor-pointer text-sm text-muted">
+              Narrow these results
+            </summary>
+            <div className="mt-3">{facets}</div>
+          </details>
+        )}
         <p className="mb-3 text-sm text-muted">
           {response.total} {response.total === 1 ? "file" : "files"}
         </p>
@@ -330,6 +381,10 @@ function FacetGroup({
         {facets.map((facet) => (
           <li key={facet.value}>
             <button
+              // Applied or not was a background tint and a text colour and
+              // nothing else, so the filter narrowing the results was
+              // inaudible and invisible to anyone who does not see the hue.
+              aria-pressed={selected.includes(facet.value)}
               onClick={() => onToggle(facet.value)}
               className={`flex w-full items-baseline justify-between gap-2 rounded px-2 py-1 text-left text-sm ${
                 selected.includes(facet.value)

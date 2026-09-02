@@ -8,7 +8,9 @@ sees the last four characters, and that is all — a settings form that renders
 your API key into the DOM has leaked it to every browser extension you run.
 """
 
+import ipaddress
 import re
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,6 +92,11 @@ _REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
 _ACCESS_KEY_ID = re.compile(r"^AKIA[A-Z0-9]{12,124}$")
 
 
+# Schemes `urllib.request` will happily open that are not a webhook. `file:`
+# turns the notifier into a file reader, `ftp:` into an outbound transfer.
+_WEBHOOK_SCHEMES = frozenset({"http", "https"})
+
+
 def _reject(detail: str) -> None:
     """Refuse here rather than at 3am on the first replication run.
 
@@ -97,6 +104,65 @@ def _reject(detail: str) -> None:
     unexplained failure hours later, in a component that did not cause it.
     """
     raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail)
+
+
+def _check_webhook(url: str) -> None:
+    """Refuse a notification URL that is not a webhook (server-side request forgery).
+
+    `api/notify.py` hands this value to `urllib.request.urlopen` from inside the
+    api and worker containers. The only validation on the way in was `.strip()`,
+    which made the field a general-purpose "make the server fetch this" control
+    for anyone who could save settings: `file:///data/...` reads a file,
+    `http://169.254.169.254/...` asks the cloud metadata service, and any
+    container on the compose network is one hostname away.
+
+    Validated here, where it is *stored*, rather than in the notifier: the
+    notifier runs unattended at 3am inside an exception handler that must never
+    raise, which is the worst possible place to discover a bad value, and the
+    person who typed it is standing right here.
+
+    What is deliberately still allowed is a private address. A self-hosted
+    archive notifying a self-hosted ntfy on the same LAN is the *named* use case
+    in `api/notify.py` — "a self-hosted archive should not require an account
+    with anybody" — so refusing RFC1918 would remove the feature rather than
+    secure it. Loopback and link-local are refused, because neither is ever a
+    webhook: loopback inside the container is the api talking to itself, and
+    link-local is the metadata endpoint and nothing else.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in _WEBHOOK_SCHEMES:
+        _reject(
+            f"{url!r} is not an http(s) URL. A notification webhook is a URL the "
+            "server will POST to, so only http and https are accepted."
+        )
+    host = (parsed.hostname or "").strip()
+    if not host:
+        _reject(f"{url!r} names no host.")
+    if host.lower() == "localhost" or host.lower().endswith(".localhost"):
+        _reject(
+            "localhost inside the container is the archive talking to itself, "
+            "not a notification service. Use the address or name the notifier "
+            "is actually reachable at."
+        )
+
+    # A literal address is checked directly; a name is not resolved here on
+    # purpose. Resolving at save time proves nothing about what the name will
+    # answer at 3am, and a DNS lookup inside a request handler is its own
+    # availability problem. Blocking the literal forms closes the shape that is
+    # actually used, and `api/notify.py` discards the response body, so what
+    # remains is blind.
+    try:
+        address = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return
+    if address.is_loopback or address.is_link_local or address.is_unspecified:
+        _reject(
+            f"{host} is not somewhere the archive will send notifications — "
+            "loopback and link-local addresses are the server talking to itself "
+            "and the host's metadata service, never a webhook."
+        )
+    if address.is_multicast or address.is_reserved:
+        _reject(f"{host} is not a routable address for a webhook.")
 
 
 def _check_offsite(payload: SettingsUpdateIn) -> None:
@@ -135,9 +201,27 @@ async def read_settings(
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> SettingsOut:
+    """What is configured. The offsite half is the administrator's alone.
+
+    The write path has been the administrator's since SEC-02 (`admin_only`); the
+    read path asked for nothing beyond being signed in, and returned the exact
+    bucket, region, KMS key and IAM access key id holding the offsite copy of
+    the entire archive, plus the last four characters of the secret. Every
+    household member — a READER who owns nothing included — was handed the
+    reconnaissance half for free: where the backup of everyone's documents
+    lives, and a four-character check on the credential for it.
+
+    ADR-009's principle is that an account learns about its own material and
+    nothing else, and the offsite destination is nobody's material but the
+    host's. So the response splits: the model, the API key state and the webhook
+    state are still everyone's, because the panel that renders them is; the
+    offsite identity is redacted to the same `None` a non-configured archive
+    returns, which says nothing at all rather than saying "not for you".
+    """
     key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
     webhook = await settings_store.get(session, settings_store.NOTIFY_WEBHOOK_URL)
     aws_secret = await settings_store.get(session, settings_store.AWS_SECRET_ACCESS_KEY)
+    offsite_visible = user.is_admin
     return SettingsOut(
         available_models=[
             ModelChoiceOut(
@@ -152,15 +236,27 @@ async def read_settings(
         prompt_version=await settings_store.get(session, settings_store.PROMPT_VERSION) or "v1",
         notify_webhook_configured=bool(webhook),
         notify_webhook_hint=settings_store.mask(webhook),
-        aws_access_key_id=await settings_store.get(
-            session, settings_store.AWS_ACCESS_KEY_ID
+        aws_access_key_id=(
+            await settings_store.get(session, settings_store.AWS_ACCESS_KEY_ID)
+            if offsite_visible
+            else None
         ),
-        aws_secret_configured=bool(aws_secret),
-        aws_secret_hint=settings_store.mask(aws_secret),
-        offsite_bucket=await settings_store.get(session, settings_store.OFFSITE_BUCKET),
-        offsite_region=await settings_store.get(session, settings_store.OFFSITE_REGION),
-        offsite_kms_key_id=await settings_store.get(
-            session, settings_store.OFFSITE_KMS_KEY_ID
+        aws_secret_configured=bool(aws_secret) if offsite_visible else False,
+        aws_secret_hint=settings_store.mask(aws_secret) if offsite_visible else None,
+        offsite_bucket=(
+            await settings_store.get(session, settings_store.OFFSITE_BUCKET)
+            if offsite_visible
+            else None
+        ),
+        offsite_region=(
+            await settings_store.get(session, settings_store.OFFSITE_REGION)
+            if offsite_visible
+            else None
+        ),
+        offsite_kms_key_id=(
+            await settings_store.get(session, settings_store.OFFSITE_KMS_KEY_ID)
+            if offsite_visible
+            else None
         ),
     )
 
@@ -219,9 +315,12 @@ async def update_settings(
         changed.append("prompt_version")
 
     if payload.notify_webhook_url is not None:
+        webhook = payload.notify_webhook_url.strip()
+        if webhook:
+            # An empty string still clears it; anything else has to be a webhook.
+            _check_webhook(webhook)
         await settings_store.set_(
-            session, settings_store.NOTIFY_WEBHOOK_URL,
-            payload.notify_webhook_url.strip() or None, actor_id=user.id,
+            session, settings_store.NOTIFY_WEBHOOK_URL, webhook or None, actor_id=user.id,
         )
         changed.append("notify_webhook_url")
 

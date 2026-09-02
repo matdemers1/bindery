@@ -205,6 +205,7 @@ function ResiliencePanel() {
         <div className="flex flex-wrap items-center gap-2">
           <input
             type="password"
+            aria-label="Passphrase for the go-bag"
             value={passphrase}
             onChange={(event) => setPassphrase(event.target.value)}
             placeholder="Passphrase (12+ characters)"

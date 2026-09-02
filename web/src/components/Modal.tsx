@@ -33,12 +33,18 @@ export default function Modal({
   children: React.ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
-  // Read once on mount rather than in the cleanup: by the time the dialog
-  // closes the trigger is no longer what has focus.
-  const restoreTo = useRef<HTMLElement | null>(null);
+  // Read once, during the first render, rather than in the cleanup or in the
+  // mount effect. Not the cleanup, because by the time the dialog closes the
+  // trigger is no longer what has focus. Not the effect either: a dialog whose
+  // content carries `autoFocus` — the command palette's input — has already
+  // taken focus by the time effects run, so the effect would record the
+  // dialog's own input as the thing to hand focus back to, and Escape would
+  // leave it on `<body>`.
+  const restoreTo = useRef<HTMLElement | null>(
+    document.activeElement as HTMLElement | null,
+  );
 
   useEffect(() => {
-    restoreTo.current = document.activeElement as HTMLElement | null;
     const node = panel.current;
     const first = node?.querySelector<HTMLElement>(FOCUSABLE);
     if (first) first.focus();

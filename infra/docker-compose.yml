@@ -1,6 +1,23 @@
 # Bindery — see D3 Cloud Vault/Bindery/Architecture.md
 # INVARIANT (REQ-104): no service publishes a host port. Ingress is Cloudflare
 # Tunnel only (ADR-006). Do not add a `ports:` key to anything in this file.
+#
+# Every long-running service carries a `logging:` block. Docker's default
+# json-file driver keeps every line forever, and on this deployment the Docker
+# data root shares a device with `pgdata` — so unbounded uvicorn access logs and
+# per-stage worker lines eventually stop Postgres being able to write, and the
+# archive presents at 3am as a database that will not start rather than as
+# "your logs are large". 20m x 5 is 100 MB a service, ceiling included. The
+# `event_log` table is the deliberately unpruned record (invariant 3); container
+# stdout is the same text with none of the provenance.
+#
+# `stop_grace_period` is on the same services for the mirror-image reason. Docker
+# SIGKILLs ten seconds after SIGTERM by default, and `worker/runner.py` gives
+# in-flight work `SHUTDOWN_GRACE_SECONDS` (20s) before handing its claims back —
+# so with the default every deploy killed the worker mid-job, the claims were
+# never released, and the jobs sat `running` until their lease expired. Keep each
+# of these comfortably above the drain the process actually performs; a test
+# asserts the relationship against worker/runner.py.
 
 services:
   postgres:
@@ -12,11 +29,18 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    # Postgres flushes and closes cleanly on SIGTERM. Ten seconds is usually
+    # enough and is not enough to be sure, and an unclean shutdown means
+    # recovery on the next start.
+    stop_grace_period: 30s
 
   api:
     build:
@@ -35,6 +59,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
+    # Above the api lifespan's own drain, so the `finally` block that flushes
+    # the last event_log rows actually runs — those are the lines most likely to
+    # explain whatever you were mid-way through when you redeployed.
+    stop_grace_period: 20s
     # NOTE (REQ-114): migrations are NOT run here. Apply them explicitly.
 
   worker:
@@ -63,6 +94,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
+    # Above runner.SHUTDOWN_GRACE_SECONDS, or SIGKILL lands while the worker is
+    # still waiting on in-flight tasks and it never reaches the block that hands
+    # its claims back — stranding a normalize job for its whole 45-minute lease
+    # and paging you about a deploy you performed on purpose.
+    stop_grace_period: 30s
 
   web:
     build:
@@ -76,14 +115,26 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
 
   # Ingress. Held behind a profile so the stack runs without a tunnel token:
   #   docker compose --profile tunnel up -d
   cloudflared:
     profiles: [tunnel]
-    image: cloudflare/cloudflared:latest
+    # Pinned, like everything else in this file. `--no-autoupdate` means the
+    # binary never updates itself, so the tag is the only update path — and on
+    # `:latest` an unrelated `docker compose pull` silently swaps the process
+    # that terminates the only ingress to the archive, with no version recorded
+    # anywhere and nothing to roll back to. Bump it deliberately; see
+    # docs/zimaos-deploy.md, "Bumping cloudflared".
+    image: cloudflare/cloudflared:2026.8.3
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
     depends_on:
       - web
       - api
@@ -130,6 +181,12 @@ services:
       - ../requirements.lock:/app/requirements.lock:ro
       # test_trust_and_export.py asserts on the restore drill's own contents.
       - ../scripts:/app/scripts:ro
+      # The operator runbooks. `test_operability.py` asserts they no longer
+      # describe a perimeter that was removed or an offsite copy that was built
+      # — an assertion about *this* tree. Without the mount it read the copy
+      # baked into the image and reported on documentation that no longer
+      # exists, the same failure that put infra/ and requirements.lock here.
+      - ../docs:/app/docs:ro
       # test_docs.py reads the guides, the routes they must cover, and the
       # screenshots. Only `web/src` and `web/public` — mounting all of `web`
       # would drag node_modules in for two directories.
@@ -187,6 +244,8 @@ services:
       - ../requirements.lock:/app/requirements.lock:ro
       # test_trust_and_export.py asserts on the restore drill's own contents.
       - ../scripts:/app/scripts:ro
+      # Same reason as in `test`: the operator runbooks are asserted on.
+      - ../docs:/app/docs:ro
       # Same reason as in `test`: the supply-chain guard reads the workflow.
       - ../.github:/app/.github:ro
     depends_on:

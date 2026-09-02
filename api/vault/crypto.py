@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from argon2.low_level import Type, hash_secret_raw
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from api.auth import kdf
+
 KEY_BYTES = 32
 SALT_BYTES = 16
 NONCE_BYTES = 12
@@ -100,6 +102,36 @@ def derive_from_passphrase(passphrase: str, salt: bytes) -> bytes:
             "it is the only thing standing between a stolen backup and these files"
         )
     return _derive(passphrase.encode(), salt, PASSPHRASE_COST)
+
+
+async def derive_from_passphrase_async(passphrase: str, salt: bytes) -> bytes:
+    """`derive_from_passphrase`, off the event loop and behind the bounded pool.
+
+    256 MiB and about a second of blocking C, which is exactly what it is for —
+    and exactly why it must not run inside an `async def` handler. Called
+    inline, one unlock stopped every other request in the process for that
+    second, and several at once allocated a gigabyte at a time on a host whose
+    OOM killer would take Postgres with it. See `api/auth/kdf.py`.
+
+    The length check happens here, on the event loop, so a refusal never
+    occupies a slot in the pool.
+    """
+    if len(passphrase) < MIN_PASSPHRASE:
+        raise VaultError(
+            f"a vault passphrase must be at least {MIN_PASSPHRASE} characters — "
+            "it is the only thing standing between a stolen backup and these files"
+        )
+    return await kdf.derive(_derive, passphrase.encode(), salt, PASSPHRASE_COST)
+
+
+async def derive_from_pin_async(pin: str, salt: bytes, pepper: bytes) -> bytes:
+    """`derive_from_pin`, off the event loop. Same reasoning as above."""
+    if not pin.isdigit() or not MIN_PIN <= len(pin) <= MAX_PIN:
+        raise VaultError(f"a PIN is {MIN_PIN} to {MAX_PIN} digits")
+    if len(pepper) < PEPPER_BYTES:
+        raise VaultError("the host pepper is missing or truncated")
+    secret = hmac.new(pepper, pin.encode(), "sha256").digest()
+    return await kdf.derive(_derive, secret, salt, PIN_COST)
 
 
 def derive_from_pin(pin: str, salt: bytes, pepper: bytes) -> bytes:

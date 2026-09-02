@@ -17,11 +17,13 @@ import uuid
 from collections.abc import AsyncIterator
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.audit import record
+from api.auth import throttle
+from api.auth.client import client_ip
 from api.auth.dependencies import current_user
 from api.db import repository
 from api.db.enums import ActorType
@@ -34,7 +36,7 @@ from api.schemas import (
     VaultSearchOut,
     VaultStateOut,
 )
-from api.vault import chunked, crypto, service, store
+from api.vault import chunked, crypto, guard, service, store
 from api.vault import search as vault_search
 from api.vault.session import sessions
 
@@ -100,12 +102,31 @@ async def setup(
 
 @router.post("/unlock", response_model=VaultStateOut)
 async def unlock(
+    request: Request,
     pin: str | None = Body(None, embed=True),
     passphrase: str | None = Body(None, embed=True),
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> VaultStateOut:
     vault = await _vault_or_404(session, user)
+    ip = client_ip(request)
+
+    # Before the derivation, not after: a refused attempt must cost no Argon2,
+    # and at the vault's parameters that is 256 MiB and about a second each.
+    # The PIN counts its own failures and destroys its wrapper at five; the
+    # passphrase cannot be treated that way — destroying it destroys the vault —
+    # so what stands in front of it is a refusal that expires. See
+    # `api/vault/guard.py`.
+    try:
+        await guard.check(session, user.id, ip)
+    except throttle.Throttled as limited:
+        await session.commit()
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many attempts. Try again shortly.",
+            headers={"Retry-After": str(limited.retry_after)},
+        ) from limited
+
     try:
         if passphrase:
             await service.unlock_with_passphrase(session, vault, passphrase)
@@ -116,11 +137,13 @@ async def unlock(
     except crypto.WrongSecret as error:
         # Committed even on failure: the failure counter is the point, and a
         # rollback would hand an attacker unlimited attempts.
+        await guard.record(session, user.id, ip, succeeded=False)
         await session.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
     except crypto.VaultError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
 
+    await guard.record(session, user.id, ip, succeeded=True)
     await record(
         session, entity_type="vault", entity_id=user.id, action="vault_unlocked",
         actor_type=ActorType.HUMAN, actor_id=user.id,

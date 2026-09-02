@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import eventlog
 from api import tokens as api_tokens
+from api.auth import service as auth_service
 from api.auth.cookies import ACCESS_COOKIE
-from api.auth.tokens import TokenError, decode_access_token
+from api.auth.tokens import TokenError, decode_access_claims
 from api.db import repository
 from api.db.models import AppUser
 from api.db.scope import Scope, resolve
@@ -96,9 +97,17 @@ async def current_user(
         user_id = identity.user_id
     else:
         try:
-            user_id = decode_access_token(token)
+            claims = decode_access_claims(token)
         except TokenError as exc:
             raise _UNAUTHENTICATED from exc
+        # The session behind the token, checked rather than assumed. A signed
+        # JWT survives logout, a password reset, a redeemed reset code and a
+        # suspension for its full lifetime unless something looks — and those
+        # are precisely the moments somebody is trying to end a session they
+        # believe is not theirs.
+        if not await auth_service.session_is_live(session, claims.session_id):
+            raise _UNAUTHENTICATED
+        user_id = claims.user_id
 
     user = await session.get(AppUser, user_id)
     if user is None or not user.is_active:

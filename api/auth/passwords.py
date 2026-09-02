@@ -17,6 +17,8 @@ from pathlib import Path
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
+from api.auth import kdf
+
 _hasher = PasswordHasher()
 
 # Long enough that the common-password list stops being the main defence. NIST
@@ -86,6 +88,23 @@ def verify_password(password_hash: str, password: str) -> bool:
         return _hasher.verify(password_hash, password)
     except (VerifyMismatchError, InvalidHashError):
         return False
+
+
+async def verify_password_async(password_hash: str, password: str) -> bool:
+    """`verify_password`, off the event loop and behind the bounded pool.
+
+    Every caller reachable from an HTTP handler should use this one. Argon2 at
+    the default parameters is 64 MiB and tens of milliseconds of blocking C —
+    called inline from an `async def` it is a denial of service anyone can
+    trigger by opening two hundred connections to the login form, which since
+    ADR-008 anyone can (see `api/auth/kdf.py`).
+    """
+    return await kdf.derive(verify_password, password_hash, password)
+
+
+async def hash_password_async(password: str) -> str:
+    """`hash_password`, off the event loop. Same reasoning as above."""
+    return await kdf.derive(hash_password, password)
 
 
 def needs_rehash(password_hash: str) -> bool:

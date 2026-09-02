@@ -173,7 +173,15 @@ export default function SegmentationPage() {
         </div>
       </header>
 
-      {status && <p className="mb-4 text-sm text-accent">{status}</p>}
+      {/* Always in the DOM, `sr-only` while empty — a live region inserted at
+          the same moment as its text is not reliably announced. */}
+      <p
+        role="status"
+        aria-live="polite"
+        className={status ? "mb-4 text-sm text-accent" : "sr-only"}
+      >
+        {status}
+      </p>
 
       <div className="space-y-6">
         {segments.map((segment, index) => (
@@ -188,6 +196,11 @@ export default function SegmentationPage() {
                   : `pages ${segment.start}–${segment.end}`}
               </span>
               <input
+                aria-label={
+                  segment.start === segment.end
+                    ? `Title for the document on page ${segment.start}`
+                    : `Title for the document on pages ${segment.start} to ${segment.end}`
+                }
                 value={titles[segment.start] ?? ""}
                 onChange={(event) =>
                   setTitles((current) => ({ ...current, [segment.start]: event.target.value }))
@@ -261,18 +274,29 @@ function SplitHandle({
   onClick: () => void;
   page: number;
 }) {
+  const label = active
+    ? `Remove the split before page ${page + 1}`
+    : `Start a new document at page ${page + 1}`;
+  // The rail stays 8px wide; the button around it is 24, which is what SC
+  // 2.5.8 asks for and what makes it hittable with a tremor or a thumb. The
+  // resting fill is `field` (3.3:1 on surface) rather than transparent,
+  // because a control that cannot be seen until it is hovered cannot be found
+  // at all by someone who is not using a mouse — and `title` never appears on
+  // touch, so it was also the only name this had.
   return (
     <button
       onClick={onClick}
       aria-pressed={active}
-      title={
-        active
-          ? `Remove the split before page ${page + 1}`
-          : `Start a new document at page ${page + 1}`
-      }
-      className={`mx-0.5 w-2 shrink-0 self-stretch rounded-full transition-colors ${
-        active ? "bg-accent" : "bg-transparent hover:bg-muted/40"
-      }`}
-    />
+      aria-label={label}
+      title={label}
+      className="group flex w-6 shrink-0 justify-center self-stretch"
+    >
+      <span
+        aria-hidden
+        className={`w-2 rounded-full transition-colors ${
+          active ? "bg-accent" : "bg-field group-hover:bg-muted"
+        }`}
+      />
+    </button>
   );
 }

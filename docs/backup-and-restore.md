@@ -93,23 +93,44 @@ that is not this machine. A lost passphrase is a lost go-bag.
 
 ## 3-2-1
 
-| Copy | Where | Made by |
-|------|-------|---------|
-| 1 | Live RAID-5 pool, `/media/Main-Storage/bindery/data` | the running stack |
-| 2 | Local backup target, `BINDERY_BACKUP_ROOT` | `make backup` |
-| 3 | Offsite, encrypted | **Not built yet — see below** |
+| Copy | Where | Made by | Verified by |
+|------|-------|---------|-------------|
+| 1 | Live RAID-5 pool, `/media/Main-Storage/bindery/data` | the running stack | `make integrity` |
+| 2 | Local generations, `BINDERY_BACKUP_ROOT` (default `/data/backups`) | `make backup`, nightly from `infra/zimaos/bindery-backup.cron` | `make drill b=<generation>` |
+| 3 | Offsite: S3 under a KMS key | the worker's replication loop, daily + weekly | `make drill-offsite` |
 
-> **Copy 3 does not exist yet.** `encrypt_for_offsite()` and `verify_encrypted()`
-> are implemented and tested, but the only callers are in
-> `tests/test_trust_and_export.py` — no route, no CLI verb, no Makefile target.
-> `encrypt_for_offsite()` writes ciphertext to a *local* path and returns;
-> nothing ships it anywhere. **Both existing copies are in the same building on
-> the same array**, so today this scheme survives a dead disk and not a fire.
->
-> Phase 13 builds the missing leg: replication to S3 under a KMS key, with a
-> restore drill that pulls from the bucket. See `docs/offsite-replication.md`
-> once it lands, and ADR-010 in the vault for why the offsite copy is
-> server-side rather than client-side encrypted.
+**All three exist.** Copy 3 is Phase 13, built and running: `api/offsite.py`
+replicates to S3 with SSE-KMS, the worker checks every ten minutes and runs on
+the cadence `offsite_run` says is due, every object it ships is recorded in a
+ledger, and each run reconciles that ledger against the bucket and re-uploads
+anything that has gone missing. The Trust screen shows the last run and the
+health panel raises a critical alert — which reaches the notifier, and therefore
+a phone — when replication has stopped. `docs/offsite-replication.md` is the
+detail; ADR-010 is why the offsite copy is server-side rather than
+client-side encrypted.
+
+**After a fire, this is the procedure:**
+
+```bash
+make drill-offsite term="rating decision"
+```
+
+That restores from the bucket alone — no local backup directory, no blob pool,
+no live stack — downloads every original the restored database references,
+re-hashes each one against the address the database asked for, and searches the
+result. It is the only step that proves copy 3 is real, so run it on a schedule
+rather than on the day you need it.
+
+Two things about copy 3 that are easy to get wrong:
+
+- **The vault pepper is deliberately *not* offsite.** It only stops a stolen
+  database being enough to attack a six-digit PIN, so the bucket holding the
+  dump is the one place it must not live. It is in copy 2. Losing it costs the
+  PIN, never data.
+- **`make lifecycle-check` is not optional.** A bucket-wide expiry rule would
+  delete the blob prefix — the archive itself — with no error and no alert,
+  because Bindery has no delete permission and would not be the one doing it
+  (ADR-010, R-21). Run it whenever anyone touches the bucket's configuration.
 
 The offsite copy is encrypted because it is, by definition, somewhere you do not
 control. `verify_encrypted` is cheap and catches the failure that matters: an

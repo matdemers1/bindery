@@ -15,6 +15,13 @@ So this adds exactly one of each, on invented files:
   something to correct. Without it the queue is empty on a healthy seeded
   archive and the correct-then-accept test skips — which is the same nothing
   the two above were added to stop.
+- a **vault with a document and a photograph in it** (CR-127). `vault.spec.ts`
+  created a vault and deliberately put nothing in it, so `/api/vault/items` was
+  always empty, the documents/photos split and the decrypted-image render never
+  ran, and the move-in path — the only code in Bindery permitted to delete a
+  person's original (ADR-012) — had no browser coverage at all. Two tests that
+  always skip are two tests that have stopped saying anything, which is the
+  sentence at the top of this file.
 
 Piped into the api container rather than run from it: the runtime image ships
 `api/` and `alembic/` and deliberately not `scripts/`.
@@ -158,6 +165,8 @@ async def main() -> None:
             print(f"acknowledged {settled} pre-existing dead letter(s) to make the state known")
 
         await _document_awaiting_review(session, library_id)
+        await session.flush()
+        await _a_vault_with_something_in_it(session, user, library_id)
 
         await session.commit()
 
@@ -227,4 +236,187 @@ async def _document_awaiting_review(session, library_id) -> None:
     print(f"{filename} is waiting for review")
 
 
-asyncio.run(main())
+# ---------------------------------------------------------------------------
+# The vault (CR-127)
+# ---------------------------------------------------------------------------
+
+# The same two secrets `web/e2e/vault.spec.ts` uses. They live in a public test
+# fixture on purpose: this vault holds two files this script invented thirty
+# lines ago, in a database CI throws away.
+VAULT_PASSPHRASE = "an end to end vault passphrase"
+VAULT_PIN = "481516"
+
+# A 1x1 PNG. Small enough to inline, real enough that `is_image` is true and the
+# photos tab has something to render through `/api/vault/items/{id}/original`.
+ONE_PIXEL_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000d49444154789c636064f8cf000001830103b0b7a3b6"
+    "0000000049454e44ae426082"
+)
+
+VAULTED = [
+    ("a-sealed-record.pdf", "application/pdf", "pdf", "Sealed — discharge papers"),
+    ("a-sealed-photograph.png", "image/png", "png", "Sealed — a photograph"),
+]
+
+
+def _stamped_png(stamp: str) -> bytes:
+    """The pixel, with `stamp` written into a tEXt chunk before IEND.
+
+    Content addresses are the whole storage model, and `store.seal` refuses to
+    vault a blob two source files share — correctly, since unlinking it would
+    destroy somebody else's original. A byte-identical fixture seeded into two
+    libraries is exactly that case, so the stamp makes each one its own file.
+    """
+    import struct
+    import zlib
+
+    data = b"Comment\x00" + stamp.encode()
+    chunk = struct.pack(">I", len(data)) + b"tEXt" + data
+    chunk += struct.pack(">I", zlib.crc32(b"tEXt" + data) & 0xFFFFFFFF)
+    iend = ONE_PIXEL_PNG.rindex(b"\x00\x00\x00\x00IEND")
+    return ONE_PIXEL_PNG[:iend] + chunk + ONE_PIXEL_PNG[iend:]
+
+
+def _tiny_pdf(stamp: str = "") -> bytes:
+    """One page, valid enough to be stored and served back after decryption."""
+    content = f"BT /F1 12 Tf 60 720 Td (A sealed record. {stamp}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(content)).encode()
+        + b" >>\nstream\n" + content + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    import io
+
+    out = io.BytesIO()
+    out.write(b"%PDF-1.4\n")
+    offsets = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(out.tell())
+        out.write(f"{index} 0 obj\n".encode() + body + b"\nendobj\n")
+    xref = out.tell()
+    out.write(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode())
+    for offset in offsets:
+        out.write(f"{offset:010d} 00000 n \n".encode())
+    out.write(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode()
+    )
+    return out.getvalue()
+
+
+async def _a_vault_with_something_in_it(session, user, library_id) -> None:
+    """Set up the demo account's vault and seal one document and one photograph.
+
+    Sealing here rather than through the API because the browser cannot: the
+    move-in path needs the unlock session, and the unlock session lives in the
+    api *process*. This runs inside that container but in a different process,
+    so it opens the vault with the passphrase and hands the data key to
+    `store.seal` directly — the same function the route calls.
+
+    This is the one script that reaches the only sanctioned delete path in the
+    project (ADR-012), and it does so on two files it created moments earlier,
+    in a database CI throws away. It is not a general-purpose tool.
+    """
+    from api.db.models import Vault, VaultItem
+    from api.storage.blobs import store_stream
+    from api.vault import service as vault_service
+    from api.vault import store as vault_store
+
+    vault = (
+        await session.execute(sa.select(Vault).where(Vault.user_id == user.id))
+    ).scalar_one_or_none()
+    if vault is None:
+        vault = await vault_service.create(session, user.id, VAULT_PASSPHRASE, VAULT_PIN)
+        print("vault created for the demo account")
+        data_key = vault_service.sessions.key(user.id)
+    else:
+        # A vault that already exists may have a different passphrase (an
+        # earlier spec run created one). If it does, say so loudly rather than
+        # leaving the suite to fail on an unlock it cannot explain.
+        try:
+            data_key = await vault_service.unlock_with_passphrase(
+                session, vault, VAULT_PASSPHRASE
+            )
+        except Exception as error:  # noqa: BLE001 — reported, not handled
+            raise SystemExit(
+                "the demo account already has a vault this script cannot open "
+                f"({error}). Drop the database or the `vault` row and re-seed; "
+                "the e2e suite needs a vault whose PIN it knows."
+            ) from error
+
+    existing = (
+        await session.execute(
+            sa.select(sa.func.count()).select_from(VaultItem).where(
+                VaultItem.vault_id == vault.id
+            )
+        )
+    ).scalar_one()
+    if existing >= len(VAULTED):
+        print(f"vault already holds {existing} item(s)")
+        return
+
+    async def one_chunk(data: bytes):
+        yield data
+
+    stamp = str(library_id)
+    for filename, mime_type, kind, title in VAULTED:
+        already = (
+            await session.execute(
+                sa.select(SourceFile).where(
+                    SourceFile.library_id == library_id,
+                    SourceFile.original_filename == filename,
+                )
+            )
+        ).scalar_one_or_none()
+        if already is not None:
+            print(f"{filename} is already in the archive; leaving it alone")
+            continue
+
+        payload = _stamped_png(stamp) if kind == "png" else _tiny_pdf(stamp)
+        blob = await store_stream(one_chunk(payload))
+        source = SourceFile(
+            library_id=library_id,
+            sha256=blob.sha256,
+            byte_size=blob.byte_size,
+            original_filename=filename,
+            mime_type=mime_type,
+            ingest_source=IngestSource.WEB_UPLOAD,
+            page_count=1,
+            state=SourceFileState.PROCESSED,
+        )
+        session.add(source)
+        await session.flush()
+        session.add(
+            Page(
+                source_file_id=source.id,
+                page_number=1,
+                text="Sealed page text. Nothing outside the vault may quote this.",
+            )
+        )
+        document = Document(
+            library_id=library_id,
+            source_file_id=source.id,
+            page_start=1,
+            page_end=1,
+            title=title,
+            review_state=ReviewState.FILED,
+        )
+        session.add(document)
+        await session.flush()
+
+        await vault_store.seal(session, document, source, vault.id, user.id, data_key)
+        print(f"{filename} sealed into the vault as {title!r}")
+
+    # Shut it again. Every vault spec establishes the state it needs, and the
+    # one that asserts a locked vault says nothing must not start with an open
+    # one left over from the seed.
+    vault_service.sessions.lock(user.id)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

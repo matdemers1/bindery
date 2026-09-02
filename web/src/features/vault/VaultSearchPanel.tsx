@@ -65,15 +65,46 @@ export default function VaultSearchPanel({ query }: { query: string }) {
 
   if (!query.trim()) return null;
 
+  // Counts and states only, never a hit — ADR-012 keeps vault contents to the
+  // vault screen and to a search the reader asked for, and a live region is a
+  // channel like any other. Mounted with the section rather than alongside the
+  // first message, so the region exists before it has anything to say. Worded
+  // differently from the copy beside it on purpose: an identical string means
+  // two matches for every `getByText`, which is a strict-mode failure.
+  const note = !on
+    ? ""
+    : !state
+      ? ""
+      : !state.exists
+        ? "This account has no vault."
+        : !state.unlocked
+          ? "Shut — unlock it to include it in this search."
+          : loading
+            ? "Scanning the vault…"
+            : error
+              ? "The vault search did not work."
+              : results
+                ? results.total === 0
+                  ? "No vault matches."
+                  : `${results.total} vault match${results.total === 1 ? "" : "es"}`
+                : "";
+
   return (
     <section className="mt-8 rounded-xl border border-edge bg-surface/50">
+      <p role="status" aria-live="polite" className="sr-only">
+        {note}
+      </p>
+      {/* "Is my vault currently in this search?" is the question this control
+          exists to answer, and the answer was two unlabelled chevrons. */}
       <button
         type="button"
         onClick={() => void toggle()}
+        aria-expanded={on}
+        aria-controls="vault-search-panel"
         className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-muted hover:text-neutral-100"
       >
-        {on ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-        <Vault size={15} />
+        {on ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
+        <Vault size={15} aria-hidden />
         Also search the vault
         {on && state?.unlocked && results && (
           <span className="ml-auto text-xs">
@@ -83,7 +114,7 @@ export default function VaultSearchPanel({ query }: { query: string }) {
       </button>
 
       {on && state && (
-        <div className="space-y-3 border-t border-edge px-4 py-4">
+        <div id="vault-search-panel" className="space-y-3 border-t border-edge px-4 py-4">
           {!state.exists ? (
             <p className="text-sm text-muted">
               There is no vault on this account.

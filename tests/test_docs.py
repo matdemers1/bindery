@@ -17,8 +17,6 @@ import re
 import subprocess
 from pathlib import Path
 
-import pytest
-
 REPO = Path(__file__).resolve().parent.parent
 GUIDES_FILE = REPO / "web" / "public" / "help" / "guides.json"
 SCREENS = REPO / "web" / "public" / "help" / "screens"
@@ -113,23 +111,60 @@ def test_no_screenshot_is_older_than_the_screen_it_shows() -> None:
     the documentation and would be switched off within a month.
     """
     manifest_file = SCREENS / "manifest.json"
-    if not manifest_file.is_file():
-        pytest.skip("no screenshots captured yet — run `make screenshots`")
+    # Not a skip. `make screenshots` writes this file and it is committed; if it
+    # is missing, the documentation has no captured state at all, and the guard
+    # that was going to notice said nothing. (`web/public` is bind-mounted into
+    # the test image precisely so this is readable.)
+    assert manifest_file.is_file(), (
+        f"{manifest_file.relative_to(REPO)} is missing, so the staleness guard "
+        "has nothing to compare. Run `make screenshots` and commit the result."
+    )
 
     manifest = json.loads(manifest_file.read_text())
-    stale = []
-    for entry in manifest["screens"]:
+    screens = manifest["screens"]
+    stale: list[str] = []
+    resolved = 0
+    orphaned: list[str] = []
+    for entry in screens:
         sources = entry.get("sources") or []
-        if not sources:
-            continue
+        # An entry with no sources is an entry the check cannot make. It used to
+        # `continue` in silence, which is how a manifest could go green while
+        # answering nothing at all.
+        assert sources, (
+            f"{entry['screenshot']} lists no sources, so nothing can say whether "
+            "it is out of date"
+        )
+        orphaned.extend(
+            f"{entry['screenshot']} → {source}"
+            for source in sources
+            if not (REPO / source).exists()
+        )
         current = subprocess.run(
             ["git", "log", "-1", "--format=%H", "--", *sources],
             cwd=REPO, capture_output=True, text=True, check=False,
         ).stdout.strip()
         if not current:
             continue
+        resolved += 1
         if current != entry.get("source_commit"):
             stale.append(entry["screenshot"])
+
+    # The two ways this guard falls silent, both routine and both previously
+    # invisible: `sources` is a hand-maintained list of directories, so a
+    # component moved during a refactor orphans an entry without changing a
+    # single test outcome; and with no git history (a shallow clone, or the
+    # `.git` bind-mount gone from infra/docker-compose.yml) `git log` answers
+    # nothing for every entry and `stale` stays empty forever.
+    assert not orphaned, (
+        "these manifest entries point at source paths that no longer exist, so "
+        "the staleness check silently skips them:\n  " + "\n  ".join(orphaned)
+    )
+    assert resolved == len(screens), (
+        f"git answered for only {resolved} of {len(screens)} screens — the "
+        "staleness check is inspecting less than it claims. Either the sources "
+        "are untracked, or this run has no git history to ask (check that "
+        "`../.git` is still bind-mounted into the test service)."
+    )
 
     assert not stale, (
         "these screenshots are older than the code they show:\n  "

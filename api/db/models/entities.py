@@ -57,7 +57,12 @@ class Asset(Base):
 
 
 class DocumentAsset(Base):
-    """Which documents concern which assets. Superseded, never deleted."""
+    """Which documents concern which assets. Superseded, never deleted.
+
+    Shares `DocumentTag`'s primary-key limitation, and its fix: one row per
+    pair means a re-linked asset overwrites the tombstone rather than appending
+    to it. See `DocumentTag` (CR-075).
+    """
 
     __tablename__ = "document_asset"
 

@@ -29,6 +29,30 @@
 #
 # `/DATA` on ZimaOS is a 904 GB NVMe partition, NOT the storage pool. Putting the
 # archive there would leave every original on a single disk.
+#
+# Two settings repeated on every service, and neither is tidiness:
+#
+#   logging:            Docker's default json-file driver keeps every line until
+#                       the disk is full, and on this host the Docker data root
+#                       is on `/DATA` — the same 904 GB NVMe as `pgdata`. So
+#                       uvicorn's access log and the worker's per-stage lines
+#                       eventually stop Postgres being able to write, and the
+#                       archive presents at 3am as a database that will not
+#                       start rather than as "your logs are large". Capped at
+#                       20 MB x 5 per service. The `event_log` table is the
+#                       record that is deliberately kept (invariant 3); this is
+#                       the same text with none of the provenance.
+#
+#   stop_grace_period:  Docker SIGKILLs ten seconds after SIGTERM by default.
+#                       `worker/runner.py` gives in-flight work 20 seconds and
+#                       then hands its claims back, so with the default that
+#                       block never ran: every `docker compose up -d` killed the
+#                       worker mid-job and the jobs sat `running` until their
+#                       lease expired — up to 45 minutes for normalize, at which
+#                       point the health panel pages you about a deploy you
+#                       performed on purpose. Repeated per service rather than
+#                       anchored, because the CasaOS importer already struggles
+#                       with the one anchor in this file.
 
 name: bindery
 
@@ -51,6 +75,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
+    # Postgres flushes and closes cleanly on SIGTERM; ten seconds is enough for
+    # a household-sized archive, but not enough to be sure, and an unclean
+    # shutdown means recovery on the next start.
+    stop_grace_period: 30s
     deploy:
       resources:
         limits:
@@ -98,6 +129,13 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
+    # Above the api lifespan's own drain, so the `finally` block that flushes
+    # the last event_log rows actually runs — those are the lines most likely to
+    # explain whatever you were mid-way through when you redeployed.
+    stop_grace_period: 20s
     deploy:
       resources:
         limits:
@@ -134,6 +172,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
+    # Above runner.SHUTDOWN_GRACE_SECONDS (20s), or SIGKILL lands while the
+    # worker is still waiting on in-flight tasks and it never reaches the block
+    # that hands its claims back.
+    stop_grace_period: 30s
     deploy:
       resources:
         limits:
@@ -152,16 +197,30 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
     deploy:
       resources:
         limits:
           memory: 256M
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    # Pinned, like the four services above it. `--no-autoupdate` means the
+    # binary never updates itself, so the tag is the only update path — and on
+    # `:latest` an unrelated `docker compose pull` during any maintenance
+    # silently swaps the process terminating the household's only ingress
+    # (ADR-006, REQ-104), with no version recorded anywhere and nothing to roll
+    # back to. It does need to stay reasonably current for tunnel protocol
+    # compatibility: bump it deliberately, as a step in the deploy runbook.
+    # See docs/zimaos-deploy.md, "Bumping cloudflared".
+    image: cloudflare/cloudflared:2026.8.3
     container_name: bindery-tunnel
     restart: unless-stopped
     command: tunnel --no-autoupdate run --token change-me-cloudflare-tunnel-token
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
     depends_on:
       - web
       - api

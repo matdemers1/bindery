@@ -51,6 +51,9 @@ class ImportSession(Base):
         sa.Boolean, nullable=False, server_default=sa.false()
     )
     created_at: Mapped[datetime] = created_at()
+    # See Document.updated_at: the `import_session_set_updated_at` trigger from
+    # migration 0029 maintains this. Only `ImportItem.updated_at` was ever
+    # assigned in code, so the session's own clock had stopped at creation.
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
