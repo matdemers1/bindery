@@ -208,7 +208,7 @@ function ResiliencePanel() {
             value={passphrase}
             onChange={(event) => setPassphrase(event.target.value)}
             placeholder="Passphrase (12+ characters)"
-            className="w-72 rounded border border-edge bg-ink px-2 py-1.5 text-sm"
+            className="w-72 rounded border border-field bg-ink px-2 py-1.5 text-sm"
           />
           <Action
             busy={busy === "gobag"}
@@ -538,7 +538,7 @@ function AuditPanel() {
           <select
             value={actorType}
             onChange={(event) => setActorType(event.target.value)}
-            className="rounded border border-edge bg-ink px-2 py-1.5 text-sm"
+            className="rounded border border-field bg-ink px-2 py-1.5 text-sm"
           >
             <option value="">Anyone</option>
             <option value="human">You</option>
@@ -552,7 +552,7 @@ function AuditPanel() {
             value={entityId}
             onChange={(event) => setEntityId(event.target.value.trim())}
             placeholder="document id"
-            className="w-72 rounded border border-edge bg-ink px-2 py-1.5 font-mono text-xs"
+            className="w-72 rounded border border-field bg-ink px-2 py-1.5 font-mono text-xs"
           />
         </Field>
         <Field label="Since">
@@ -560,7 +560,7 @@ function AuditPanel() {
             type="date"
             value={since}
             onChange={(event) => setSince(event.target.value)}
-            className="rounded border border-edge bg-ink px-2 py-1.5 text-sm"
+            className="rounded border border-field bg-ink px-2 py-1.5 text-sm"
           />
         </Field>
       </div>

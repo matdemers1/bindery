@@ -11,6 +11,7 @@ import {
   fileUrl,
 } from "../../api";
 import { matchesTerm, queryTerms } from "../../lib/highlight";
+import { isTypingTarget } from "../../lib/keyboard";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 import MoveToVault from "../vault/MoveToVault";
@@ -124,7 +125,7 @@ function Viewer({
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.target instanceof HTMLInputElement) return;
+      if (isTypingTarget(event.target)) return;
       if (event.key === "ArrowRight" || event.key === "j") go(localPage + 1);
       if (event.key === "ArrowLeft" || event.key === "k") go(localPage - 1);
     }

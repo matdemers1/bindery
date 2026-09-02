@@ -91,7 +91,7 @@ export default function SettingsPage() {
             placeholder="sk-ant-…"
             autoComplete="off"
             spellCheck={false}
-            className="min-w-0 flex-1 rounded-md border border-edge bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent"
+            className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent"
           />
           <button
             type="submit"
@@ -347,7 +347,7 @@ function NotificationSettings({
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           placeholder="https://ntfy.sh/your-topic"
-          className="w-96 max-w-full rounded border border-edge bg-ink px-2 py-1.5 text-sm"
+          className="w-96 max-w-full rounded border border-field bg-ink px-2 py-1.5 text-sm"
         />
         <button
           type="submit"
@@ -698,7 +698,7 @@ function ApiTokens() {
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Brother scanner"
-            className="w-56 rounded border border-edge bg-ink px-2 py-1.5 text-sm"
+            className="w-56 rounded border border-field bg-ink px-2 py-1.5 text-sm"
           />
         </label>
         <fieldset className="flex flex-wrap gap-3">

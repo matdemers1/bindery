@@ -284,3 +284,176 @@ async def test_the_detail_line_reads_as_a_sentence(session, blob_root, fake_dump
     )
     assert "byte dump" not in result.detail
     assert "bytes dump" in result.detail or "KB dump" in result.detail
+
+
+# --------------------------------------------------------------------------
+# The weekly generation reads the bucket back (CR-012)
+# --------------------------------------------------------------------------
+
+
+async def test_the_weekly_run_reconciles_before_it_syncs(session, blob_root, fake_dump):
+    """`reconcile` had no caller anywhere in the product — only tests.
+
+    That is what made the ledger unfalsifiable. `sync_blobs` skips every key the
+    ledger records, so a bucket emptied from the console kept reporting healthy
+    replication run after run, and the Trust screen agreed. Running it first
+    means anything found absent is shipped again by this same generation rather
+    than waiting for someone to notice.
+    """
+    fake = RecordingS3()
+    await offsite.replicate(
+        session, CONFIG, fake, kind=offsite.Kind.DAILY,
+        blob_root=blob_root, integrity_report=healthy(), stamp=STAMP,
+    )
+    assert len([k for k in fake.objects if k.startswith(offsite.BLOB_PREFIX)]) == 3
+
+    # Somebody empties the blob prefix from the console.
+    for key in [k for k in fake.objects if k.startswith(offsite.BLOB_PREFIX)]:
+        del fake.objects[key]
+
+    result = await offsite.replicate(
+        session, CONFIG, fake, kind=offsite.Kind.WEEKLY,
+        blob_root=blob_root, integrity_report=healthy(), stamp=STAMP,
+    )
+
+    assert result.ok, result.detail
+    assert result.objects_absent == 3
+    assert result.blobs_uploaded == 3, "the gap the reconcile found was not filled"
+    assert len([k for k in fake.objects if k.startswith(offsite.BLOB_PREFIX)]) == 3
+    assert "gone from the bucket" in result.detail
+
+
+async def test_the_weekly_run_reconciles_the_vault_prefix_as_well(
+    session, blob_root, fake_dump, monkeypatch
+):
+    """Both prefixes, in one pass. The vault is the half that mattered: a blob
+    can be re-uploaded from the disk it was hashed from, and a sealed object
+    exists exactly twice — here and in the bucket."""
+    listed: list[str] = []
+    original = offsite._list_keys
+
+    def record(client, config, prefix):
+        listed.append(prefix)
+        return original(client, config, prefix)
+
+    monkeypatch.setattr(offsite, "_list_keys", record)
+
+    fake = RecordingS3()
+    await offsite.replicate(
+        session, CONFIG, fake, kind=offsite.Kind.WEEKLY,
+        blob_root=blob_root, integrity_report=healthy(), stamp=STAMP,
+    )
+
+    assert listed == [offsite.BLOB_PREFIX, offsite.VAULT_PREFIX]
+
+
+async def test_a_reconcile_that_cannot_read_the_bucket_still_ships_the_copy(
+    session, blob_root, fake_dump, monkeypatch
+):
+    """A copy that cannot be verified still has to leave the building.
+
+    Failing the generation over a denied ListBucket would trade a check for the
+    backup itself, so the failure is reported on the run and the dump goes.
+    """
+    def refuse(client, config, prefix):
+        raise RuntimeError("simulated ListBucket denial")
+
+    monkeypatch.setattr(offsite, "_list_keys", refuse)
+
+    fake = RecordingS3()
+    result = await offsite.replicate(
+        session, CONFIG, fake, kind=offsite.Kind.WEEKLY,
+        blob_root=blob_root, integrity_report=healthy(), stamp=STAMP,
+    )
+
+    assert result.ok, result.detail
+    assert any("reconcile" in failure for failure in result.failures)
+    assert any(k.startswith(offsite.DUMP_PREFIX) for k in fake.objects)
+
+
+async def test_a_daily_run_does_not_list_the_bucket(session, blob_root, fake_dump):
+    """The cadence `offsite_object` documents is weekly, and a listing per day
+    buys nothing `sync_blobs` does not already know."""
+    listed: list[str] = []
+    fake = RecordingS3()
+    original = fake.get_paginator
+
+    def watch(name):
+        listed.append(name)
+        return original(name)
+
+    fake.get_paginator = watch
+    await offsite.replicate(
+        session, CONFIG, fake, kind=offsite.Kind.DAILY,
+        blob_root=blob_root, integrity_report=healthy(), stamp=STAMP,
+    )
+    assert listed == []
+
+
+# --------------------------------------------------------------------------
+# A run must not freeze the worker (CR-011)
+# --------------------------------------------------------------------------
+
+
+async def test_a_run_leaves_the_event_loop_free(session, blob_root, monkeypatch):
+    """The worker is a single asyncio process, and this ran on its loop.
+
+    `pg_dump`, every boto3 put and the archive re-hash were all synchronous
+    calls inside `async def`, so for the whole length of a nightly run — a
+    gigabyte over a home uplink — the three OCR slots, the reclaimer, the inbox
+    watcher and the health monitor were frozen. What the operator saw was
+    documents not being picked up, jobs queued with nothing running, and no
+    heartbeat; and the monitor that exists to report exactly that could not run,
+    because it was on the same blocked loop.
+
+    Measured rather than asserted structurally: a heartbeat that keeps ticking
+    is the property, and it survives a refactor that a grep for `to_thread`
+    would not.
+    """
+    import asyncio
+    import time
+
+    def slow_dump(destination):
+        time.sleep(0.05)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"PGDMP fake custom-format archive")
+        return destination
+
+    monkeypatch.setattr("api.export.backup.dump_database", slow_dump)
+
+    class SlowS3(RecordingS3):
+        def put_object(self, **kwargs):
+            time.sleep(0.05)
+            return super().put_object(**kwargs)
+
+    # The measurement is the longest gap between heartbeats, not the number of
+    # them: a run that threads four of its five blocking calls still freezes the
+    # worker for the fifth, and a count would average that away.
+    stalls: list[float] = []
+
+    async def heartbeat():
+        last = time.monotonic()
+        while True:
+            await asyncio.sleep(0.005)
+            now = time.monotonic()
+            stalls.append(now - last)
+            last = now
+
+    beat = asyncio.create_task(heartbeat())
+    try:
+        result = await offsite.replicate(
+            session, CONFIG, SlowS3(), kind=offsite.Kind.DAILY,
+            blob_root=blob_root, integrity_report=healthy(), stamp=STAMP,
+        )
+    finally:
+        beat.cancel()
+
+    assert result.ok, result.detail
+    assert len(stalls) > 10, "the heartbeat never got to run at all"
+    # Every blocking call in the run sleeps 50ms, so anything left on the loop
+    # shows up as a gap at least that long. Off the loop, the gaps are the 5ms
+    # the heartbeat asked for.
+    assert max(stalls) < 0.04, (
+        f"the event loop was blocked for {max(stalls) * 1000:.0f}ms during a "
+        "replication run — every other task on the worker was frozen for it"
+    )

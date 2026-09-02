@@ -314,12 +314,13 @@ function MoveControl({
     <div className="mt-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <select
+          aria-label="Move this file to another library"
           value={target}
           onChange={(event) => {
             setTarget(event.target.value);
             setPlan(null);
           }}
-          className="rounded border border-edge bg-ink px-1.5 py-1"
+          className="rounded border border-field bg-ink px-1.5 py-1"
         >
           <option value="">Move to…</option>
           {destinations.map((library) => (

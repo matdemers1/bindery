@@ -211,12 +211,13 @@ function NewRuleForm({
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="Name — e.g. GEICO is vehicle insurance"
-          className="rounded-md border border-edge bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent sm:col-span-2"
+          className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent sm:col-span-2"
         />
         <select
+          aria-label="Field to match"
           value={field}
           onChange={(event) => setField(event.target.value)}
-          className="rounded-md border border-edge bg-ink px-3 py-1.5 text-sm"
+          className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm"
         >
           {FIELDS.map((option) => (
             <option key={option} value={option}>
@@ -225,9 +226,10 @@ function NewRuleForm({
           ))}
         </select>
         <select
+          aria-label="How to match it"
           value={operator}
           onChange={(event) => setOperator(event.target.value)}
-          className="rounded-md border border-edge bg-ink px-3 py-1.5 text-sm"
+          className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm"
         >
           {OPERATORS.map((option) => (
             <option key={option} value={option}>
@@ -240,14 +242,14 @@ function NewRuleForm({
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="Value — e.g. GEICO"
-          className="rounded-md border border-edge bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
         />
         <input
           required
           value={tags}
           onChange={(event) => setTags(event.target.value)}
           placeholder="Add tags, comma separated"
-          className="rounded-md border border-edge bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
         />
       </div>
       <button

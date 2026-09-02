@@ -13,6 +13,7 @@ import {
 
 import { ApiError, api, type AskAnswer, type Document, type Library } from "../../api";
 import { Logo } from "../../components/brand/Logo";
+import Modal from "../../components/Modal";
 import FirstRun from "../firstrun/FirstRun";
 import NextSteps from "../firstrun/NextSteps";
 import { hasFoundSomething } from "../firstrun/onboarding";
@@ -155,7 +156,7 @@ export default function AskPage({
               }
             }}
             placeholder="Ask anything about your documents…"
-            className="w-full resize-none rounded-2xl border border-edge bg-surface py-4 pl-5 pr-14 text-[15px] outline-none transition-colors focus:border-accent"
+            className="w-full resize-none rounded-2xl border border-field bg-surface py-4 pl-5 pr-14 text-[15px] outline-none transition-colors focus:border-accent"
           />
           <button
             type="submit"
@@ -218,12 +219,23 @@ export default function AskPage({
       </div>
 
       {result && sources.length > 0 && (
-        <SourcesPanel
-          open={sourcesOpen}
-          cited={result.citations.length > 0}
-          sources={sources}
-          onClose={() => setSourcesOpen(false)}
-        />
+        <>
+          <SourcesPanel
+            open={sourcesOpen}
+            cited={result.citations.length > 0}
+            sources={sources}
+            onClose={() => setSourcesOpen(false)}
+          />
+          {/* The panel is a `lg:block` drawer, so below that breakpoint — a
+              phone, or a desktop at 400% zoom — the sheet is the only way the
+              evidence is reachable at all. Ask never shows an answer without
+              the page it came from, and that has to hold at every width. */}
+          <SourcesSheet
+            open={sourcesOpen}
+            sources={sources}
+            onClose={() => setSourcesOpen(false)}
+          />
+        </>
       )}
     </div>
   );
@@ -418,7 +430,7 @@ function SourcesPanel({
 }
 
 /** Narrow screens get the same list as a sheet rather than a side panel. */
-export function SourcesSheet({
+function SourcesSheet({
   open,
   sources,
   onClose,
@@ -429,31 +441,31 @@ export function SourcesSheet({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-40 flex items-end bg-ink/70 lg:hidden" onClick={onClose}>
-      <div
-        className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl border-t border-edge bg-surface p-4"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium">Sources</h2>
-          <button onClick={onClose} aria-label="Close sources">
-            <X size={16} />
-          </button>
-        </div>
-        <ol className="divide-y divide-edge">
-          {sources.map((source, index) => (
-            <li key={index} className="py-3">
-              <Link
-                to={`/document/${source.document_id}/page/${source.page_number}`}
-                className="text-sm font-medium underline-offset-2 hover:underline"
-              >
-                {source.title}
-              </Link>
-              <p className="text-xs text-muted">page {source.page_number}</p>
-            </li>
-          ))}
-        </ol>
+    <Modal
+      label="Sources"
+      onClose={onClose}
+      backdropClassName="fixed inset-0 z-40 flex items-end bg-ink/70 lg:hidden"
+      className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl border-t border-edge bg-surface p-4"
+    >
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-medium">Sources</h2>
+        <button onClick={onClose} aria-label="Close sources">
+          <X size={16} />
+        </button>
       </div>
-    </div>
+      <ol className="divide-y divide-edge">
+        {sources.map((source, index) => (
+          <li key={index} className="py-3">
+            <Link
+              to={`/document/${source.document_id}/page/${source.page_number}`}
+              className="text-sm font-medium underline-offset-2 hover:underline"
+            >
+              {source.title}
+            </Link>
+            <p className="text-xs text-muted">page {source.page_number}</p>
+          </li>
+        ))}
+      </ol>
+    </Modal>
   );
 }

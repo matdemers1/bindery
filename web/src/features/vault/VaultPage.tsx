@@ -160,10 +160,12 @@ export default function VaultPage() {
             </label>
             <input
               id="vault-search"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "vault-search-error" : undefined}
               value={q}
               onChange={(event) => setQ(event.target.value)}
               placeholder="Search inside the vault…"
-              className="w-full rounded-lg border border-edge bg-surface py-2 pl-9 pr-3 text-sm outline-none focus:border-accent"
+              className="w-full rounded-lg border border-field bg-surface py-2 pl-9 pr-3 text-sm outline-none focus:border-accent"
             />
           </form>
 
@@ -195,7 +197,11 @@ export default function VaultPage() {
           )}
 
           {error && (
-            <p className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300">
+            <p
+              id="vault-search-error"
+              role="alert"
+              className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300"
+            >
               {error}
             </p>
           )}

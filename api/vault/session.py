@@ -55,7 +55,34 @@ class Sessions:
         log.info("vault unlocked for %s", user_id)
 
     def key(self, user_id: uuid.UUID, *, now: datetime | None = None) -> bytes | None:
-        """The data key, or None. Touching it extends the idle window."""
+        """The data key, or None. Touching it extends the idle window.
+
+        For calls made on a person's behalf — an unlock, a search, opening a
+        document, moving one in or out. Code that only needs to *know* whether
+        a vault is open wants `peek`.
+        """
+        return self._read(user_id, now=now, extend=True)
+
+    def peek(self, user_id: uuid.UUID, *, now: datetime | None = None) -> bytes | None:
+        """The data key, or None, without counting as use.
+
+        The vault sweep asks whether each vault-bound import's owner is
+        unlocked, four times a minute. Asking through `key` answered itself:
+        any account with one such import — the ordinary state after any vault
+        import, since nothing clears the flag — had its idle window reset on
+        every tick and could never time out, so ADR-012's fifteen minutes
+        silently became "until the process restarts" for exactly the accounts
+        that use the vault most. Nobody could see it: the screen said unlocked,
+        and it was.
+
+        Non-touching, not non-expiring — an expired key is still dropped here
+        rather than merely reported as absent.
+        """
+        return self._read(user_id, now=now, extend=False)
+
+    def _read(
+        self, user_id: uuid.UUID, *, now: datetime | None, extend: bool
+    ) -> bytes | None:
         now = now or datetime.now(UTC)
         with self._guard:
             held = self._by_user.get(user_id)
@@ -67,7 +94,8 @@ class Sessions:
                 del self._by_user[user_id]
                 log.info("vault relocked for %s after idling", user_id)
                 return None
-            held.touched_at = now
+            if extend:
+                held.touched_at = now
             return held.data_key
 
     def lock(self, user_id: uuid.UUID) -> bool:
@@ -81,6 +109,11 @@ class Sessions:
         return count
 
     def is_unlocked(self, user_id: uuid.UUID) -> bool:
+        """Asked on a person's behalf, so it counts as use, like `key`.
+
+        Every caller of this is inside a request that person made. A background
+        reader must use `peek`, or its own polling keeps the vault open.
+        """
         return self.key(user_id) is not None
 
     def __repr__(self) -> str:

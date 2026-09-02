@@ -19,6 +19,7 @@ from api.db.enums import (
     ActorType,
     IngestSource,
     JobStage,
+    JobState,
     LibraryKind,
     ReviewState,
     SourceFileState,
@@ -366,6 +367,51 @@ async def test_classification_queues_the_rules_stage(session, document) -> None:
         )
     ).scalar_one()
     assert queued is not None
+
+
+async def test_re_classifying_sends_the_document_through_rules_again(session, document) -> None:
+    """A replay has to reset the next stage, or the document is stranded.
+
+    Classify puts every document it touches back into PENDING_CLASSIFICATION,
+    and `run_rules` is the only thing that takes it out again. Cascading with
+    the idempotent `enqueue` left the rules job that had already succeeded
+    exactly where it was, so a re-classified document waited for a stage that
+    would never run — and `api/reclassify.py` reads "waiting" as precisely that
+    state, so it offered the same document again on every visit.
+    """
+    _, _, doc = document
+    await _classify(session, doc)
+
+    # Stand in for the rules stage having run: the job succeeded and the
+    # document was filed. This is the state every replay actually starts from.
+    rules_job = (
+        await session.execute(
+            sa.select(Job).where(Job.document_id == doc.id, Job.stage == JobStage.RULES.value)
+        )
+    ).scalar_one()
+    rules_job.state = JobState.SUCCEEDED
+    rules_job.attempts = 3
+    doc.review_state = ReviewState.FILED
+    await session.commit()
+
+    await _classify(session, doc)
+    # From the database rather than from the identity map: `requeue_stage`
+    # resets the job with a core UPDATE, which the loaded object does not see.
+    session.expire_all()
+    await session.refresh(doc)
+    assert doc.review_state is ReviewState.PENDING_CLASSIFICATION
+
+    jobs = (
+        await session.execute(
+            sa.select(Job).where(Job.document_id == doc.id, Job.stage == JobStage.RULES.value)
+        )
+    ).scalars().all()
+    assert len(jobs) == 1, "a replay must reset the existing rules job, not add a second"
+    assert jobs[0].state is JobState.QUEUED, (
+        "the rules job was left as it was, so nothing will move this document "
+        "out of PENDING_CLASSIFICATION"
+    )
+    assert jobs[0].attempts == 0, "a replay gets a full attempt budget"
 
 
 # --------------------------------------------------------------------------

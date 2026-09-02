@@ -8,6 +8,13 @@
   --color-edge: #232a37;
   --color-muted: #8b94a7;
   --color-accent: #d8a657;
+
+  /* `edge` is a card stroke — 1.2:1 against surface, which is all a divider
+     needs to be. A form control's border is not a divider: it is the boundary
+     of a user-interface component, and WCAG 1.4.11 asks for 3:1 so the box can
+     be found before it is focused. `field` is 3.3:1 on surface, 3.6:1 on ink
+     and 3.5:1 on the ink/40 fill the edit panel uses. */
+  --color-field: #606c7e;
 }
 
 html,

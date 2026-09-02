@@ -133,3 +133,29 @@ def test_moving_the_dump_prefix_without_moving_the_rule_is_caught():
                    for f in offsite.audit_lifecycle(checked_in_rules()))
     finally:
         offsite.DUMP_PREFIX = original
+
+
+def test_a_rule_aimed_at_the_vault_prefix_is_caught():
+    """The blob rule's argument, applied to the objects it is truer of.
+
+    A blob that expires can be re-uploaded from the disk it was hashed from. A
+    sealed vault object cannot: the plaintext was destroyed when it was sealed,
+    so the bucket's copy and the household's copy are the only two that exist,
+    and an expiry rule takes one of them with no error and no alert. Until this
+    was added the audit only ever looked at `blobs/`, so a `vault/` rule passed
+    in silence (CR-012).
+    """
+    rules = [
+        *checked_in_rules(),
+        {"ID": "prune-vault", "Status": "Enabled", "Filter": {"Prefix": "vault/"},
+         "Expiration": {"Days": 365}},
+    ]
+    findings = offsite.audit_lifecycle(rules)
+    assert any("meant to be kept" in f and "vault object" in f for f in findings)
+
+
+def test_the_vault_sample_key_comes_from_the_real_key_builder():
+    """Same drift argument as the dump prefixes: a hard-coded `vault/...` would
+    keep passing after `vault_object_key` moved."""
+    assert offsite.sample_keys()["vault object"] == offsite.vault_object_key("a" * 64)
+    assert offsite.sample_keys()["vault object"].startswith(offsite.VAULT_PREFIX)

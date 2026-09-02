@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ImageOff, Undo2, X } from "lucide-react";
 
 import { fileUrl, type VaultItem } from "../../api";
+import Modal from "../../components/Modal";
 
 /**
  * Vaulted photographs, as photographs.
@@ -83,50 +84,47 @@ export default function VaultGrid({
       </ul>
 
       {open && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/90 p-6"
-          onClick={() => setOpen(null)}
+        <Modal
+          label={open.title ?? open.original_filename ?? "Untitled"}
+          onClose={() => setOpen(null)}
+          backdropClassName="fixed inset-0 z-50 flex items-center justify-center bg-ink/90 p-6"
+          className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-edge bg-surface lg:flex-row"
         >
-          <div
-            className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-edge bg-surface lg:flex-row"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <img
-              src={fileUrl.vaultOriginal(open.document_id)}
-              alt={open.title ?? "A vaulted picture"}
-              className="max-h-[80vh] flex-1 bg-ink object-contain"
-            />
-            <div className="w-full shrink-0 space-y-3 border-t border-edge p-4 lg:w-72 lg:border-l lg:border-t-0">
-              <div className="flex items-start justify-between gap-2">
-                <h2 className="text-sm font-medium">
-                  {open.title ?? open.original_filename ?? "Untitled"}
-                </h2>
-                <button type="button" onClick={() => setOpen(null)} aria-label="Close">
-                  <X size={15} />
-                </button>
-              </div>
-              <dl className="grid grid-cols-[5rem_1fr] gap-y-1 text-xs">
-                <dt className="text-muted">Filename</dt>
-                <dd className="truncate">{open.original_filename ?? "—"}</dd>
-                <dt className="text-muted">Vaulted</dt>
-                <dd>{open.vaulted_at?.slice(0, 10) ?? "—"}</dd>
-              </dl>
-              <button
-                type="button"
-                onClick={() => onTakeOut(open.document_id)}
-                disabled={busy === open.document_id}
-                className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
-              >
-                <Undo2 size={13} />
-                {busy === open.document_id ? "Restoring…" : "Take out of the vault"}
+          <img
+            src={fileUrl.vaultOriginal(open.document_id)}
+            alt={open.title ?? "A vaulted picture"}
+            className="max-h-[80vh] flex-1 bg-ink object-contain"
+          />
+          <div className="w-full shrink-0 space-y-3 border-t border-edge p-4 lg:w-72 lg:border-l lg:border-t-0">
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="text-sm font-medium">
+                {open.title ?? open.original_filename ?? "Untitled"}
+              </h2>
+              <button type="button" onClick={() => setOpen(null)} aria-label="Close">
+                <X size={15} />
               </button>
-              <p className="text-[11px] text-muted">
-                Nothing here is cached. Closing the vault makes this
-                unreadable again until the PIN is entered.
-              </p>
             </div>
+            <dl className="grid grid-cols-[5rem_1fr] gap-y-1 text-xs">
+              <dt className="text-muted">Filename</dt>
+              <dd className="truncate">{open.original_filename ?? "—"}</dd>
+              <dt className="text-muted">Vaulted</dt>
+              <dd>{open.vaulted_at?.slice(0, 10) ?? "—"}</dd>
+            </dl>
+            <button
+              type="button"
+              onClick={() => onTakeOut(open.document_id)}
+              disabled={busy === open.document_id}
+              className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+            >
+              <Undo2 size={13} />
+              {busy === open.document_id ? "Restoring…" : "Take out of the vault"}
+            </button>
+            <p className="text-[11px] text-muted">
+              Nothing here is cached. Closing the vault makes this
+              unreadable again until the PIN is entered.
+            </p>
           </div>
-        </div>
+        </Modal>
       )}
     </>
   );

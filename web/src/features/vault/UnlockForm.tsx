@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { KeyRound, Lock } from "lucide-react";
 
 import { ApiError, api, type VaultState } from "../../api";
@@ -30,6 +30,16 @@ export default function UnlockForm({
   const [error, setError] = useState<string | null>(null);
 
   const remaining = Math.max(0, 5 - state.pin_failures);
+
+  // The field has to point at whatever is being said about it. A wrong PIN
+  // used to produce a paragraph nobody was told about, so the first thing a
+  // screen-reader user learned was that the PIN had been switched off.
+  const errorId = useId();
+  const attemptsId = useId();
+  const describedBy =
+    [state.pin_failures > 0 ? attemptsId : null, error ? errorId : null]
+      .filter(Boolean)
+      .join(" ") || undefined;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -74,9 +84,11 @@ export default function UnlockForm({
             id="vault-passphrase"
             type="password"
             autoComplete="off"
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? errorId : undefined}
             value={passphrase}
             onChange={(event) => setPassphrase(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-edge bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+            className="mt-1 w-full rounded-lg border border-field bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
           />
         </div>
       ) : (
@@ -89,12 +101,14 @@ export default function UnlockForm({
             type="password"
             inputMode="numeric"
             autoComplete="off"
+            aria-invalid={Boolean(error)}
+            aria-describedby={describedBy}
             value={pin}
             onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
-            className="mt-1 w-full rounded-lg border border-edge bg-surface px-3 py-2 font-mono text-lg tracking-[0.4em] outline-none focus:border-accent"
+            className="mt-1 w-full rounded-lg border border-field bg-surface px-3 py-2 font-mono text-lg tracking-[0.4em] outline-none focus:border-accent"
           />
           {state.pin_failures > 0 && (
-            <p className="mt-1 text-xs text-amber-400">
+            <p id={attemptsId} role="status" className="mt-1 text-xs text-amber-400">
               {remaining} attempt{remaining === 1 ? "" : "s"} left. After that the
               PIN is switched off and the passphrase is the way in — nothing in
               the vault is lost.
@@ -104,7 +118,11 @@ export default function UnlockForm({
       )}
 
       {error && (
-        <p className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300">
+        <p
+          id={errorId}
+          role="alert"
+          className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300"
+        >
           {error}
         </p>
       )}

@@ -206,3 +206,46 @@ async def test_the_limit_caps_hits_without_lying_about_the_total(session, stocke
     found = await search.search(session, my_vault.id, "brackenridge", my_key, limit=2)
     assert len(found.hits) == 2
     assert found.total == 6
+
+
+async def test_a_vault_larger_than_one_batch_is_scanned_whole(session, stocked, monkeypatch):
+    """The scan is streamed a batch at a time rather than loaded whole
+    (CR-032). A page must not fall down the gap between two batches, and must
+    not be counted twice."""
+    my_vault, my_key, _yv, _yk, _doc, item = stocked
+    monkeypatch.setattr(search, "BATCH_PAGES", 2)
+    for number in range(10, 20):
+        session.add(
+            VaultPage(
+                vault_item_id=item.id, page_number=number,
+                sealed_text=crypto.encrypt(f"{PHRASE} on page {number}".encode(), my_key),
+            )
+        )
+    await session.commit()
+
+    found = await search.search(session, my_vault.id, "brackenridge", my_key, limit=50)
+    assert found.pages_scanned == 12, "a batch boundary lost or repeated a page"
+    assert found.total == 11
+    assert len({hit.page_number for hit in found.hits}) == len(found.hits)
+
+
+async def test_the_scan_does_not_run_on_the_event_loop(session, stocked, monkeypatch):
+    """ADR-012 buys the linear cost with the searcher's patience. It does not
+    buy it with the whole server's — one uvicorn loop serves everything, so a
+    decrypt-and-scan on it is a scan during which nothing else is answered."""
+    import threading
+
+    my_vault, my_key, *_ = stocked
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+    scan = search._scan
+
+    def spy(*args, **kwargs):
+        seen.append(threading.get_ident())
+        return scan(*args, **kwargs)
+
+    monkeypatch.setattr(search, "_scan", spy)
+    found = await search.search(session, my_vault.id, "brackenridge", my_key)
+    assert found.total == 1
+    assert seen, "nothing was scanned"
+    assert all(ident != loop_thread for ident in seen)

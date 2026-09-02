@@ -22,7 +22,7 @@ from api.audit import record
 from api.db.enums import ActorType, JobState, SourceFileState
 from api.db.models import Document, ImportItem, ImportSession, Job, SourceFile, Vault
 from api.segments import live
-from api.vault import service, store
+from api.vault import store
 from api.vault.session import sessions
 
 log = logging.getLogger("bindery.vault.sweep")
@@ -33,7 +33,14 @@ IN_FLIGHT = tuple(state.value for state in (JobState.QUEUED, JobState.RUNNING, J
 
 def _ready_documents(import_session_id: uuid.UUID):
     """Documents from this import that are finished and not yet vaulted."""
-    busy = sa.select(Job.source_file_id).where(Job.state.in_(IN_FLIGHT))
+    # `is_not(None)` is load-bearing: classify and rules jobs carry a document
+    # and no source file, and `x NOT IN (…, NULL)` is never true in SQL. One
+    # queued classification anywhere in the archive — the ordinary state during
+    # any import — therefore made this list empty and the sweep sealed nothing,
+    # silently, for as long as the pipeline had work to do.
+    busy = sa.select(Job.source_file_id).where(
+        Job.state.in_(IN_FLIGHT), Job.source_file_id.is_not(None)
+    )
     return (
         sa.select(Document)
         .join(SourceFile, SourceFile.id == Document.source_file_id)
@@ -93,16 +100,18 @@ async def sweep_once(session: AsyncSession) -> int:
 
     sealed = 0
     for import_id, owner in bound:
-        if not sessions.is_unlocked(owner):
+        # `peek`, not `key` or `is_unlocked`: this runs every fifteen seconds
+        # whether anyone is here or not, and a read that extended the idle
+        # window would mean an account with one vault-bound import never idled
+        # out at all. The vault closing behind you is the whole point of the
+        # timeout (ADR-012); a poll is not somebody using the vault.
+        key = sessions.peek(owner)
+        if key is None:
             continue
         vault_id = (
             await session.execute(sa.select(Vault.id).where(Vault.user_id == owner))
         ).scalar_one_or_none()
         if vault_id is None:
-            continue
-        try:
-            key = service.require_key(owner)
-        except service.VaultLocked:
             continue
 
         ready_ids = [

@@ -106,7 +106,7 @@ export default function LibrariesPage() {
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
             placeholder="Library name"
-            className="w-64 rounded border border-edge bg-ink px-2 py-1.5 text-sm"
+            className="w-64 rounded border border-field bg-ink px-2 py-1.5 text-sm"
           />
           <button
             type="submit"
@@ -149,9 +149,10 @@ function LibraryCard({
             <span className="flex-1">{member.display_name ?? member.email}</span>
             {canManage ? (
               <select
+                aria-label={`Role for ${member.display_name ?? member.email}`}
                 value={member.role}
                 onChange={(event) => onChange(member.email, event.target.value)}
-                className="rounded border border-edge bg-ink px-2 py-1 text-xs"
+                className="rounded border border-field bg-ink px-2 py-1 text-xs"
               >
                 <option value="owner">owner</option>
                 <option value="contributor">contributor</option>
@@ -178,12 +179,13 @@ function LibraryCard({
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="Add someone by email"
-            className="w-64 rounded border border-edge bg-ink px-2 py-1.5 text-sm"
+            className="w-64 rounded border border-field bg-ink px-2 py-1.5 text-sm"
           />
           <select
+            aria-label="Role for the person you are adding"
             value={role}
             onChange={(event) => setRole(event.target.value)}
-            className="rounded border border-edge bg-ink px-2 py-1.5 text-sm"
+            className="rounded border border-field bg-ink px-2 py-1.5 text-sm"
           >
             <option value="reader">reader</option>
             <option value="contributor">contributor</option>

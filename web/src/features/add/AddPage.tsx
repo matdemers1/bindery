@@ -242,7 +242,7 @@ export default function AddPage({
                   id="target-library"
                   value={libraryId}
                   onChange={(event) => setChosen(event.target.value)}
-                  className="rounded border border-edge bg-ink px-2 py-1 text-xs"
+                  className="rounded border border-field bg-ink px-2 py-1 text-xs"
                 >
                   {libraries.map((library) => (
                     <option key={library.id} value={library.id}>

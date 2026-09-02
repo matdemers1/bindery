@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { Eye, Film, Images, Search, Sparkles } from "lucide-react";
 
 import { api, type Photo, fileUrl } from "../../api";
+import Modal from "../../components/Modal";
 import PageHeader from "../../components/PageHeader";
 import { useLiveQuery } from "../../live/LiveProvider";
 import MetadataPanel, { formatDuration } from "../media/MetadataPanel";
@@ -135,7 +136,7 @@ export default function PhotosPage() {
             value={q}
             onChange={(event) => setQ(event.target.value)}
             placeholder="Filter by title, description or filename…"
-            className="w-full rounded-lg border border-edge bg-surface py-2 pl-9 pr-3 text-sm outline-none focus:border-accent"
+            className="w-full rounded-lg border border-field bg-surface py-2 pl-9 pr-3 text-sm outline-none focus:border-accent"
           />
         </div>
         {kind === "image" && (
@@ -279,87 +280,82 @@ function Lightbox({
   onVaulted: () => void;
 }) {
   const playable = photo.media?.browser_playable ?? true;
+  const heading = photo.title ?? photo.original_filename ?? "Untitled";
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/85 p-6"
-      onClick={onClose}
+    <Modal
+      label={heading}
+      onClose={onClose}
+      className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-edge bg-surface lg:flex-row"
     >
-      <div
-        className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-edge bg-surface lg:flex-row"
-        onClick={(event) => event.stopPropagation()}
-      >
-        {photo.kind === "video" ? (
-          playable ? (
-            // `FileResponse` honours Range, which is what lets this seek.
-            <video
-              controls
-              preload="metadata"
-              poster={fileUrl.poster(photo.source_file_id)}
-              src={fileUrl.original(photo.source_file_id)}
-              className="max-h-[80vh] flex-1 bg-ink"
-            />
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-ink p-8 text-center text-sm text-muted">
-              <Film size={28} aria-hidden />
-              <p>Browsers cannot play this format directly.</p>
-              <a
-                href={fileUrl.original(photo.source_file_id)}
-                className="rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
-              >
-                Download to watch
-              </a>
-            </div>
-          )
-        ) : (
-          <img
-            src={fileUrl.render(photo.source_file_id, photo.page)}
-            alt={photo.title ?? "Image"}
-            className="max-h-[80vh] flex-1 bg-ink object-contain"
+      {photo.kind === "video" ? (
+        playable ? (
+          // `FileResponse` honours Range, which is what lets this seek.
+          <video
+            controls
+            preload="metadata"
+            poster={fileUrl.poster(photo.source_file_id)}
+            src={fileUrl.original(photo.source_file_id)}
+            className="max-h-[80vh] flex-1 bg-ink"
           />
-        )}
-        <div className="w-full shrink-0 space-y-3 border-t border-edge p-4 lg:w-80 lg:border-l lg:border-t-0">
-          <h2 className="text-sm font-medium">
-            {photo.title ?? photo.original_filename ?? "Untitled"}
-          </h2>
-          {photo.kind === "image" && (
-            photo.summary ? (
-              <p className="text-sm text-muted">{photo.summary}</p>
-            ) : (
-              <p className="rounded border border-amber-900/60 bg-amber-950/20 p-2.5 text-xs text-amber-300">
-                Nothing has described this image. If OCR read no text there is
-                nothing to search on — running AI review over it is what gives it a
-                title and tags.
-              </p>
-            )
-          )}
-          {photo.media ? (
-            <MetadataPanel media={photo.media} />
-          ) : (
-            <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
-              <dt className="text-muted">Filename</dt>
-              <dd className="truncate">{photo.original_filename ?? "—"}</dd>
-              <dt className="text-muted">Added</dt>
-              <dd>{photo.received_at.slice(0, 10)}</dd>
-            </dl>
-          )}
-          <div className="flex flex-wrap items-center gap-2">
-            {photo.kind === "image" && (
-              <Link
-                to={`/document/${photo.document_id}/page/${photo.page}`}
-                className="inline-block rounded border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
-              >
-                Open in the viewer
-              </Link>
-            )}
-            <MoveToVault
-              documentId={photo.document_id}
-              title={photo.title ?? photo.original_filename}
-              onMoved={onVaulted}
-              className="flex items-center gap-1.5 rounded border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
-            />
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-ink p-8 text-center text-sm text-muted">
+            <Film size={28} aria-hidden />
+            <p>Browsers cannot play this format directly.</p>
+            <a
+              href={fileUrl.original(photo.source_file_id)}
+              className="rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
+            >
+              Download to watch
+            </a>
           </div>
+        )
+      ) : (
+        <img
+          src={fileUrl.render(photo.source_file_id, photo.page)}
+          alt={photo.title ?? "Image"}
+          className="max-h-[80vh] flex-1 bg-ink object-contain"
+        />
+      )}
+      <div className="w-full shrink-0 space-y-3 border-t border-edge p-4 lg:w-80 lg:border-l lg:border-t-0">
+        <h2 className="text-sm font-medium">{heading}</h2>
+        {photo.kind === "image" && (
+          photo.summary ? (
+            <p className="text-sm text-muted">{photo.summary}</p>
+          ) : (
+            <p className="rounded border border-amber-900/60 bg-amber-950/20 p-2.5 text-xs text-amber-300">
+              Nothing has described this image. If OCR read no text there is
+              nothing to search on — running AI review over it is what gives it a
+              title and tags.
+            </p>
+          )
+        )}
+        {photo.media ? (
+          <MetadataPanel media={photo.media} />
+        ) : (
+          <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
+            <dt className="text-muted">Filename</dt>
+            <dd className="truncate">{photo.original_filename ?? "—"}</dd>
+            <dt className="text-muted">Added</dt>
+            <dd>{photo.received_at.slice(0, 10)}</dd>
+          </dl>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {photo.kind === "image" && (
+            <Link
+              to={`/document/${photo.document_id}/page/${photo.page}`}
+              className="inline-block rounded border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
+            >
+              Open in the viewer
+            </Link>
+          )}
+          <MoveToVault
+            documentId={photo.document_id}
+            title={photo.title ?? photo.original_filename}
+            onMoved={onVaulted}
+            className="flex items-center gap-1.5 rounded border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
+          />
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

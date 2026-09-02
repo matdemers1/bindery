@@ -11,6 +11,7 @@ hundreds of documents and is not fine for thousands, so the ceiling is measured
 rather than assumed and reported rather than discovered.
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -18,6 +19,7 @@ import uuid
 from dataclasses import dataclass
 
 import sqlalchemy as sa
+from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.db.models import VaultItem, VaultPage
@@ -29,6 +31,10 @@ log = logging.getLogger("bindery.vault")
 # response is to say so rather than to quietly take four seconds.
 SLOW_AFTER_PAGES = 5_000
 SNIPPET_RADIUS = 90
+# How many pages one trip to a worker thread carries. Small enough that only a
+# batch of ciphertext is resident rather than the whole vault, large enough
+# that the hop costs nothing against the decryption it is carrying.
+BATCH_PAGES = 200
 
 
 @dataclass
@@ -64,32 +70,21 @@ def _snippet(text: str, terms: list[str]) -> str:
     return ("…" if start else "") + text[start:end].strip() + ("…" if end < len(text) else "")
 
 
-async def search(
-    session: AsyncSession,
-    vault_id: uuid.UUID,
-    query: str,
+def _scan(
+    batch: list[Row],
     data_key: bytes,
-    *,
-    limit: int = 25,
-) -> VaultResults:
-    """Every vaulted page matching the query, decrypted here and now."""
-    terms = [term for term in re.split(r"\W+", query.lower()) if len(term) > 1]
-    if not terms:
-        return VaultResults(total=0, hits=[], pages_scanned=0, elapsed_ms=0)
+    terms: list[str],
+    titles: dict[uuid.UUID, str | None],
+) -> list[VaultHit]:
+    """Decrypt one batch of pages and keep the ones that match.
 
-    started = time.monotonic()
-    rows = (
-        await session.execute(
-            sa.select(VaultPage, VaultItem)
-            .join(VaultItem, VaultItem.id == VaultPage.vault_item_id)
-            .where(VaultItem.vault_id == vault_id)
-            .order_by(VaultItem.vaulted_at.desc(), VaultPage.page_number)
-        )
-    ).all()
-
+    Every byte of AES and every `str.lower` in the scan happens here, and this
+    runs in a worker thread. The cost is ADR-012's and stays; what must not
+    happen is the single API event loop paying it, because then a four-second
+    vault search is four seconds in which nothing else in Bindery is served.
+    """
     hits: list[VaultHit] = []
-    titles: dict[uuid.UUID, str | None] = {}
-    for page, item in rows:
+    for page, item in batch:
         try:
             text = crypto.decrypt(page.sealed_text, data_key).decode()
         except crypto.WrongSecret:
@@ -110,18 +105,53 @@ async def search(
                 snippet=_snippet(text, terms),
             )
         )
+    return hits
+
+
+async def search(
+    session: AsyncSession,
+    vault_id: uuid.UUID,
+    query: str,
+    data_key: bytes,
+    *,
+    limit: int = 25,
+) -> VaultResults:
+    """Every vaulted page matching the query, decrypted here and now."""
+    terms = [term for term in re.split(r"\W+", query.lower()) if len(term) > 1]
+    if not terms:
+        return VaultResults(total=0, hits=[], pages_scanned=0, elapsed_ms=0)
+
+    started = time.monotonic()
+    # Streamed a batch at a time rather than loaded whole. The scan has to read
+    # every page either way — that is the decision — but it does not have to
+    # hold every page's ciphertext at once, which on a vault of videos and
+    # scans is the difference between a working box and an OOM kill.
+    stream = await session.stream(
+        sa.select(VaultPage, VaultItem)
+        .join(VaultItem, VaultItem.id == VaultPage.vault_item_id)
+        .where(VaultItem.vault_id == vault_id)
+        .order_by(VaultItem.vaulted_at.desc(), VaultPage.page_number)
+        .execution_options(yield_per=BATCH_PAGES)
+    )
+
+    hits: list[VaultHit] = []
+    titles: dict[uuid.UUID, str | None] = {}
+    scanned = 0
+    async for batch in stream.partitions():
+        scanned += len(batch)
+        hits.extend(await asyncio.to_thread(_scan, batch, data_key, terms, titles))
 
     elapsed = int((time.monotonic() - started) * 1000)
-    if len(rows) > SLOW_AFTER_PAGES:
+    if scanned > SLOW_AFTER_PAGES:
         log.warning(
             "vault search scanned %s pages in %sms — past %s pages this is slow "
             "enough to notice, and the design note in ADR-012 applies",
-            len(rows), elapsed, SLOW_AFTER_PAGES,
+            scanned, elapsed, SLOW_AFTER_PAGES,
         )
     return VaultResults(
         total=len(hits),
         hits=hits[:limit],
-        pages_scanned=len(rows),
+        pages_scanned=scanned,
         elapsed_ms=elapsed,
-        slow=len(rows) > SLOW_AFTER_PAGES,
+        slow=scanned > SLOW_AFTER_PAGES,
     )

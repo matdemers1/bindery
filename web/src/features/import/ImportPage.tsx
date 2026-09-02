@@ -200,7 +200,7 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
               value={path}
               onChange={(event) => setPath(event.target.value)}
               placeholder={`…or a folder the worker can see, e.g. ${inbox ?? "/data/inbox"}/2019`}
-              className="min-w-0 flex-1 rounded-lg border border-edge bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent"
+              className="min-w-0 flex-1 rounded-lg border border-field bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent"
             />
             <button
               type="submit"

@@ -378,10 +378,14 @@ async def _offsite_replication(stopping: asyncio.Event) -> None:
                     # credential rotated between the claim and the run should
                     # take effect, not fail with the one it replaced.
                     config = await offsite.config_from_settings(session)
+                    # Building a boto3 client loads botocore's service model
+                    # off disk and resolves credentials. Small, but blocking,
+                    # and this loop is shared with all three OCR slots.
+                    client = await asyncio.to_thread(offsite.make_client, config)
                     result = await offsite.replicate(
                         session,
                         config,
-                        offsite.make_client(config),
+                        client,
                         kind=offsite.Kind(run.kind),
                         blob_root=get_settings().blob_root,
                         integrity_report=await integrity.check(session),

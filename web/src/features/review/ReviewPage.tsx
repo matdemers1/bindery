@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 import { ApiError, api, type Document, type DocumentDetail } from "../../api";
+import { isTypingTarget } from "../../lib/keyboard";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 
@@ -71,7 +72,7 @@ export default function ReviewPage() {
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.target instanceof HTMLInputElement) return;
+      if (isTypingTarget(event.target)) return;
       if (event.metaKey || event.ctrlKey) return;
       const key = event.key.toLowerCase();
       if (key === "j") setIndex((n) => Math.min(n + 1, documents.length - 1));

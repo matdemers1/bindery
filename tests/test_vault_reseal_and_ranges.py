@@ -217,3 +217,69 @@ async def test_a_range_never_reads_a_locked_vault(client, session, v1_item):
     )
     assert response.status_code == 423
     assert BODY[:11] not in response.content
+
+
+async def test_a_read_with_no_range_never_reads_a_locked_vault(client, session, v1_item):
+    """The same property as the range case, on the path a download link takes.
+    Streaming the body must not have moved the refusal after the first chunk."""
+    user, document, _item, _key, _ = v1_item
+    sessions.lock(user.id)
+
+    response = await client.get(f"/api/vault/items/{document.id}/original")
+    assert response.status_code == 423
+    assert BODY[:11] not in response.content
+
+
+async def test_the_whole_file_is_streamed_rather_than_joined(
+    client, session, v1_item, monkeypatch
+):
+    """CR-033: the Range-less path used to `read_all` — every chunk decrypted
+    and concatenated into one `bytes` before a byte was sent, which is the
+    thing ADR-013 exists to prevent. It must never hold more than a chunk."""
+    document, _ = await _v2(session, v1_item)
+
+    def refuse(self):
+        raise AssertionError("the whole plaintext was joined in memory")
+
+    spans: list[int] = []
+    read_range = chunked.Reader.read_range
+
+    def record(self, start: int, end: int) -> bytes:
+        spans.append(end - start + 1)
+        return read_range(self, start, end)
+
+    monkeypatch.setattr(chunked.Reader, "read_all", refuse)
+    monkeypatch.setattr(chunked.Reader, "read_range", record)
+
+    response = await client.get(f"/api/vault/items/{document.id}/original")
+    assert response.status_code == 200
+    assert response.content == BODY
+    # The size is still declared, or a browser cannot scrub the video and a
+    # download has no progress bar.
+    assert response.headers["content-length"] == str(len(BODY))
+    assert response.headers["accept-ranges"] == "bytes"
+    assert "no-store" in response.headers["cache-control"]
+    assert spans and max(spans) <= chunked.CHUNK_SIZE
+
+
+async def test_decryption_does_not_run_on_the_event_loop(
+    client, session, v1_item, monkeypatch
+):
+    """A 2 GB video decrypted inside the handler is 2 GB of one uvicorn loop
+    doing nothing else (CR-033)."""
+    import threading
+
+    document, _ = await _v2(session, v1_item)
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+    read_range = chunked.Reader.read_range
+
+    def record(self, start: int, end: int) -> bytes:
+        seen.append(threading.get_ident())
+        return read_range(self, start, end)
+
+    monkeypatch.setattr(chunked.Reader, "read_range", record)
+
+    assert (await client.get(f"/api/vault/items/{document.id}/original")).status_code == 200
+    assert seen, "no chunk was decrypted"
+    assert all(ident != loop_thread for ident in seen)

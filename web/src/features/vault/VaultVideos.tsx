@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Download, Film, Undo2, X } from "lucide-react";
 
 import { fileUrl, type VaultItem } from "../../api";
+import Modal from "../../components/Modal";
 import MetadataPanel, { formatDuration } from "../media/MetadataPanel";
 
 /**
@@ -76,59 +77,56 @@ export default function VaultVideos({
       </ul>
 
       {open && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/90 p-6"
-          onClick={() => setOpen(null)}
+        <Modal
+          label={open.title ?? open.original_filename ?? "Untitled"}
+          onClose={() => setOpen(null)}
+          backdropClassName="fixed inset-0 z-50 flex items-center justify-center bg-ink/90 p-6"
+          className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-edge bg-surface lg:flex-row"
         >
-          <div
-            className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-edge bg-surface lg:flex-row"
-            onClick={(event) => event.stopPropagation()}
-          >
-            {(open.media?.browser_playable ?? true) ? (
-              <video
-                controls
-                preload="metadata"
-                src={fileUrl.vaultOriginal(open.document_id)}
-                className="max-h-[80vh] flex-1 bg-ink"
-              />
-            ) : (
-              <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-ink p-8 text-center text-sm text-muted">
-                <Film size={28} aria-hidden />
-                <p>Browsers cannot play {open.media_type ?? "this format"} directly.</p>
-                <a
-                  href={fileUrl.vaultOriginal(open.document_id)}
-                  className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
-                >
-                  <Download size={13} /> Download to watch
-                </a>
-              </div>
-            )}
-            <div className="w-full shrink-0 space-y-3 border-t border-edge p-4 lg:w-72 lg:border-l lg:border-t-0">
-              <div className="flex items-start justify-between gap-2">
-                <h2 className="text-sm font-medium">
-                  {open.title ?? open.original_filename ?? "Untitled"}
-                </h2>
-                <button type="button" onClick={() => setOpen(null)} aria-label="Close">
-                  <X size={15} />
-                </button>
-              </div>
-              {open.media && <MetadataPanel media={open.media} />}
-              <button
-                type="button"
-                onClick={() => onTakeOut(open.document_id)}
-                disabled={busy === open.document_id}
-                className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+          {(open.media?.browser_playable ?? true) ? (
+            <video
+              controls
+              preload="metadata"
+              src={fileUrl.vaultOriginal(open.document_id)}
+              className="max-h-[80vh] flex-1 bg-ink"
+            />
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-ink p-8 text-center text-sm text-muted">
+              <Film size={28} aria-hidden />
+              <p>Browsers cannot play {open.media_type ?? "this format"} directly.</p>
+              <a
+                href={fileUrl.vaultOriginal(open.document_id)}
+                className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60"
               >
-                <Undo2 size={13} />
-                {busy === open.document_id ? "Restoring…" : "Take out of the vault"}
-              </button>
-              <p className="text-[11px] text-muted">
-                Streamed by decrypting only the part you are watching. Nothing is
-                cached; locking the vault stops playback.
-              </p>
+                <Download size={13} /> Download to watch
+              </a>
             </div>
+          )}
+          <div className="w-full shrink-0 space-y-3 border-t border-edge p-4 lg:w-72 lg:border-l lg:border-t-0">
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="text-sm font-medium">
+                {open.title ?? open.original_filename ?? "Untitled"}
+              </h2>
+              <button type="button" onClick={() => setOpen(null)} aria-label="Close">
+                <X size={15} />
+              </button>
+            </div>
+            {open.media && <MetadataPanel media={open.media} />}
+            <button
+              type="button"
+              onClick={() => onTakeOut(open.document_id)}
+              disabled={busy === open.document_id}
+              className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+            >
+              <Undo2 size={13} />
+              {busy === open.document_id ? "Restoring…" : "Take out of the vault"}
+            </button>
+            <p className="text-[11px] text-muted">
+              Streamed by decrypting only the part you are watching. Nothing is
+              cached; locking the vault stops playback.
+            </p>
           </div>
-        </div>
+        </Modal>
       )}
     </>
   );

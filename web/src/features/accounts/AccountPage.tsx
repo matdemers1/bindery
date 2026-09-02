@@ -174,7 +174,7 @@ function TwoFactor({ account, onChanged }: { account: Account; onChanged: () => 
             value={code}
             onChange={(event) => setCode(event.target.value)}
             placeholder="123456"
-            className="mt-3 w-full rounded-md border border-edge bg-ink px-3 py-2 font-mono tracking-widest outline-none focus:border-accent"
+            className="mt-3 w-full rounded-md border border-field bg-ink px-3 py-2 font-mono tracking-widest outline-none focus:border-accent"
           />
           {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
           <button
@@ -254,7 +254,7 @@ function ChangePassword() {
           placeholder="Current password"
           value={current}
           onChange={(event) => setCurrent(event.target.value)}
-          className="w-full rounded-md border border-edge bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
+          className="w-full rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
         />
         <input
           type="password"
@@ -264,7 +264,7 @@ function ChangePassword() {
           placeholder="New password — at least 12 characters"
           value={next}
           onChange={(event) => setNext(event.target.value)}
-          className="w-full rounded-md border border-edge bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
+          className="w-full rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
         />
         {error && <p className="text-sm text-red-400">{error}</p>}
         {done && <p className="text-sm text-emerald-400">Changed.</p>}

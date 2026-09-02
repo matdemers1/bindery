@@ -43,6 +43,37 @@ def test_using_it_extends_the_window():
     assert s.key(who, now=datetime.now(UTC) + timedelta(minutes=20)) == key
 
 
+def test_a_background_read_does_not_extend_the_window():
+    """`peek` is for code that only needs to know, not code acting for a person.
+
+    The vault sweep asks "is this account unlocked?" every 15 seconds. With the
+    touching read, that question was itself an answer: any account with a
+    vault-bound import had its idle window reset four times a minute and could
+    never time out, so ADR-012's 15 minutes quietly became "until the process
+    restarts" for exactly the accounts that use the vault most.
+    """
+    who, key = uuid.uuid4(), crypto.new_data_key()
+    s = Sessions(timeout=timedelta(minutes=15))
+    s.unlock(who, key)
+
+    ten = datetime.now(UTC) + timedelta(minutes=10)
+    assert s.peek(who, now=ten) == key
+    # Twenty minutes after the unlock and ten after the peek: the peek did not
+    # restart the clock, so this is past the timeout either way.
+    assert s.peek(who, now=datetime.now(UTC) + timedelta(minutes=20)) is None
+
+
+def test_a_background_read_still_relocks_an_idle_vault():
+    """Non-touching is not the same as non-expiring: an expired key must be
+    gone after a peek, not merely reported as absent."""
+    who, key = uuid.uuid4(), crypto.new_data_key()
+    s = Sessions(timeout=timedelta(minutes=15))
+    s.unlock(who, key)
+
+    assert s.peek(who, now=datetime.now(UTC) + timedelta(minutes=16)) is None
+    assert s.key(who) is None, "the expired entry must be dropped, not hidden"
+
+
 def test_one_persons_unlock_is_not_anothers():
     a, b = uuid.uuid4(), uuid.uuid4()
     s = Sessions()

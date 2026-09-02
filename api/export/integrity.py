@@ -24,8 +24,14 @@ Three failure modes, reported separately because they mean different things:
 
   Their ciphertext is checked instead: a vault object that is gone from disk
   really is missing, and nothing else in the archive can replace it.
+
+  "Sealed" is a property of the **file**, and only when *every* live document
+  over it is vaulted. A file with one vaulted document and two ordinary ones is
+  still read in the clear by those two, so its plaintext is still required and
+  its absence is real loss — see `check` (CR-024).
 """
 
+import asyncio
 import hashlib
 import logging
 import uuid
@@ -98,22 +104,42 @@ async def check(
     include_orphans: bool = True,
 ) -> IntegrityReport:
     """Re-hash every original and compare against its content address."""
+    from api.vault import store
+
     report = IntegrityReport(started_at=datetime.now(UTC))
 
-    # Source files whose plaintext was deliberately destroyed when a document
-    # on them went into the vault. Without this they read as missing, which
-    # makes a healthy archive look damaged — and stops the backups, because
-    # `run_backup` and `replicate` both refuse over a failing check.
-    sealed_files = {
-        row.source_file_id: row.object_name
-        for row in (
+    # How many documents currently read each source file. The count is the
+    # denominator of "is this file sealed": the plaintext is one file shared by
+    # every live document over it, so it is only deliberately gone when all of
+    # them are in the vault. Superseded rows are history and read nothing.
+    live_documents: dict[uuid.UUID, int] = dict(
+        (
             await session.execute(
-                sa.select(Document.source_file_id, VaultItem.object_name)
-                .join(VaultItem, VaultItem.document_id == Document.id)
-                .where(Document.vaulted_by.is_not(None))
+                sa.select(Document.source_file_id, sa.func.count(Document.id))
+                .where(Document.superseded_at.is_(None))
+                .group_by(Document.source_file_id)
             )
         ).all()
-    }
+    )
+
+    # Every vault object over each file, not one of them. Keying this on the
+    # file and keeping only the last name meant a file with two vaulted
+    # documents had exactly one ciphertext checked and the other never looked
+    # at — and a file with one vaulted document out of three was called sealed
+    # outright, so its missing original was never noticed and the backups ran
+    # over it (CR-024).
+    sealed_objects: dict[uuid.UUID, list[str]] = {}
+    for row in (
+        await session.execute(
+            sa.select(Document.source_file_id, VaultItem.object_name)
+            .join(VaultItem, VaultItem.document_id == Document.id)
+            .where(
+                Document.vaulted_by.is_not(None),
+                Document.superseded_at.is_(None),
+            )
+        )
+    ).all():
+        sealed_objects.setdefault(row.source_file_id, []).append(row.object_name)
 
     query = sa.select(
         SourceFile.id, SourceFile.sha256, SourceFile.original_filename, SourceFile.byte_size
@@ -132,30 +158,66 @@ async def check(
             "original_filename": row.original_filename,
         }
 
-        if row.id in sealed_files:
-            # The plaintext is supposed to be gone. What must still be here is
-            # the ciphertext — and unlike a blob, nothing can reproduce it.
-            from api.vault import store
+        sealed_here = sealed_objects.get(row.id, [])
+        live_here = live_documents.get(row.id, 0)
+        # Every ciphertext over this file has to be here, whether or not the
+        # file as a whole counts as sealed — all of them, not the one the old
+        # per-file map happened to keep. Unlike a blob, nothing can reproduce
+        # one.
+        lost = [
+            name for name in sealed_here if not store.object_path(name).is_file()
+        ]
+        for name in lost:
+            log.error(
+                "integrity: VAULT OBJECT MISSING for %s (%s) — the encrypted "
+                "copy is gone and there is no other",
+                name[:12], row.original_filename,
+            )
+            report.missing.append({**record, "vault_object": name})
 
-            object_name = sealed_files[row.id]
-            if store.object_path(object_name).is_file():
-                report.sealed.append({**record, "vault_object": object_name})
+        if sealed_here and len(sealed_here) >= live_here:
+            # Every live document over this file is in the vault, so the
+            # plaintext is supposed to be gone. Nothing left to hash.
+            for name in sealed_here:
+                if name not in lost:
+                    report.sealed.append({**record, "vault_object": name})
+            if not lost:
                 report.ok += 1
-            else:
-                log.error(
-                    "integrity: VAULT OBJECT MISSING for %s (%s) — the encrypted "
-                    "copy is gone and there is no other",
-                    object_name[:12], row.original_filename,
-                )
-                report.missing.append({**record, "vault_object": object_name})
             continue
 
         if not path.is_file():
-            log.error("integrity: blob missing for %s (%s)", row.sha256, row.original_filename)
-            report.missing.append(record)
+            if sealed_here:
+                # A partly vaulted file. The unsealed documents are still read
+                # from this plaintext, so it is not deliberately gone — it is
+                # lost, and every one of those documents with it. This is the
+                # state the old per-file `sealed` map reported as healthy.
+                unsealed = live_here - len(sealed_here)
+                log.error(
+                    "integrity: blob missing for %s (%s) — only %s of %s documents "
+                    "on this file are vaulted, so the original was still needed",
+                    row.sha256, row.original_filename, len(sealed_here), live_here,
+                )
+                report.missing.append({
+                    **record,
+                    "reason": (
+                        "partially vaulted: the original is gone but "
+                        f"{unsealed} document(s) on this file are not sealed"
+                    ),
+                })
+            else:
+                log.error(
+                    "integrity: blob missing for %s (%s)",
+                    row.sha256, row.original_filename,
+                )
+                report.missing.append(record)
             continue
 
-        actual, size = hash_file(path)
+        # Off the loop: re-hashing the archive is a 400 MB read per original and
+        # minutes in total. On the worker's single loop that froze the OCR
+        # slots, the inbox watcher and the health monitor for the length of
+        # every replication run — including the health monitor that exists to
+        # report a stalled pipeline (CR-011).
+        actual, size = await asyncio.to_thread(hash_file, path)
         report.bytes_read += size
         if actual != row.sha256:
             # This is the case that matters. Say it loudly — the whole point of
@@ -170,7 +232,8 @@ async def check(
         report.ok += 1
 
     if include_orphans and library_ids is None:
-        report.orphans = sorted(_scan_orphans(known))
+        # An rglob of the whole blob tree, for the same reason as the hashing.
+        report.orphans = sorted(await asyncio.to_thread(_scan_orphans, known))
 
     report.finished_at = datetime.now(UTC)
     log.info(

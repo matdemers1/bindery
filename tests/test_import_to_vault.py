@@ -8,6 +8,7 @@ The two states that must stay distinguishable on screen are "done" and
 
 import hashlib
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
@@ -24,7 +25,7 @@ from api.db.enums import (
 from api.db.models import Document, ImportItem, ImportSession, Job, SourceFile
 from api.storage.blobs import blob_path
 from api.vault import service, sweep
-from api.vault.session import sessions
+from api.vault.session import IDLE_TIMEOUT, sessions
 
 
 @pytest.fixture
@@ -142,6 +143,68 @@ async def test_the_sweep_records_what_it_did(session, bound_import):
 async def test_a_second_pass_seals_nothing_twice(session, bound_import):
     await sweep.sweep_once(session)
     assert await sweep.sweep_once(session) == 0
+
+
+async def test_a_queued_classification_elsewhere_does_not_stop_the_sweep(
+    session, bound_import
+):
+    """The "is this file still being read?" check has to survive a NULL.
+
+    Classify and rules jobs carry a document and no source file, so the subquery
+    that lists busy files contains NULLs — and `x NOT IN (…, NULL)` is never
+    true. One queued classification anywhere in the archive, which is the normal
+    state during any import, emptied the ready list entirely: the sweep sealed
+    nothing, said nothing, and every file sat on the screen as "awaiting".
+    """
+    user, _vault, _import_session, docs = bound_import
+    user_id = user.id
+    session.add(
+        Job(
+            document_id=docs["still-in-ocr.jpg"].id,
+            stage=JobStage.CLASSIFY,
+            state=JobState.QUEUED,
+        )
+    )
+    await session.commit()
+
+    assert await sweep.sweep_once(session) >= 1
+    await session.refresh(docs["done.jpg"])
+    assert docs["done.jpg"].vaulted_by == user_id
+
+
+async def test_a_sweep_tick_is_not_activity(session, bound_import):
+    """ADR-012's idle timeout has to survive the sweep that reads it.
+
+    The sweep asks every 15 seconds whether each vault-bound import's owner is
+    unlocked. When that question extended the idle window, an account with one
+    such import — the normal state after any vault import, since nothing clears
+    the flag — could never idle out, and the vault stayed open until the api
+    process restarted. The person's screen said "unlocked" and gave them no way
+    to find out why.
+    """
+    user, _vault, _import_session, _docs = bound_import
+    user_id = user.id
+
+    # Last used by a person fourteen minutes ago: still open, one minute left.
+    held = sessions._by_user[user_id]
+    held.touched_at = datetime.now(UTC) - timedelta(minutes=14)
+    idle_since = held.touched_at
+
+    await sweep.sweep_once(session)
+
+    assert sessions._by_user[user_id].touched_at == idle_since, (
+        "the sweep counted its own poll as use, so this vault will never close"
+    )
+
+    # And the window actually closes with ticks still running.
+    sessions._by_user[user_id].touched_at = (
+        datetime.now(UTC) - IDLE_TIMEOUT - timedelta(minutes=1)
+    )
+    # Not asserted on the return: the sweep is global and other tests in this
+    # module leave bound, unlocked sessions behind. The claim is about *this*
+    # account's key.
+    await sweep.sweep_once(session)
+    assert not sessions.is_unlocked(user_id), "an idle vault stayed open across a sweep"
 
 
 async def test_an_import_bound_for_a_locked_vault_is_refused_up_front(

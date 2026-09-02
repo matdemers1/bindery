@@ -128,7 +128,7 @@ export default function SearchPage({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Search every page in the archive…"
-            className="w-full rounded-xl border border-edge bg-surface py-3 pl-12 pr-4 text-lg outline-none transition-colors focus:border-accent"
+            className="w-full rounded-xl border border-field bg-surface py-3 pl-12 pr-4 text-lg outline-none transition-colors focus:border-accent"
           />
         </div>
       </form>

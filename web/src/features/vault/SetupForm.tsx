@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ShieldPlus } from "lucide-react";
 
 import { api, type VaultState } from "../../api";
@@ -20,6 +20,7 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
   const [error, setError] = useState<string | null>(null);
 
   const mismatch = again.length > 0 && passphrase !== again;
+  const mismatchId = useId();
   const ready =
     understood && passphrase.length >= 12 && passphrase === again && pin.length >= 4;
 
@@ -58,7 +59,7 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
           autoComplete="new-password"
           value={passphrase}
           onChange={(event) => setPassphrase(event.target.value)}
-          className="mt-1 w-full rounded-lg border border-edge bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+          className="mt-1 w-full rounded-lg border border-field bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
         />
       </div>
 
@@ -70,12 +71,16 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
           id="setup-again"
           type="password"
           autoComplete="new-password"
+          aria-invalid={mismatch}
+          aria-describedby={mismatch ? mismatchId : undefined}
           value={again}
           onChange={(event) => setAgain(event.target.value)}
-          className="mt-1 w-full rounded-lg border border-edge bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+          className="mt-1 w-full rounded-lg border border-field bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
         />
         {mismatch && (
-          <p className="mt-1 text-xs text-red-400">These do not match.</p>
+          <p id={mismatchId} role="alert" className="mt-1 text-xs text-red-400">
+            These do not match.
+          </p>
         )}
       </div>
 
@@ -90,7 +95,7 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
           autoComplete="off"
           value={pin}
           onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
-          className="mt-1 w-40 rounded-lg border border-edge bg-surface px-3 py-2 font-mono text-lg tracking-[0.4em] outline-none focus:border-accent"
+          className="mt-1 w-40 rounded-lg border border-field bg-surface px-3 py-2 font-mono text-lg tracking-[0.4em] outline-none focus:border-accent"
         />
         <p className="mt-1 text-xs text-muted">
           Five wrong entries switch the PIN off. Nothing is deleted — the
@@ -110,7 +115,10 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
       </label>
 
       {error && (
-        <p className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300">
+        <p
+          role="alert"
+          className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300"
+        >
           {error}
         </p>
       )}

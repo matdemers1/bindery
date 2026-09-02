@@ -193,7 +193,7 @@ export default function SegmentationPage() {
                   setTitles((current) => ({ ...current, [segment.start]: event.target.value }))
                 }
                 placeholder={`Document ${index + 1} — untitled`}
-                className="min-w-0 flex-1 rounded-md border border-edge bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
+                className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
               />
               {saved.segments.find(
                 (existing) => existing.page_start === segment.start && existing.known_form_id,

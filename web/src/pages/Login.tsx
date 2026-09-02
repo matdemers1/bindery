@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { ApiError, api } from "../api";
 import { Logo } from "../components/brand/Logo";
@@ -10,6 +10,11 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
   const [needsCode, setNeedsCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A rejected password and a rate-limit delay are both things a sighted user
+  // reads the moment they appear; without a live region neither is spoken at
+  // all, and the field that has to be retyped says nothing about them.
+  const errorId = useId();
+  const describedBy = error ? errorId : undefined;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -72,7 +77,7 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
             autoComplete="username"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="w-full rounded-md border border-edge bg-ink px-3 py-2 outline-none focus:border-accent"
+            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
           />
         </label>
 
@@ -82,9 +87,11 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
             type="password"
             required
             autoComplete="current-password"
+            aria-invalid={Boolean(error) && !needsCode}
+            aria-describedby={needsCode ? undefined : describedBy}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            className="w-full rounded-md border border-edge bg-ink px-3 py-2 outline-none focus:border-accent"
+            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
           />
         </label>
 
@@ -98,15 +105,21 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
               autoComplete="one-time-code"
               autoFocus
               required
+              aria-invalid={Boolean(error)}
+              aria-describedby={describedBy}
               value={code}
               onChange={(event) => setCode(event.target.value)}
               placeholder="123456 — or a recovery code"
-              className="w-full rounded-md border border-edge bg-ink px-3 py-2 font-mono tracking-widest outline-none focus:border-accent"
+              className="w-full rounded-md border border-field bg-ink px-3 py-2 font-mono tracking-widest outline-none focus:border-accent"
             />
           </label>
         )}
 
-        {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
+        {error && (
+          <p id={errorId} role="alert" className="mb-4 text-sm text-red-400">
+            {error}
+          </p>
+        )}
 
         <button
           type="submit"

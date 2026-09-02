@@ -367,3 +367,76 @@ async def test_an_ordinary_export_says_nothing_about_a_vault(
 
     assert result.vaulted_count == 0
     assert "private vault" not in (root / "index.html").read_text()
+
+
+# --------------------------------------------------------------------------
+# The reconcile covers the vault prefix too (CR-012)
+# --------------------------------------------------------------------------
+
+
+async def test_a_lost_vault_object_is_noticed_and_shipped_again(session, data_root):
+    """The failure `reconcile` was written for, on the prefix it never read.
+
+    `sync_vault_objects` skips anything the ledger records, so once a vault
+    object is marked shipped nothing looks at the bucket again. Reconcile was
+    hard-coded to `blobs/`, which meant a sealed object removed by a console
+    delete or by a lifecycle rule that matched more than intended was never
+    noticed, never re-uploaded, and reported as replicated forever — for the one
+    class of file in the archive with no second source anywhere.
+    """
+    import sqlalchemy as sa
+
+    from api.db.models import OffsiteObject
+
+    await session.execute(sa.delete(OffsiteObject))
+    await session.commit()
+
+    names = _seal_two(data_root)
+    fake = FakeS3()
+    await offsite.sync_vault_objects(
+        session, CONFIG, fake, vault_root=store.vault_root()
+    )
+    assert len(fake.objects) == 2
+
+    del fake.objects[vault_object_key(names[0])]
+
+    audit = await offsite.reconcile(session, CONFIG, fake, prefix=VAULT_PREFIX)
+    assert audit.missing_from_bucket == 1
+    assert audit.confirmed == 1
+
+    again = await offsite.sync_vault_objects(
+        session, CONFIG, fake, vault_root=store.vault_root()
+    )
+    assert again.uploaded == 1, "the object that left the bucket was never replaced"
+    assert again.skipped == 1, "the one still in the bucket was shipped a second time"
+    assert vault_object_key(names[0]) in fake.objects
+
+
+async def test_reconciling_the_blob_prefix_says_nothing_about_the_vault(
+    session, data_root
+):
+    """Why the prefix had to become a parameter rather than a wider listing.
+
+    A `blobs/` pass sees no vault rows at all, so it reports a clean bucket
+    while every sealed object is gone. Asserted so that a future change which
+    quietly drops the vault call cannot pass by leaning on this one.
+    """
+    import sqlalchemy as sa
+
+    from api.db.models import OffsiteObject
+
+    await session.execute(sa.delete(OffsiteObject))
+    await session.commit()
+
+    _seal_two(data_root)
+    fake = FakeS3()
+    await offsite.sync_vault_objects(
+        session, CONFIG, fake, vault_root=store.vault_root()
+    )
+    fake.objects.clear()
+
+    blobs_only = await offsite.reconcile(session, CONFIG, fake, prefix=offsite.BLOB_PREFIX)
+    assert blobs_only.missing_from_bucket == 0
+
+    vault = await offsite.reconcile(session, CONFIG, fake, prefix=VAULT_PREFIX)
+    assert vault.missing_from_bucket == 2

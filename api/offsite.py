@@ -500,13 +500,18 @@ async def sync_blobs(
     result = SyncResult()
     shipped = await _already_shipped(session)
 
-    for sha256, path in local_blobs(blob_root):
+    # Every blocking call in this loop runs off the event loop. The worker is a
+    # single asyncio process, and a run that puts hundreds of megabytes over a
+    # home uplink synchronously froze all three OCR slots, the inbox watcher and
+    # the health monitor for its whole duration — including the health monitor
+    # whose job is to report exactly that (CR-011).
+    for sha256, path in await asyncio.to_thread(local_blobs, blob_root):
         key = object_key_for_blob(sha256)
         if key in shipped:
             result.skipped += 1
             continue
         try:
-            size = upload_blob(client, config, path, sha256)
+            size = await asyncio.to_thread(upload_blob, client, config, path, sha256)
         except Exception as error:  # collected and reported, never swallowed
             # The hash goes here, to the log, and not into `failures` — see the
             # note on SyncResult.
@@ -531,9 +536,38 @@ class ReconcileResult:
     missing_from_bucket: int = 0
     unrecorded: int = 0
 
+    def __add__(self, other: "ReconcileResult") -> "ReconcileResult":
+        """One number per prefix is not what the operator asked. "Is anything
+        gone" is a question about the whole bucket."""
+        return ReconcileResult(
+            in_bucket=self.in_bucket + other.in_bucket,
+            confirmed=self.confirmed + other.confirmed,
+            missing_from_bucket=self.missing_from_bucket + other.missing_from_bucket,
+            unrecorded=self.unrecorded + other.unrecorded,
+        )
+
+
+def _list_keys(client, config: Config, prefix: str) -> set[str]:
+    """Every key under `prefix`, read through the paginator.
+
+    Separated so the whole listing — hundreds of round trips on a large bucket
+    — goes to a thread in one hop rather than blocking the loop page by page.
+    """
+    seen: set[str] = set()
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=config.bucket, Prefix=prefix):
+        for entry in page.get("Contents", []):
+            seen.add(entry["Key"])
+    return seen
+
 
 async def reconcile(
-    session: AsyncSession, config: Config, client, *, commit: bool = True
+    session: AsyncSession,
+    config: Config,
+    client,
+    *,
+    prefix: str = BLOB_PREFIX,
+    commit: bool = True,
 ) -> ReconcileResult:
     """Compare the ledger against the bucket, and believe the bucket.
 
@@ -546,20 +580,21 @@ async def reconcile(
     deleted, so the next sync re-uploads it. Nothing here removes a row —
     nothing in Bindery removes rows on its own (REQ-090), and a ledger that
     forgets is a ledger that cannot be audited.
+
+    The prefix is a parameter for the same reason `_already_shipped` takes one,
+    and it matters more here: sealed vault objects are the only files in the
+    archive with no second source, and hard-coding `blobs/` meant the one class
+    of object nothing can regenerate was the one class never checked (CR-012).
     """
     result = ReconcileResult()
-    seen: set[str] = set()
 
-    paginator = client.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=config.bucket, Prefix=BLOB_PREFIX):
-        for entry in page.get("Contents", []):
-            seen.add(entry["Key"])
+    seen = await asyncio.to_thread(_list_keys, client, config, prefix)
     result.in_bucket = len(seen)
 
     rows = (
         await session.execute(
             sa.select(OffsiteObject).where(
-                OffsiteObject.object_key.startswith(BLOB_PREFIX)
+                OffsiteObject.object_key.startswith(prefix)
             )
         )
     ).scalars().all()
@@ -640,7 +675,9 @@ async def sync_vault_objects(
     if not vault_root.is_dir():
         return result
 
-    for path in sorted(vault_root.rglob("*")):
+    # Threaded for the reason `sync_blobs` gives: the walk and every put are
+    # blocking, and this runs on the worker's only event loop (CR-011).
+    for path in await asyncio.to_thread(lambda: sorted(vault_root.rglob("*"))):
         if not path.is_file():
             continue
         name = path.name
@@ -656,7 +693,9 @@ async def sync_vault_objects(
         try:
             # The digest is of the ciphertext, computed here — a vault object's
             # name is random, so unlike a blob there is no hash already on hand.
-            digest, size = upload_file(client, config, path, key)
+            digest, size = await asyncio.to_thread(
+                upload_file, client, config, path, key
+            )
         except Exception as error:
             log.error("offsite vault upload failed for %s: %s", name[:12], error)
             result.failures.append(_explain(error, config))
@@ -788,6 +827,12 @@ class ReplicationResult:
     blobs_uploaded: int = 0
     blobs_skipped: int = 0
     bytes_sent: int = 0
+    # What the weekly reconcile found. `objects_confirmed` is the number the
+    # Trust screen's claim of a healthy offsite copy actually rests on — before
+    # this ran on a cadence, that claim rested on the ledger's own opinion of
+    # itself (CR-012).
+    objects_confirmed: int = 0
+    objects_absent: int = 0
     failures: list[str] = field(default_factory=list)
 
 
@@ -819,6 +864,14 @@ async def replicate(
     Integrity is checked before any of it, for the reason `run_backup` gives: a
     backup taken over a corrupt blob is a corrupt backup, faithfully replicated
     and eventually rotated into every generation you have.
+
+    The weekly generation reconciles first. `sync_blobs` skips anything the
+    ledger records, so without a pass that reads the bucket back nothing in the
+    product ever compares the two — an emptied bucket would report healthy
+    replication forever, and the object that can never be regenerated would be
+    the one nobody was checking (CR-012). Weekly rather than daily because that
+    is the cadence `offsite_object` documents, and because a listing per day
+    buys nothing the sync does not already know.
     """
     from api.export import backup as local_backup
     from api.vault import store as vault_store
@@ -836,12 +889,39 @@ async def replicate(
     stamp = stamp or datetime.now(UTC)
     dump_key = dump_object_key(kind, stamp)
 
+    if kind is Kind.WEEKLY:
+        # Before the syncs, so anything found absent is re-uploaded by this same
+        # run rather than waiting a week for the next one. Never fatal: a copy
+        # that cannot be verified still has to leave the building, so a failure
+        # here is reported and the generation carries on.
+        try:
+            audit = await reconcile(session, config, client, prefix=BLOB_PREFIX)
+            audit = audit + await reconcile(
+                session, config, client, prefix=VAULT_PREFIX
+            )
+        except Exception as error:
+            result.failures.append(
+                f"the weekly reconcile could not read the bucket back: "
+                f"{_explain(error, config)}"
+            )
+        else:
+            result.objects_confirmed = audit.confirmed
+            result.objects_absent = audit.missing_from_bucket
+            if audit.missing_from_bucket:
+                log.error(
+                    "weekly reconcile: %s object(s) the ledger claimed are not in "
+                    "the bucket — this run will ship them again",
+                    audit.missing_from_bucket,
+                )
+
     with tempfile.TemporaryDirectory(prefix="bindery-offsite-") as staging:
         # Step 1: the dump, to disk only. Taken before the blob sync so that
         # everything it references is captured by the sync that follows.
         dump_path = Path(staging) / "bindery.dump"
         try:
-            local_backup.dump_database(dump_path)
+            # `pg_dump` is a subprocess that runs for as long as the database is
+            # big. Off the loop, like every other blocking call here (CR-011).
+            await asyncio.to_thread(local_backup.dump_database, dump_path)
         except Exception as error:
             result.detail = f"pg_dump failed: {str(error)[:300]}"
             result.failures.append(result.detail)
@@ -879,7 +959,9 @@ async def replicate(
 
         # Step 3: the dump, last.
         try:
-            digest, size = upload_file(client, config, dump_path, dump_key)
+            digest, size = await asyncio.to_thread(
+                upload_file, client, config, dump_path, dump_key
+            )
         except Exception as error:
             result.detail = f"the dump failed to upload: {_explain(error, config)}"
             result.failures.append(result.detail)
@@ -929,7 +1011,7 @@ async def replicate(
     payload = json.dumps(manifest, indent=2).encode()
     manifest_key = manifest_object_key(dump_key)
     try:
-        upload_bytes(client, config, manifest_key, payload)
+        await asyncio.to_thread(upload_bytes, client, config, manifest_key, payload)
     except Exception as error:
         # The dump is up and restorable; only its description is missing.
         result.failures.append(f"manifest upload failed: {_explain(error, config)}")
@@ -943,6 +1025,14 @@ async def replicate(
         f"{human_bytes(size)} dump, {sync.uploaded} new blob(s) "
         f"({human_bytes(sync.bytes_sent)}), {sync.skipped} already present"
     )
+    if result.objects_absent:
+        # Said out loud rather than left in the counters: an object that left
+        # the bucket without anyone asking is the one sentence on this screen
+        # worth reading twice.
+        result.detail += (
+            f" — the reconcile found {result.objects_absent} object(s) gone from "
+            "the bucket and shipped them again"
+        )
     return result
 
 
@@ -976,6 +1066,7 @@ def sample_keys() -> dict[str, str]:
     weekly = dump_object_key(Kind.WEEKLY, stamp)
     return {
         "blob": object_key_for_blob("a" * 64),
+        "vault object": vault_object_key("a" * 64),
         "daily dump": daily,
         "weekly dump": weekly,
         "daily manifest": manifest_object_key(daily),
@@ -986,8 +1077,15 @@ def sample_keys() -> dict[str, str]:
 
 # What each kind of object is *supposed* to happen to. The blob entry is the
 # whole point: expiring a blob is deleting the archive.
+#
+# The vault entry is the same point made about the only objects with no second
+# source anywhere. A blob that expires can be re-uploaded from disk; a sealed
+# object that expires while the household still holds the plaintext-less
+# original is simply gone. `blobs/` was the only prefix audited until this was
+# added, so a `vault/` expiry rule passed the check in silence (CR-012).
 EXPECTED_EXPIRY = {
     "blob": None,
+    "vault object": None,
     "daily dump": "expire-daily-dumps",
     "weekly dump": "expire-weekly-dumps",
     "daily manifest": None,

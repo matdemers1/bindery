@@ -381,7 +381,10 @@ async def test_a_preview_writes_nothing(client, session, many_documents) -> None
     assert body["matched"] == 20
     assert body["operation_id"] is None
     assert (
-        await session.execute(sa.select(sa.func.count()).select_from(DocumentTag))
+        await session.execute(
+            sa.select(sa.func.count()).select_from(DocumentTag)
+            .where(DocumentTag.document_id.in_([d.id for d in documents]))
+        )
     ).scalar_one() == 0
 
 
@@ -401,7 +404,10 @@ async def test_bulk_apply_then_undo_in_one_action(client, session, many_document
     tagged = (
         await session.execute(
             sa.select(sa.func.count()).select_from(DocumentTag)
-            .where(DocumentTag.removed_at.is_(None))
+            .where(
+                DocumentTag.removed_at.is_(None),
+                DocumentTag.document_id.in_([d.id for d in documents]),
+            )
         )
     ).scalar_one()
     assert tagged == 20
@@ -413,7 +419,10 @@ async def test_bulk_apply_then_undo_in_one_action(client, session, many_document
     still_tagged = (
         await session.execute(
             sa.select(sa.func.count()).select_from(DocumentTag)
-            .where(DocumentTag.removed_at.is_(None))
+            .where(
+                DocumentTag.removed_at.is_(None),
+                DocumentTag.document_id.in_([d.id for d in documents]),
+            )
         )
     ).scalar_one()
     assert still_tagged == 0

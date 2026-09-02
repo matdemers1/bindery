@@ -11,12 +11,14 @@ at a keyboard with a PIN; a long-lived bearer token is the opposite, and
 `Scope` refuses it by construction.
 """
 
+import asyncio
 import logging
 import uuid
+from collections.abc import AsyncIterator
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, status
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.audit import record
@@ -32,7 +34,7 @@ from api.schemas import (
     VaultSearchOut,
     VaultStateOut,
 )
-from api.vault import crypto, service, store
+from api.vault import chunked, crypto, service, store
 from api.vault import search as vault_search
 from api.vault.session import sessions
 
@@ -374,6 +376,23 @@ def _parse_range(header: str, length: int) -> tuple[int, int] | None:
     return start, end
 
 
+def _chunk_end(reader: chunked.Reader, start: int) -> int:
+    """The last byte of the chunk-sized span beginning at `start`."""
+    return min(start + reader.header.chunk_size, reader.length) - 1
+
+
+async def _stream_chunks(reader: chunked.Reader, first: bytes) -> AsyncIterator[bytes]:
+    """The whole file, one chunk at a time, decrypted off the event loop.
+
+    `first` has already been read — a wrong key or a bad first chunk becomes a
+    500 before the response starts, which it cannot once bytes are on the wire.
+    """
+    if first:
+        yield first
+    for start in range(len(first), reader.length, reader.header.chunk_size):
+        yield await asyncio.to_thread(reader.read_range, start, _chunk_end(reader, start))
+
+
 @router.get("/items/{document_id}/original")
 async def original(
     document_id: uuid.UUID,
@@ -420,8 +439,12 @@ async def original(
         if reader is None:
             # A v1 object: the whole file is the only thing it can give, which
             # is what it always cost. The re-seal on the next unlock retires it.
+            # In a thread even so — the memory is v1's price, the frozen event
+            # loop was never anybody's.
             return Response(
-                content=store.open_object(item.object_name, document_id, key),
+                content=await asyncio.to_thread(
+                    store.open_object, item.object_name, document_id, key
+                ),
                 media_type=media_type, headers=headers,
             )
 
@@ -430,7 +453,7 @@ async def original(
             # Only the chunks covering the range are decrypted (ADR-013). A
             # 2 GB video seeked to the middle costs two chunks of memory.
             return Response(
-                content=reader.read_range(start, end),
+                content=await asyncio.to_thread(reader.read_range, start, end),
                 status_code=status.HTTP_206_PARTIAL_CONTENT,
                 media_type=media_type,
                 headers={
@@ -438,10 +461,28 @@ async def original(
                     "Content-Range": f"bytes {start}-{end}/{reader.length}",
                 },
             )
-        return Response(content=reader.read_all(), media_type=media_type, headers=headers)
+
+        # No Range — a download link, an <img src>, curl. This is the common
+        # path and it used to be the expensive one: the whole plaintext joined
+        # into one `bytes` before a single byte was sent, which is precisely
+        # what ADR-013 exists to avoid. Streamed a chunk at a time instead, so
+        # a 2 GB video costs a chunk of memory here too.
+        first = (
+            await asyncio.to_thread(reader.read_range, 0, _chunk_end(reader, 0))
+            if reader.length
+            else b""
+        )
     except store.VaultRefused as error:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(error)) from error
     except crypto.WrongSecret as error:
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR, "the vault object did not decrypt"
         ) from error
+
+    return StreamingResponse(
+        _stream_chunks(reader, first),
+        media_type=media_type,
+        # Declared rather than chunked: a download needs a size, and a browser
+        # will not scrub a video whose length it does not know.
+        headers={**headers, "Content-Length": str(reader.length)},
+    )

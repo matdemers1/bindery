@@ -169,9 +169,12 @@ function Select({
 }) {
   return (
     <select
+      // The placeholder option names nothing: unlike a text input, a select
+      // takes no accessible name from its own content.
+      aria-label={placeholder}
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="min-w-0 flex-1 rounded-md border border-edge bg-ink px-2 py-1.5 text-sm"
+      className="min-w-0 flex-1 rounded-md border border-field bg-ink px-2 py-1.5 text-sm"
     >
       <option value="">{placeholder}</option>
       {options.map((option) => (
@@ -242,7 +245,7 @@ function AliasForm({ correspondentId, onAdded }: { correspondentId: string; onAd
         value={alias}
         onChange={(event) => setAlias(event.target.value)}
         placeholder="Add another spelling…"
-        className="min-w-0 flex-1 rounded border border-edge bg-ink px-2 py-1 text-xs outline-none focus:border-accent"
+        className="min-w-0 flex-1 rounded border border-field bg-ink px-2 py-1 text-xs outline-none focus:border-accent"
       />
       <button type="submit" className="rounded border border-edge px-2 py-1 text-xs text-muted">
         Add
@@ -276,9 +279,10 @@ function Assets({ libraryId }: { libraryId?: string }) {
         className="flex flex-wrap gap-2 rounded-lg border border-edge bg-surface p-4"
       >
         <select
+          aria-label="Kind of thing"
           value={kind}
           onChange={(event) => setKind(event.target.value)}
-          className="rounded-md border border-edge bg-ink px-2 py-1.5 text-sm"
+          className="rounded-md border border-field bg-ink px-2 py-1.5 text-sm"
         >
           {["vehicle", "property", "policy", "account", "person", "other"].map((k) => (
             <option key={k} value={k}>{k}</option>
@@ -288,7 +292,7 @@ function Assets({ libraryId }: { libraryId?: string }) {
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="2020 Honda Accord"
-          className="min-w-0 flex-1 rounded-md border border-edge bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
         />
         <button
           type="submit"

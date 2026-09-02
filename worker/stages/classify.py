@@ -375,7 +375,23 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
     )
 
     # Rules get the last word, and the gate is re-run once they have spoken.
-    await queue.enqueue(session, JobStage.RULES, document_id=document.id)
+    #
+    # `requeue_stage`, not `enqueue`: enqueue is idempotent and deliberately
+    # refuses to disturb an existing job — right for a first run and fatal for
+    # a replay. Classify puts every document it touches back into
+    # PENDING_CLASSIFICATION and `run_rules` is the only thing that takes it
+    # out, so re-classifying a filed document left it waiting on a rules job
+    # that had already succeeded and would never run again. `api/reclassify.py`
+    # reads "waiting" as exactly that state, so it offered the document again,
+    # every time, forever.
+    #
+    # Keyed on the document alone, matching what this cascade has always
+    # written: adding `source_file_id` here would change the idempotency key of
+    # every rules job that already exists, and the first replay of each would
+    # insert a second job rather than reset the one it found.
+    # `repository.visible_jobs` reaches a job by either key, so the pipeline
+    # screen still shows it.
+    await queue.requeue_stage(session, JobStage.RULES, document_id=document.id)
     log.info(
         "classified %s -> %r (gate: %s, score %.1f)",
         document.id, document.title, verdict.decision.value, verdict.score,

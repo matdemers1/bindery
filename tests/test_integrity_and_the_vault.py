@@ -18,6 +18,7 @@ import hashlib
 import uuid
 
 import pytest
+import sqlalchemy as sa
 
 from api.db.enums import IngestSource, ReviewState, SourceFileState
 from api.db.models import Document, SourceFile, VaultItem
@@ -146,3 +147,177 @@ async def test_an_ordinary_archive_reports_nothing_sealed(
     assert report.sealed == []
     assert report.healthy is True
     assert report.ok == 1
+
+
+async def test_a_file_half_in_the_vault_is_not_called_sealed(session, sealed):
+    """The check that would have made the round-1 data-loss bug visible.
+
+    "Sealed" is a property of the *file*, not of one document over it. Keying
+    the sealed map on `source_file_id` meant a single vaulted document declared
+    the whole file sealed — so the plaintext its siblings are still read from
+    was never looked for, `report.healthy` stayed true, and `run_backup` and
+    `replicate` both proceeded over a genuinely lost original (CR-024).
+
+    `seal` now refuses a document whose file has live siblings, so this state
+    should not be creatable going forward. It is still what an archive that
+    already holds one looks like, and the check has to be right about it.
+    """
+    library, source, _ = sealed
+    session.add(
+        Document(
+            library_id=library.id, source_file_id=source.id,
+            page_start=2, page_end=2, review_state=ReviewState.FILED,
+        )
+    )
+    await session.commit()
+
+    report = await integrity.check(session, library_ids=[library.id])
+
+    assert report.healthy is False, (
+        "a file whose original is gone while a live document still reads it was "
+        "reported healthy — this is what lets the backups run over data loss"
+    )
+    assert len(report.missing) == 1
+    assert "partially vaulted" in report.missing[0]["reason"]
+    assert report.sealed == [], "a half-vaulted file is not a sealed file"
+
+
+async def test_a_superseded_sibling_does_not_make_a_sealed_file_look_half_vaulted(
+    session, sealed
+):
+    """Segments are superseded, never deleted, so history sits on the same file.
+
+    Counting those rows would report every re-segmented, fully vaulted file as
+    partially vaulted — the false alarm this file exists to prevent, arriving
+    from the other direction and stopping the backups just as effectively.
+    """
+    from datetime import UTC, datetime
+
+    library, source, _ = sealed
+    session.add(
+        Document(
+            library_id=library.id, source_file_id=source.id,
+            page_start=1, page_end=1, review_state=ReviewState.FILED,
+            superseded_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+
+    report = await integrity.check(session, library_ids=[library.id])
+
+    assert report.healthy is True
+    assert len(report.sealed) == 1
+
+
+async def test_every_vault_object_on_a_file_is_verified_not_just_one(session, sealed):
+    """The dict comprehension kept the last `object_name` per file, so a file
+    with two vaulted documents had exactly one ciphertext checked. The other
+    could vanish and the report would still call the archive whole."""
+    library, source, first_object = sealed
+
+    owner_id = (
+        await session.execute(
+            sa.select(Document.vaulted_by).where(Document.vaulted_by.is_not(None)).limit(1)
+        )
+    ).scalar_one()
+    vault_id = (
+        await session.execute(sa.select(VaultItem.vault_id).limit(1))
+    ).scalar_one()
+
+    second = Document(
+        library_id=library.id, source_file_id=source.id,
+        page_start=2, page_end=2, review_state=ReviewState.FILED,
+        vaulted_by=owner_id,
+    )
+    session.add(second)
+    await session.flush()
+
+    second_object = store.new_object_name()
+    path = store.object_path(second_object)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"a second ciphertext")
+    session.add(
+        VaultItem(
+            document_id=second.id, vault_id=vault_id, object_name=second_object,
+            byte_size=19, sealed_sha256=b"ciphertext", sealed_meta=b"ciphertext",
+            page_count=1,
+        )
+    )
+    await session.commit()
+
+    assert (await integrity.check(session, library_ids=[library.id])).healthy is True
+
+    # Lose the object the old map would have discarded.
+    store.object_path(first_object).unlink()
+    report = await integrity.check(session, library_ids=[library.id])
+
+    assert report.healthy is False
+    assert [row["vault_object"] for row in report.missing] == [first_object]
+
+
+async def test_hashing_the_archive_does_not_block_the_event_loop(
+    session, signed_in, tmp_path, monkeypatch
+):
+    """`check` is `async def` and every byte of its work was synchronous.
+
+    It runs from the worker's replication pass, over the whole archive, before
+    every backup. Re-hashing hundreds of originals on the only event loop the
+    worker has stalls the OCR slots and the health monitor for the length of the
+    scan — and the health monitor is what would have reported the stall (CR-011).
+    """
+    import asyncio
+    import time
+
+    from api.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("DATA_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    _, library = await signed_in()
+    for index in range(3):
+        body = b"an ordinary document " + uuid.uuid4().bytes
+        digest = hashlib.sha256(body).hexdigest()
+        path = blob_path(digest)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+        session.add(
+            SourceFile(
+                library_id=library.id, sha256=digest, byte_size=len(body),
+                original_filename=f"ordinary-{index}.pdf",
+                ingest_source=IngestSource.WEB_UPLOAD,
+                page_count=1, state=SourceFileState.PROCESSED,
+            )
+        )
+    await session.commit()
+
+    real = integrity.hash_file
+
+    def slow(path):
+        time.sleep(0.05)
+        return real(path)
+
+    monkeypatch.setattr(integrity, "hash_file", slow)
+
+    stalls: list[float] = []
+
+    async def heartbeat():
+        last = time.monotonic()
+        while True:
+            await asyncio.sleep(0.005)
+            now = time.monotonic()
+            stalls.append(now - last)
+            last = now
+
+    beat = asyncio.create_task(heartbeat())
+    try:
+        report = await integrity.check(session, library_ids=[library.id])
+    finally:
+        beat.cancel()
+
+    assert report.ok == 3
+    assert len(stalls) > 5, "the heartbeat never got to run at all"
+    assert max(stalls) < 0.04, (
+        f"the event loop was blocked for {max(stalls) * 1000:.0f}ms while the "
+        "archive was re-hashed — the OCR slots and the health monitor with it"
+    )

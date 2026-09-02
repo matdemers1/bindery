@@ -193,12 +193,13 @@ export default function ArchivePage() {
                 }
               }}
               placeholder="Filter by title or filename…"
-              className="min-w-0 flex-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm outline-none focus:border-accent"
+              className="min-w-0 flex-1 rounded-md border border-field bg-surface px-3 py-1.5 text-sm outline-none focus:border-accent"
             />
             <select
+              aria-label="Sort order"
               value={filters.sort}
               onChange={(event) => update((next) => next.set("sort", event.target.value))}
-              className="rounded-md border border-edge bg-surface px-2 py-1.5 text-sm"
+              className="rounded-md border border-field bg-surface px-2 py-1.5 text-sm"
             >
               <option value="newest">Newest in</option>
               <option value="oldest">Oldest in</option>
@@ -405,7 +406,7 @@ function BulkBar({
             setPreview(null);
           }}
           placeholder="Add tags, comma separated"
-          className="min-w-0 flex-1 rounded-md border border-edge bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
         />
         <button
           onClick={async () => {

@@ -162,6 +162,32 @@ async def test_orphan_blobs_are_listed_but_never_removed(session, archive) -> No
     assert blob_path(orphan_sha).is_file(), "the check must not delete anything"
 
 
+async def test_the_integrity_check_does_not_hash_on_the_event_loop(
+    session, archive, monkeypatch
+) -> None:
+    """CR-010: one uvicorn process serves every request from one event loop, so
+    re-hashing the archive inside the handler is search, login, `/api/live` and
+    the container healthcheck all stopped for the length of the scan — on the
+    button whose whole purpose is reassurance."""
+    import threading
+
+    from api.export import integrity as module
+
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+    hash_file = module.hash_file
+
+    def spy(path):
+        seen.append(threading.get_ident())
+        return hash_file(path)
+
+    monkeypatch.setattr(module, "hash_file", spy)
+    report = await integrity.check(session, library_ids=[archive["library"].id])
+    assert report.checked, "nothing was checked, so the test proves nothing"
+    assert seen, "nothing was hashed"
+    assert all(ident != loop_thread for ident in seen)
+
+
 # --------------------------------------------------------------------------
 # 2. Full export works without Bindery (T-6.3, REQ-093)
 # --------------------------------------------------------------------------

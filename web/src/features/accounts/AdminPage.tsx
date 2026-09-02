@@ -313,14 +313,14 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
           placeholder="their@email.address"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className="rounded-md border border-edge bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
+          className="rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
         />
         <input
           required
           placeholder="What their library is called"
           value={libraryName}
           onChange={(event) => setLibraryName(event.target.value)}
-          className="rounded-md border border-edge bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
+          className="rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
         />
         <label className="text-sm">
           <span className="mb-1 block text-xs text-muted">Space, in GB (blank for no limit)</span>
@@ -328,7 +328,7 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
             inputMode="decimal"
             value={quotaGb}
             onChange={(event) => setQuotaGb(event.target.value)}
-            className="w-full rounded-md border border-edge bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
+            className="w-full rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
           />
         </label>
         <label className="text-sm">
@@ -337,7 +337,7 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
             value={note}
             onChange={(event) => setNote(event.target.value)}
             placeholder="Optional"
-            className="w-full rounded-md border border-edge bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
+            className="w-full rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
           />
         </label>
         <div className="sm:col-span-2">

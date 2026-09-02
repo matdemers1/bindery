@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Check, Plus, Undo2, X } from "lucide-react";
 
 import {
@@ -156,73 +156,87 @@ export default function EditPanel({
   return (
     <div className="space-y-4 rounded-xl border border-edge bg-surface p-4">
       <Field label="Title" source={sources.get("title")}>
-        <input
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder="Untitled"
-          className="w-full rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
-        />
+        {(id) => (
+          <input
+            id={id}
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Untitled"
+            className="w-full rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+        )}
       </Field>
 
       <Field label="Date" source={sources.get("document_date")}>
-        <input
-          type="date"
-          value={documentDate}
-          onChange={(event) => setDocumentDate(event.target.value)}
-          className="rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
-        />
+        {(id) => (
+          <input
+            id={id}
+            type="date"
+            value={documentDate}
+            onChange={(event) => setDocumentDate(event.target.value)}
+            className="rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+        )}
       </Field>
 
       <Field label="From" source={sources.get("correspondent_id")}>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={correspondentId}
-            disabled={!!newCorrespondent.trim()}
-            onChange={(event) => setCorrespondentId(event.target.value)}
-            className="min-w-40 rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-40"
-          >
-            <option value="">— none —</option>
-            {correspondents.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-          <input
-            value={newCorrespondent}
-            onChange={(event) => setNewCorrespondent(event.target.value)}
-            placeholder="or create a new one…"
-            className="min-w-40 flex-1 rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-        </div>
+        {(id) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              id={id}
+              value={correspondentId}
+              disabled={!!newCorrespondent.trim()}
+              onChange={(event) => setCorrespondentId(event.target.value)}
+              className="min-w-40 rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-40"
+            >
+              <option value="">— none —</option>
+              {correspondents.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.name}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Create a new correspondent"
+              value={newCorrespondent}
+              onChange={(event) => setNewCorrespondent(event.target.value)}
+              placeholder="or create a new one…"
+              className="min-w-40 flex-1 rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+        )}
       </Field>
 
       <Field label="Type" source={sources.get("document_type_id")}>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={typeId}
-            disabled={!!newType.trim()}
-            onChange={(event) => setTypeId(event.target.value)}
-            className="min-w-40 rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-40"
-          >
-            <option value="">— none —</option>
-            {types.map((kind) => (
-              <option key={kind.id} value={kind.id}>
-                {kind.name} ({kind.document_count})
-              </option>
-            ))}
-          </select>
-          <input
-            value={newType}
-            onChange={(event) => setNewType(event.target.value)}
-            placeholder="or create a new one…"
-            className="min-w-40 flex-1 rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-        </div>
+        {(id) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              id={id}
+              value={typeId}
+              disabled={!!newType.trim()}
+              onChange={(event) => setTypeId(event.target.value)}
+              className="min-w-40 rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-40"
+            >
+              <option value="">— none —</option>
+              {types.map((kind) => (
+                <option key={kind.id} value={kind.id}>
+                  {kind.name} ({kind.document_count})
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Create a new document type"
+              value={newType}
+              onChange={(event) => setNewType(event.target.value)}
+              placeholder="or create a new one…"
+              className="min-w-40 flex-1 rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+        )}
       </Field>
 
-      <div>
-        <span className="text-xs text-muted">Tags</span>
+      <fieldset>
+        <legend className="text-xs text-muted">Tags</legend>
         <div className="mt-1 flex flex-wrap gap-1.5">
           {tagIds.map((id) => (
             <Chip
@@ -241,10 +255,11 @@ export default function EditPanel({
           ))}
         </div>
         <input
+          aria-label="Find a tag, or type a new name"
           value={tagDraft}
           onChange={(event) => setTagDraft(event.target.value)}
           placeholder="Find a tag, or type a new name…"
-          className="mt-2 w-full rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+          className="mt-2 w-full rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
         />
         {draft && (
           <div className="mt-1 flex flex-wrap gap-1.5">
@@ -277,19 +292,25 @@ export default function EditPanel({
             )}
           </div>
         )}
-      </div>
+      </fieldset>
 
       <Field label="Summary" source={sources.get("summary")}>
-        <textarea
-          value={summary}
-          onChange={(event) => setSummary(event.target.value)}
-          rows={3}
-          className="w-full rounded-lg border border-edge bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
-        />
+        {(id) => (
+          <textarea
+            id={id}
+            value={summary}
+            onChange={(event) => setSummary(event.target.value)}
+            rows={3}
+            className="w-full rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+        )}
       </Field>
 
       {error && (
-        <p className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300">
+        <p
+          role="alert"
+          className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300"
+        >
           {error}
         </p>
       )}
@@ -338,6 +359,15 @@ export default function EditPanel({
   );
 }
 
+/**
+ * The label has to be a real `<label htmlFor>`. This form is the only way to
+ * correct a wrong title, date, correspondent or type, and a `<span>` sitting
+ * beside a control names nothing to a screen reader or to voice control.
+ *
+ * `children` is a function so the generated id reaches the control the label
+ * points at. The two rows that hold a picker and a "create a new one" box give
+ * the id to the picker and name the box themselves.
+ */
 function Field({
   label,
   source,
@@ -345,15 +375,18 @@ function Field({
 }: {
   label: string;
   source?: { source: "ai" | "rule" | "human" | "file"; set_at: string | null };
-  children: React.ReactNode;
+  children: (id: string) => React.ReactNode;
 }) {
+  const id = useId();
   return (
     <div>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs text-muted">{label}</span>
+        <label htmlFor={id} className="text-xs text-muted">
+          {label}
+        </label>
         <SourceBadge source={source?.source} when={source?.set_at} />
       </div>
-      <div className="mt-1">{children}</div>
+      <div className="mt-1">{children(id)}</div>
     </div>
   );
 }

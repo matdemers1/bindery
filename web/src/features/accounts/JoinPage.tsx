@@ -143,7 +143,7 @@ export default function JoinPage({ token }: { token: string }) {
             onChange={(event) => setDisplayName(event.target.value)}
             autoComplete="name"
             placeholder="Optional"
-            className="w-full rounded-md border border-edge bg-ink px-3 py-2 outline-none focus:border-accent"
+            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
           />
         </label>
 
@@ -156,7 +156,7 @@ export default function JoinPage({ token }: { token: string }) {
             autoComplete="new-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            className="w-full rounded-md border border-edge bg-ink px-3 py-2 outline-none focus:border-accent"
+            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
           />
           <span className="mt-1 block text-xs text-muted">
             At least 12 characters. Four unrelated words beats one clever word.
@@ -171,7 +171,7 @@ export default function JoinPage({ token }: { token: string }) {
             autoComplete="new-password"
             value={confirm}
             onChange={(event) => setConfirm(event.target.value)}
-            className="w-full rounded-md border border-edge bg-ink px-3 py-2 outline-none focus:border-accent"
+            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
           />
         </label>
 

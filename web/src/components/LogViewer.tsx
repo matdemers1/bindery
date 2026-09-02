@@ -108,7 +108,7 @@ export default function LogViewer({
           id="log-level"
           value={level}
           onChange={(event) => setLevel(event.target.value)}
-          className="rounded border border-edge bg-ink px-2 py-1 text-xs"
+          className="rounded border border-field bg-ink px-2 py-1 text-xs"
         >
           <option value="">Everything</option>
           <option value="warning">Warnings and errors</option>
@@ -123,7 +123,7 @@ export default function LogViewer({
           value={q}
           onChange={(event) => setQ(event.target.value)}
           placeholder="Filter…"
-          className="w-40 rounded border border-edge bg-ink px-2 py-1 text-xs"
+          className="w-40 rounded border border-field bg-ink px-2 py-1 text-xs"
         />
 
         <button
