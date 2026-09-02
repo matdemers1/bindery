@@ -167,12 +167,24 @@ export default function Shell({
   }, [collapsed]);
 
   const refreshBadges = useCallback(async () => {
+    // One endpoint that answers exactly what is drawn here. This was the review
+    // queue and the whole health panel, of which a count and a boolean were
+    // kept and the rest — twenty-five serialised documents, queue depth by
+    // stage, thirty days of API spend — was discarded. The badges follow the
+    // `jobs` topic, so that ran several times a second for the length of an
+    // import: the archive competing with itself for the same small database,
+    // hardest exactly when it was busiest.
+    //
     // Failures are swallowed on purpose: a badge is a nicety, and a navigation
     // that throws up an error because a count could not be fetched is worse
     // than a navigation with no count.
-    const [review, health] = await Promise.allSettled([api.review(), api.healthPanel()]);
-    if (review.status === "fulfilled") setReviewCount(review.value.total);
-    if (health.status === "fulfilled") setUnhealthy(!health.value.healthy);
+    try {
+      const badge = await api.healthBadge();
+      setReviewCount(badge.review_total);
+      setUnhealthy(!badge.healthy);
+    } catch {
+      // Leave both showing whatever they last knew.
+    }
   }, []);
 
   // The counts move the moment something changes rather than up to a minute

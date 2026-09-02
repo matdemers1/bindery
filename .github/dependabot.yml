@@ -1,0 +1,67 @@
+# Dependabot — the half of dependency watching that runs without a push.
+#
+# The blocking gate is in workflows/build.yml: `pip-audit` against
+# requirements.lock and `npm audit --audit-level=high`, both in the lint job,
+# both on every push and once a week. Those *fail the build* on a published
+# advisory. Dependabot is the complement — it opens the pull request that fixes
+# it, so the remediation path is a review rather than a person remembering how
+# `make lock` works under pressure.
+#
+# Also enable Dependabot **alerts** in this repository's settings. A private
+# repository does not get them by default, and nothing in this file turns them
+# on.
+#
+# One honest limitation: GitHub's Python dependency graph reads pyproject.toml,
+# not requirements.lock, and pyproject deliberately declares packages without
+# versions (the lock holds those). So Dependabot's view of the Python tree is
+# the direct dependency names only. `pip-audit` is what actually sees the
+# pinned transitive closure — cryptography, starlette, python-multipart and the
+# rest of the pre-authentication surface — and it is the reason that gate is
+# blocking rather than advisory.
+
+version: 2
+updates:
+  # The web app. This one is complete: package-lock.json is a real lockfile and
+  # Dependabot sees the whole tree.
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the routine patch traffic, separate PRs for anything that
+      # could change behaviour. A stack of eleven single-bump PRs is a stack
+      # nobody reviews.
+      dev-minor-and-patch:
+        dependency-type: development
+        update-types: [minor, patch]
+      prod-patch:
+        dependency-type: production
+        update-types: [patch]
+
+  # The workflow actions themselves. checkout@v5, setup-python@v6,
+  # build-push-action@v6 and the rest run with `packages: write` against ghcr —
+  # they are as much a supply chain as anything pip installs, and until now
+  # nothing watched them at all.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Python. Sees pyproject.toml's declared names; see the note above about what
+  # it can and cannot do with them. Kept anyway, because it is what will raise
+  # the two bounded requirements — `ocrmypdf>=17,<18` and `anthropic>=1,<2` —
+  # when a new major appears, which is exactly the moment somebody should look
+  # at the exit codes and the citations shape rather than let a `make lock`
+  # carry it in.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5

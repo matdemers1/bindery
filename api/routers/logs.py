@@ -35,7 +35,6 @@ from api.schemas import (
     PhotoWallOut,
     PipelineFilesOut,
 )
-from api.vault import boundary as vault
 from api.vault.store import VIDEO_SUFFIXES
 
 router = APIRouter(tags=["logs"])
@@ -161,11 +160,16 @@ async def pipeline_files(
     the stages themselves set — and the job rows supply what is *happening*
     right now and what went wrong.
     """
-    library_ids = await repository.visible_library_ids(session, user.id)
-    if not library_ids:
+    bound = await repository.scope_for(session, user.id)
+    if not bound.visible:
         return PipelineFilesOut(files=[], stages=[state.value for state in STAGE_ORDER])
 
-    query = sa.select(SourceFile).where(SourceFile.library_id.in_(library_ids))
+    # This screen listed every file in the library and named it: a vaulted
+    # file's `original_filename` is usually the whole disclosure, and the file
+    # row is not the document row, so hiding the document left this untouched.
+    # `source_files()` is the library filter and `hidden_source_file_ids`
+    # together, which is why neither is written out here.
+    query = bound.source_files()
     if ids:
         query = query.where(SourceFile.id.in_(ids))
     files = (
@@ -196,7 +200,14 @@ async def pipeline_files(
         (
             await session.execute(
                 sa.select(Document.source_file_id, sa.func.count())
-                .where(Document.source_file_id.in_(file_ids), Document.superseded_at.is_(None))
+                .where(
+                    Document.source_file_id.in_(file_ids),
+                    Document.superseded_at.is_(None),
+                    # A bundle can hold one vaulted document and nine ordinary
+                    # ones; counting all ten here would say how many are
+                    # missing from the list below it.
+                    bound.only(Document),
+                )
                 .group_by(Document.source_file_id)
             )
         ).all()
@@ -268,8 +279,8 @@ async def photos(
     and nothing has described is, in a list, indistinguishable from any other
     row.
     """
-    library_ids = await repository.visible_library_ids(session, user.id)
-    if not library_ids:
+    bound = await repository.scope_for(session, user.id)
+    if not bound.visible:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "no visible libraries")
 
     # The text of the page the document starts on. A photograph is one page, so
@@ -297,13 +308,13 @@ async def photos(
     )
 
     conditions: list[sa.ColumnElement[bool]] = [
-        Document.library_id.in_(library_ids),
-        Document.superseded_at.is_(None),
         # This screen had no vault boundary at all, so a vaulted photograph
         # stayed on the wall — locked or not. Photographs are the likeliest
         # thing anyone vaults, which made this the one surface that most
-        # needed it.
-        vault.document_clause(user.id),
+        # needed it. Both halves now arrive as one condition, so the next
+        # author cannot take the library filter and leave the vault behind.
+        bound.only(Document),
+        Document.superseded_at.is_(None),
         sa.or_(
             *[
                 SourceFile.original_filename.ilike(f"%{ext}")

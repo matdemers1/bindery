@@ -237,7 +237,13 @@ def test_every_route_that_selects_documents_applies_the_vault_boundary() -> None
 
     root = Path(__file__).resolve().parent.parent
     # Reached through `Scope` or `repository`, both of which apply it centrally.
-    VIA_SCOPE = {"documents.py", "files.py", "segments.py", "upload.py", "trust.py"}
+    # `library.py` and `logs.py` were passing this guard on a substring match
+    # against the word in a *comment*, not on any filtering they did. They
+    # route through `Scope` like the rest of this set, so name them.
+    VIA_SCOPE = {
+        "documents.py", "files.py", "segments.py", "upload.py", "trust.py",
+        "library.py", "logs.py",
+    }
     # Vault routes are the one place vaulted rows are *supposed* to be visible.
     EXEMPT = {"vault.py"}
 

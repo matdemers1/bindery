@@ -83,11 +83,12 @@ async def get_document(
         if document.known_form_id
         else None
     )
-    pages = [
-        page
-        for page in await repository.list_pages(session, user.id, document.source_file_id)
-        if document.page_start <= page.page_number <= document.page_end
-    ]
+    # The range, from the database. Fetching the file's pages as entities and
+    # slicing them here read the whole bundle's OCR text to render three
+    # scalars per page — see `repository.list_pages_in_range`.
+    pages = await repository.list_pages_in_range(
+        session, user.id, document.source_file_id, document.page_start, document.page_end
+    )
 
     sources = await field_source.sources_for(session, document.id)
     media = await session.get(MediaMetadata, document.source_file_id)

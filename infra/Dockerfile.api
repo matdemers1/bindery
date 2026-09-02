@@ -21,9 +21,15 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends postgresql-client-16 \
  && apt-get purge -y curl gnupg && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
-COPY pyproject.toml infra/extract-deps.py ./
+# requirements.lock is copied alongside pyproject.toml for two reasons. It pins
+# the whole transitive closure, so this image and the one CI tested are the same
+# software — and it puts the lock's content hash into this layer's cache key, so
+# a dependency change busts the pip layer and nothing else does. Without it the
+# buildx cache pins the resolution invisibly and a security fix cannot reach a
+# published image at all.
+COPY pyproject.toml requirements.lock infra/extract-deps.py ./
 RUN python extract-deps.py > /tmp/requirements.txt \
- && pip install --no-cache-dir -r /tmp/requirements.txt \
+ && pip install --no-cache-dir -c requirements.lock -r /tmp/requirements.txt \
  && rm extract-deps.py
 
 # ---------------------------------------------------------------------------
@@ -62,9 +68,9 @@ FROM base AS dev
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git \
  && rm -rf /var/lib/apt/lists/*
-COPY pyproject.toml infra/extract-deps.py ./
+COPY pyproject.toml requirements.lock infra/extract-deps.py ./
 RUN python extract-deps.py dev > /tmp/dev-requirements.txt \
- && pip install --no-cache-dir -r /tmp/dev-requirements.txt \
+ && pip install --no-cache-dir -c requirements.lock -r /tmp/dev-requirements.txt \
  && rm extract-deps.py
 COPY . .
 CMD ["python", "-m", "pytest"]

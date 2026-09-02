@@ -6,15 +6,18 @@ The verification steps from the phase plan, in the plan's own order:
 2. The full export is navigable **without Bindery** (REQ-093)
 3. Delete the mirror tree → it rebuilds; `_bundles/` lists page ranges (REQ-094, REQ-043)
 4. Offsite copies are verified encrypted (REQ-096)
-5. Restore drill (REQ-097) — the shell script, exercised here for its guarantees
+5. Restore drill (REQ-097) — the script itself, executed, against a real backup
 6. Vital documents surface without searching (REQ-091)
 7. The go-bag is produced and decryptable (REQ-092)
 8. The audit log filters by document, actor and time (REQ-069)
 """
 
+import asyncio
 import hashlib
 import json
 import os
+import subprocess
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -188,9 +191,73 @@ async def test_the_integrity_check_does_not_hash_on_the_event_loop(
     assert all(ident != loop_thread for ident in seen)
 
 
+async def _worst_stall(run):
+    """Run `run()` with a 5 ms heartbeat beside it and report the longest gap.
+
+    The same measurement as `test_a_run_leaves_the_event_loop_free` in
+    tests/test_offsite_replicate.py, and for the same reason: what matters is
+    that the loop keeps turning, which survives a refactor that a grep for
+    `to_thread` would not. The *longest* gap rather than an average, because an
+    operation that threads four of its five blocking calls still freezes the
+    process for the fifth and a mean would hide it.
+    """
+    stalls: list[float] = []
+
+    async def heartbeat():
+        last = time.monotonic()
+        while True:
+            await asyncio.sleep(0.005)
+            now = time.monotonic()
+            stalls.append(now - last)
+            last = now
+
+    beat = asyncio.create_task(heartbeat())
+    try:
+        result = await run()
+    finally:
+        beat.cancel()
+
+    assert len(stalls) > 10, "the heartbeat never got to run at all"
+    return result, max(stalls)
+
+
 # --------------------------------------------------------------------------
 # 2. Full export works without Bindery (T-6.3, REQ-093)
 # --------------------------------------------------------------------------
+
+
+async def test_a_full_export_does_not_copy_originals_on_the_event_loop(
+    session, archive, monkeypatch
+) -> None:
+    """CR-010: `POST /export/full` copied every original inside its handler.
+
+    One uvicorn process serves the whole application from one event loop, so an
+    export of a real archive — hundreds of gigabytes of `shutil.copy2` — was
+    search, login, `/api/live` and the container healthcheck all stopped until
+    it finished. The healthcheck gives up after ~2.5 minutes, and nothing
+    distinguishes that from a genuine outage.
+    """
+    real_copy = archive_export.shutil.copy2
+
+    def slow_copy(source, target, *args, **kwargs):
+        time.sleep(0.05)
+        return real_copy(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(archive_export.shutil, "copy2", slow_copy)
+
+    result, worst = await _worst_stall(
+        lambda: archive_export.full_export(
+            session, [archive["library"].id], destination=archive["tmp"] / "slow-export"
+        )
+    )
+
+    assert result.file_count == 2, "nothing was copied, so the test proves nothing"
+    # Every copy sleeps 50ms, so anything left on the loop shows up as a gap at
+    # least that long. Off the loop, the gaps are the 5ms the heartbeat asked for.
+    assert worst < 0.04, (
+        f"the event loop was blocked for {worst * 1000:.0f}ms during a full "
+        "export — every other request was frozen for it"
+    )
 
 
 async def test_full_export_is_a_folder_tree_of_untouched_originals(
@@ -356,6 +423,37 @@ async def test_rebuilding_removes_entries_for_superseded_documents(
     assert blob_path(archive["dd214_sha"]).is_file()
 
 
+async def test_a_mirror_rebuild_does_not_link_on_the_event_loop(
+    session, archive, monkeypatch
+) -> None:
+    """CR-010, the same defect on `POST /mirror/rebuild`.
+
+    A rebuild hardlinks one entry per source file, writes an index per bundle,
+    and then walks the whole tree to prune it — over a real archive that is
+    hundreds of thousands of filesystem calls, and every one of them ran on the
+    loop serving every other request.
+    """
+    real_link = mirror._link_or_copy
+
+    def slow_link(source, target):
+        time.sleep(0.05)
+        return real_link(source, target)
+
+    monkeypatch.setattr(mirror, "_link_or_copy", slow_link)
+
+    result, worst = await _worst_stall(
+        lambda: mirror.rebuild(
+            session, [archive["library"].id], root=archive["tmp"] / "slow-mirror"
+        )
+    )
+
+    assert result.linked + result.copied == 2, "nothing was mirrored"
+    assert worst < 0.04, (
+        f"the event loop was blocked for {worst * 1000:.0f}ms during a mirror "
+        "rebuild — every other request was frozen for it"
+    )
+
+
 # --------------------------------------------------------------------------
 # 4/5. Backup and restore (T-6.6, T-6.7, REQ-096, REQ-097)
 # --------------------------------------------------------------------------
@@ -400,27 +498,218 @@ def test_a_short_offsite_passphrase_is_refused(tmp_path) -> None:
         backup.encrypt_for_offsite(source, tmp_path / "out.enc", "short")
 
 
-def test_the_restore_drill_fails_loudly_when_it_cannot_find_the_document() -> None:
+DRILL_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "restore-drill.sh"
+
+
+@pytest.fixture
+def drill(tmp_path):
+    """Run `scripts/restore-drill.sh` for real, against a real backup directory.
+
+    CR-041. The drill is the deliverable of Phase 6 and the only thing that had
+    ever tested it was a grep for six substrings — every one of which survives a
+    script whose control flow is broken.
+
+    **What is real here**: bash, the script itself, its argument guards, the
+    manifest read, the blob and vault presence loops, the hit count, the exit
+    codes and the cleanup trap; and a backup directory on disk laid out the way
+    `api/export/backup.py` lays one out, sharded blob paths and all.
+
+    **What is not**: Postgres. The suite runs in a container with no Docker
+    socket, so `docker` is `tests/fake_docker.py` and the restore is asserted to
+    have been *asked for*, not performed. The drill that restores a real dump
+    into a real empty database runs in CI, in the e2e job, against the seeded
+    corpus — see the "Restore drill" steps in .github/workflows/build.yml.
+    """
+    fake = Path(__file__).resolve().parent / "fake_docker.py"
+    binary = tmp_path / "bin" / "docker"
+    binary.parent.mkdir(parents=True)
+    binary.write_text(f'#!/bin/sh\nexec python3 "{fake}" "$@"\n')
+    binary.chmod(0o755)
+
+    backup = tmp_path / "20260902-031500"
+    (backup / "blobs").mkdir(parents=True)
+    (backup / "bindery.dump").write_bytes(b"PGDMP fake custom-format archive")
+    (backup / "manifest.json").write_text(
+        json.dumps(
+            {
+                "created_at": datetime.now(UTC).isoformat(),
+                "blob_count": 1,
+                "blob_bytes": 42,
+                "integrity": {"healthy": True},
+            }
+        )
+    )
+
+    sha = hashlib.sha256(b"a restored original").hexdigest()
+    blob = backup / "blobs" / sha[:2] / sha[2:4] / sha
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"a restored original")
+
+    answers = tmp_path / "answers"
+    answers.mkdir()
+    (answers / "shas").write_text(f"{sha}\n")
+    (answers / "vault").write_text("")
+    (answers / "hits").write_text("Certificate of Release or Discharge | pp. 1-1\n")
+    (answers / "forms").write_text("")
+    log = tmp_path / "docker.log"
+
+    def run(term: str = "DD-214", **overrides):
+        environment = {
+            **os.environ,
+            "PATH": f"{binary.parent}:{os.environ['PATH']}",
+            "FAKE_DOCKER_LOG": str(log),
+            "FAKE_DOCKER_SHAS": str(answers / "shas"),
+            "FAKE_DOCKER_VAULT": str(answers / "vault"),
+            "FAKE_DOCKER_HITS": str(answers / "hits"),
+            "FAKE_DOCKER_FORMS": str(answers / "forms"),
+            **{key: str(value) for key, value in overrides.items()},
+        }
+        return subprocess.run(
+            ["bash", str(DRILL_SCRIPT), str(backup), term],
+            capture_output=True, text=True, env=environment, timeout=120,
+        )
+
+    return {
+        "run": run, "backup": backup, "blob": blob, "sha": sha,
+        "answers": answers, "log": log, "tmp": tmp_path,
+    }
+
+
+def test_the_restore_drill_passes_against_a_backup_that_is_whole(drill) -> None:
+    """The deliverable, executed rather than described.
+
+    `I restored to an empty container and found the DD-214` — the script really
+    runs, really reads the backup directory, really counts the originals it
+    references and really reports a pass.
+    """
+    result = drill["run"]()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "DRILL PASSED" in result.stdout
+    assert "all 1 originals present" in result.stdout
+
+    # It must never point at the live database. Asserted from what the script
+    # actually did rather than from the text of the script: every container it
+    # touched is the throwaway one, and the dump went nowhere else.
+    calls = drill["log"].read_text().splitlines()
+    containers = {line.split("\t")[1] for line in calls if line.startswith("exec\t")}
+    assert containers == {"bindery-restore-drill"}
+    assert any("pg_restore" in line and "--exit-on-error" in line for line in calls)
+    # And it tore its scratch container down, on the way out, via the trap.
+    assert calls[-1].startswith("rm\t-f\tbindery-restore-drill")
+
+
+def test_the_restore_drill_fails_loudly_when_it_cannot_find_the_document(drill) -> None:
     """The drill's whole value is that it can fail.
 
-    A drill that always passes is a ceremony. These are the assertions in
-    scripts/restore-drill.sh that make it a test rather than a ritual.
+    A drill that always passes is a ceremony. So the search comes back empty and
+    the script has to notice: a restore that completed without error, over a
+    backup with every blob present, is still a failed drill if the document
+    cannot be retrieved afterwards.
     """
-    script = Path(__file__).resolve().parent.parent / "scripts" / "restore-drill.sh"
-    body = script.read_text()
+    (drill["answers"] / "hits").write_text("")
+    (drill["answers"] / "forms").write_text("")
 
-    assert "DRILL FAILED" in body
-    assert "exit 1" in body
-    # An unclassified document has no title, and `NULL || text` is NULL in SQL,
-    # so without coalesce a real hit comes back as a blank line that reads as
-    # "not found". The drill did exactly that on its first run against a live
-    # archive — it reported failure while holding the document it was asked for.
-    assert "coalesce(d.title" in body
-    # It must verify the blobs, not just that pg_restore returned zero.
-    assert "MISSING BLOB" in body
-    # It must never point at the live database.
-    assert "bindery-restore-drill" in body
-    assert "--exit-on-error" in body
+    result = drill["run"]()
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "DRILL FAILED" in result.stdout
+    assert "DRILL PASSED" not in result.stdout
+
+
+def test_a_hit_with_no_title_still_counts_as_finding_the_document(drill) -> None:
+    """`NULL || text` is NULL in SQL, and an unclassified document has no title.
+
+    Without the `coalesce` in the search query a real hit comes back as a blank
+    line, `grep -c .` counts nothing, and the drill reports failure while
+    holding the document it was asked for. That is not hypothetical — it is
+    what this drill did on its first run against a live archive. The blank line
+    is what the bug produced, so that is what is fed in here.
+    """
+    (drill["answers"] / "hits").write_text("\n")
+
+    result = drill["run"]()
+
+    assert result.returncode == 1, "a blank line is not a document"
+    assert "DRILL FAILED" in result.stdout
+
+    # And the same query, coalesced, is a pass.
+    (drill["answers"] / "hits").write_text("untitled | pp. 4-8\n")
+    assert drill["run"]().returncode == 0
+
+
+def test_the_restore_drill_fails_when_an_original_is_not_in_the_backup(drill) -> None:
+    """A backup that restores and cannot supply its originals is not a backup.
+
+    `pg_restore` returning zero says nothing about the blob pool beside it, and
+    this is the check that does. The loop that finds this is the one a substring
+    test cannot tell apart from a loop over an empty list.
+    """
+    drill["blob"].unlink()
+
+    result = drill["run"]()
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "MISSING BLOB" in result.stdout
+    assert "not restorable" in result.stdout
+    assert "DRILL PASSED" not in result.stdout
+
+
+def test_the_restore_drill_fails_when_a_sealed_vault_object_is_not_in_the_backup(
+    drill,
+) -> None:
+    """The vault is the one part of the archive with no second source.
+
+    A blob can be re-scanned. A sealed object exists once, so a backup missing
+    one is unrecoverable and the drill has to say so rather than pass.
+    """
+    name = "beefcafe" + "0" * 56
+    (drill["answers"] / "vault").write_text(f"{name}\t{'a' * 64}\n")
+
+    result = drill["run"]()
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "MISSING VAULT OBJECT" in result.stdout
+    assert "the vault is not restorable" in result.stdout
+
+
+def test_the_restore_drill_stops_when_the_restore_itself_fails(drill) -> None:
+    """`set -e`, exercised. A failed `pg_restore` must not reach the search."""
+    result = drill["run"](FAKE_DOCKER_RESTORE_EXIT=1)
+
+    assert result.returncode != 0
+    assert "restore completed without error" not in result.stdout
+    assert "DRILL PASSED" not in result.stdout
+
+
+def test_the_restore_drill_refuses_a_backup_that_is_not_there(drill) -> None:
+    """The guards run before anything is started, and they exit non-zero."""
+    missing = drill["tmp"] / "no-such-generation"
+    environment = {**os.environ, "PATH": f"{drill['tmp']}/bin:{os.environ['PATH']}"}
+
+    absent = subprocess.run(
+        ["bash", str(DRILL_SCRIPT), str(missing)],
+        capture_output=True, text=True, env=environment, timeout=60,
+    )
+    assert absent.returncode == 1
+    assert "no such backup directory" in absent.stdout
+
+    empty = drill["tmp"] / "empty-generation"
+    empty.mkdir()
+    no_dump = subprocess.run(
+        ["bash", str(DRILL_SCRIPT), str(empty)],
+        capture_output=True, text=True, env=environment, timeout=60,
+    )
+    assert no_dump.returncode == 1
+    assert "no bindery.dump" in no_dump.stdout
+
+    # No argument at all: the usage guard, and `set -u` behind it.
+    unspecified = subprocess.run(
+        ["bash", str(DRILL_SCRIPT)],
+        capture_output=True, text=True, env=environment, timeout=60,
+    )
+    assert unspecified.returncode != 0
+    assert "usage" in unspecified.stderr
 
 
 # --------------------------------------------------------------------------
@@ -466,6 +755,43 @@ async def test_a_weak_go_bag_passphrase_is_refused(session, archive) -> None:
     """It is going to leave the house on a USB stick."""
     with pytest.raises(ValueError, match="at least 12"):
         await archive_export.go_bag(session, [archive["library"].id], "hunter2")
+
+
+async def test_a_go_bag_does_not_encrypt_on_the_event_loop(
+    session, archive, monkeypatch
+) -> None:
+    """CR-010, the same defect on `POST /export/go-bag`.
+
+    Deflating and AES-encrypting the vital tier is seconds of solid CPU inside
+    the request handler, and it held the whole process while it ran.
+    """
+    pytest.importorskip("pyzipper")
+
+    real_index = archive_export.index_html
+
+    def slow_index(*args, **kwargs):
+        # 100ms rather than 50: the zip is written by a single call, so this is
+        # the only place to put the delay and the run has to last long enough
+        # for the heartbeat to be sampled a useful number of times.
+        time.sleep(0.1)
+        return real_index(*args, **kwargs)
+
+    monkeypatch.setattr(archive_export, "index_html", slow_index)
+
+    result, worst = await _worst_stall(
+        lambda: archive_export.go_bag(
+            session,
+            [archive["library"].id],
+            "correct-horse-battery-staple",
+            destination=archive["tmp"] / "slow-go-bag.zip",
+        )
+    )
+
+    assert result.file_count == 1, "nothing was written into the go-bag"
+    assert worst < 0.04, (
+        f"the event loop was blocked for {worst * 1000:.0f}ms while a go-bag "
+        "was written — every other request was frozen for it"
+    )
 
 
 # --------------------------------------------------------------------------

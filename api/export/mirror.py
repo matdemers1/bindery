@@ -20,6 +20,7 @@ original even by accident. Across filesystems, where hardlinks are impossible,
 it falls back to copying and says so.
 """
 
+import asyncio
 import logging
 import os
 import uuid
@@ -101,12 +102,32 @@ async def rebuild(
     *,
     root: Path | None = None,
 ) -> MirrorResult:
-    """Regenerate the whole tree from the database. Idempotent."""
+    """Regenerate the whole tree from the database. Idempotent.
+
+    The database reads happen here; the tree is written off the event loop
+    (CR-010). A rebuild hardlinks or copies one entry per source file and then
+    walks the whole tree to prune it, and all of that used to run inside the
+    request handler — so "Rebuild mirror" on the Trust screen froze search,
+    login, `/api/live` and the container healthcheck until it finished.
+    """
     destination = root or mirror_root()
-    destination.mkdir(parents=True, exist_ok=True)
 
     entries = await collect(session, library_ids)
     by_file = plan_layout(entries)
+
+    return await asyncio.to_thread(_rebuild_tree, entries, by_file, destination)
+
+
+def _rebuild_tree(
+    entries: list,
+    by_file: dict[str, list],
+    destination: Path,
+) -> MirrorResult:
+    """The blocking half of `rebuild` — link, write, prune.
+
+    Moved, not changed: the same loop, the same indexes, the same `_prune`.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
 
     linked = copied = missing = bundles = 0
     keep: set[Path] = set()

@@ -25,6 +25,7 @@ import Login from "./pages/Login";
 import AccountPage from "./features/accounts/AccountPage";
 import AdminPage from "./features/accounts/AdminPage";
 import JoinPage from "./features/accounts/JoinPage";
+import ResetPage from "./features/accounts/ResetPage";
 import HelpPage from "./features/help/HelpPage";
 import VaultPage from "./features/vault/VaultPage";
 
@@ -77,6 +78,15 @@ export default function App() {
     : null;
   if (joinToken && state.status !== "in") {
     return <JoinPage token={joinToken} />;
+  }
+
+  // And so does a reset code, for the same reason: it is the way back in for
+  // somebody who cannot get in. Not a `<Route>` — the router below is inside
+  // the signed-in tree, so a route would be unreachable by exactly the person
+  // who needs it. Signed in, this falls through to the catch-all and lands on
+  // Ask, which is where "reset my password" belongs from inside a session.
+  if (window.location.pathname === "/reset" && state.status !== "in") {
+    return <ResetPage />;
   }
 
   if (state.status === "loading") {

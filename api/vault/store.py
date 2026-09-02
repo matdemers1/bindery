@@ -303,6 +303,10 @@ async def seal(
 
     meta = {
         "title": document.title,
+        # The summary is AI-written prose describing what the document
+        # contains, which is more revealing than the title it sits beside.
+        # Blanking the title and leaving this would have been theatre.
+        "summary": document.summary,
         "original_filename": source.original_filename,
         "media": media_meta,
         # `source.mime_type`, not `media_type`. The first version read the
@@ -348,6 +352,7 @@ async def seal(
     # mean a locked archive still knew what the document was called, which is
     # most of what a title is for.
     document.title = None
+    document.summary = None
 
     # Taxonomy does not travel into the vault. A tag is a library-wide row, so
     # leaving the link would let anyone browsing tags see that *something*
@@ -576,6 +581,7 @@ async def unseal(
 
     meta = open_meta(item, data_key)
     document.title = meta.get("title")
+    document.summary = meta.get("summary")
     document.vaulted_by = None
     if (media_meta := meta.get("media")) is not None:
         from datetime import datetime

@@ -39,6 +39,7 @@ from api.db.models import (
     Tag,
     live_tag_links,
 )
+from api.db.scope import Scope
 from api.db.session import get_session
 from api.schemas import (
     ArchiveEntryOut,
@@ -50,7 +51,6 @@ from api.schemas import (
     TreeOut,
 )
 from api.segments import live
-from api.vault import boundary as vault
 
 router = APIRouter(tags=["library"])
 
@@ -62,13 +62,16 @@ SORTS = {
 }
 
 
-def _base(library_ids: list[uuid.UUID], viewer: uuid.UUID | None = None):
+def _base(bound: Scope):
     """Every live document the caller may see, with everything a row displays.
 
-    `viewer` carries the vault boundary. This is the browse query and the stats
-    behind it, so a vaulted document reaching here is listed by title *and*
-    counted — and a hidden row that still moves a total says "there is
-    something here you cannot see", which is more than nothing.
+    `bound.only(Document)` is the library filter and the vault filter as one
+    condition (`api/db/scope.py`): it is where `boundary.document_clause` is
+    applied on this screen, so there is nothing left for this file to remember.
+    This is the browse query and the stats behind it, so a vaulted document
+    reaching here is listed by title *and* counted — and a hidden row that
+    still moves a total says "there is something here you cannot see", which is
+    more than nothing.
     """
     return (
         sa.select(
@@ -86,7 +89,7 @@ def _base(library_ids: list[uuid.UUID], viewer: uuid.UUID | None = None):
         .outerjoin(Correspondent, Correspondent.id == Document.correspondent_id)
         .outerjoin(DocumentType, DocumentType.id == Document.document_type_id)
         .outerjoin(KnownForm, KnownForm.id == Document.known_form_id)
-        .where(Document.library_id.in_(library_ids), live(), vault.document_clause(viewer))
+        .where(bound.only(Document), live())
     )
 
 
@@ -149,12 +152,11 @@ async def browse(
     session: AsyncSession = Depends(get_session),
 ) -> ArchiveOut:
     """Everything in the archive, newest first, with how it arrived."""
-    library_ids = await repository.visible_library_ids(session, user.id)
-    viewer = user.id
-    if not library_ids:
+    bound = await repository.scope_for(session, user.id)
+    if not bound.visible:
         return ArchiveOut(total=0, entries=[], stats=ArchiveStatsOut())
 
-    statement = _base(library_ids, viewer)
+    statement = _base(bound)
     if q:
         pattern = f"%{q.strip()}%"
         statement = statement.where(
@@ -201,32 +203,30 @@ async def browse(
     return ArchiveOut(
         total=total,
         entries=[_entry(row, tags) for row in rows],
-        stats=await _stats(session, library_ids, viewer),
+        stats=await _stats(session, bound),
     )
 
 
-async def _stats(
-    session: AsyncSession, library_ids: list[uuid.UUID], viewer: uuid.UUID | None = None
-) -> ArchiveStatsOut:
+async def _stats(session: AsyncSession, bound: Scope) -> ArchiveStatsOut:
     documents = (
         await session.execute(
             sa.select(sa.func.count()).select_from(Document)
-            .where(Document.library_id.in_(library_ids), live(), vault.document_clause(viewer))
+            .where(bound.only(Document), live())
         )
     ).scalar_one()
+    # The file and page totals had the library filter and no vault filter, so a
+    # vaulted file was hidden from every list on this screen and still counted
+    # in the header above them. `only(SourceFile)` is both halves at once.
     files = (
         await session.execute(
-            sa.select(sa.func.count()).select_from(SourceFile)
-            .where(SourceFile.library_id.in_(library_ids))
+            sa.select(sa.func.count()).select_from(SourceFile).where(bound.only(SourceFile))
         )
     ).scalar_one()
     pages = (
         await session.execute(
-            sa.text(
-                "SELECT coalesce(sum(page_count), 0) FROM source_file "
-                "WHERE library_id = ANY(:libs)"
-            ),
-            {"libs": library_ids},
+            sa.select(sa.func.coalesce(sa.func.sum(SourceFile.page_count), 0))
+            .select_from(SourceFile)
+            .where(bound.only(SourceFile))
         )
     ).scalar_one()
     # Counted separately, because they go to different places. The header used
@@ -236,8 +236,7 @@ async def _stats(
     needs_review = (
         await session.execute(
             sa.select(sa.func.count()).select_from(Document).where(
-                Document.library_id.in_(library_ids), live(),
-                vault.document_clause(viewer),
+                bound.only(Document), live(),
                 Document.review_state == ReviewState.NEEDS_REVIEW.value,
                 Document.is_backlog.is_(False),
             )
@@ -246,8 +245,7 @@ async def _stats(
     backlog_pending = (
         await session.execute(
             sa.select(sa.func.count()).select_from(Document).where(
-                Document.library_id.in_(library_ids), live(),
-                vault.document_clause(viewer),
+                bound.only(Document), live(),
                 Document.review_state == ReviewState.NEEDS_REVIEW.value,
                 Document.is_backlog.is_(True),
             )
@@ -256,8 +254,7 @@ async def _stats(
     unclassified = (
         await session.execute(
             sa.select(sa.func.count()).select_from(Document).where(
-                Document.library_id.in_(library_ids), live(),
-                vault.document_clause(viewer),
+                bound.only(Document), live(),
                 Document.review_state == ReviewState.PENDING_CLASSIFICATION.value,
             )
         )
@@ -280,9 +277,8 @@ async def tree(
     `year` mirrors how Phase 6 lays the files out on disk, so the tree you click
     through and the tree you'd see in Finder are the same tree.
     """
-    library_ids = await repository.visible_library_ids(session, user.id)
-    viewer = user.id
-    if not library_ids:
+    bound = await repository.scope_for(session, user.id)
+    if not bound.visible:
         return TreeOut(group_by=group_by, groups=[])
 
     label = {
@@ -303,7 +299,7 @@ async def tree(
             .outerjoin(Correspondent, Correspondent.id == Document.correspondent_id)
             .outerjoin(DocumentType, DocumentType.id == Document.document_type_id)
             .outerjoin(KnownForm, KnownForm.id == Document.known_form_id)
-            .where(Document.library_id.in_(library_ids), live(), vault.document_clause(viewer))
+            .where(bound.only(Document), live())
             .group_by(label)
             .order_by(label.desc() if group_by == "year" else label)
         )

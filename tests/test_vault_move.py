@@ -172,6 +172,36 @@ async def test_the_title_leaves_the_row(session, ready):
     assert document.title is None
 
 
+async def test_the_summary_leaves_the_row_with_the_title(session, ready):
+    """An AI-written summary describes what the document contains, so blanking
+    the title and leaving this beside it would have been theatre."""
+    user, _, document, source, vault, key, _original = ready
+    document.summary = "Discharge paperwork naming the condition and the date."
+    await session.flush()
+
+    await store.seal(session, document, source, vault.id, user.id, key)
+    assert document.summary is None
+
+
+async def test_the_summary_comes_back_on_unseal(session, ready):
+    """Sealed, not discarded — the row comes back exactly as it went in."""
+    user, _, document, source, vault, key, _original = ready
+    document.summary = "Discharge paperwork naming the condition and the date."
+    await session.flush()
+
+    await store.seal(session, document, source, vault.id, user.id, key)
+    await session.commit()
+
+    item = (
+        await session.execute(
+            sa.select(VaultItem).where(VaultItem.document_id == document.id)
+        )
+    ).scalar_one()
+    await store.unseal(session, document, source, item, key)
+
+    assert document.summary == "Discharge paperwork naming the condition and the date."
+
+
 async def test_tags_are_revoked_rather_than_carried(session, ready):
     """A tag is a library-wide row. Leaving the link would let anyone browsing
     tags see that *something* tagged "property" exists and is unreachable."""

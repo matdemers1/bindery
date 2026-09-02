@@ -229,7 +229,8 @@ docker exec -it bindery-api python -m api.cli create-user \
 # REQ-104: no service may publish a host port. No row may contain "->".
 docker ps --filter name=bindery --format '{{.Names}}\t{{.Ports}}'
 
-# All five up, four reporting healthy.
+# All five up. postgres, api, worker and web report (healthy); cloudflared has
+# no healthcheck of its own.
 docker ps --filter name=bindery --format '{{.Names}}\t{{.Status}}'
 
 # The pipeline is watching.
@@ -248,6 +249,41 @@ docker logs -f bindery-worker
 
 It should ingest (after the stability check), normalize, page, and segment. Then
 press ⌘K in the browser and search for a word you know is inside it.
+
+### When the worker goes unhealthy
+
+The worker's healthcheck does not ask whether the process exists — a wedged
+worker and an idle one both look like `Up` with no logs, which is precisely the
+stall that never announces itself. It asks whether the event loop is still
+turning: `worker/runner.py` stamps `/tmp/bindery-worker.heartbeat` every 15
+seconds from the same loop the pipeline runs on, and the check fails once that
+file is two minutes old.
+
+**Docker will mark it and do nothing else.** `restart: unless-stopped` acts on
+process *exit*; a plain Docker Engine healthcheck has no restart action at all.
+So the container sits there saying `(unhealthy)` until somebody looks. Two ways
+to stop that being a person's job, in order of preference:
+
+```bash
+# 1. Have the host restart anything unhealthy. Add to root's crontab on the
+#    Zima. No extra container, and nothing gains access to the Docker socket
+#    that does not already have it.
+*/5 * * * * for c in $(docker ps --filter health=unhealthy --format '{{.Names}}'); do docker restart "$c"; done
+```
+
+```bash
+# 2. Or just be told. The health panel already alerts on a stalled pipeline and
+#    the notifier already has your webhook, but both of those live *inside* the
+#    worker — so this is the one that still fires when the worker is the thing
+#    that is stuck.
+docker events --filter event=health_status
+```
+
+Option 1 is a deliberate choice over an autoheal sidecar
+(`willfarrell/autoheal` and friends). Those work by bind-mounting
+`/var/run/docker.sock`, which hands a third-party image tagged `latest` full
+root over this host — on the box that holds the archive. A five-line cron entry
+does the same job with nothing new to trust.
 
 ---
 
@@ -322,6 +358,8 @@ To roll back, change the `:main` tags to `:sha-<commit>` and `up -d` again.
 | Browser reaches Access but then a 502 | `web` is unhealthy, or the tunnel points somewhere other than `web:80` |
 | Files sit in the inbox untouched | The subdirectory name does not match a library name; check `docker logs bindery-worker` |
 | Jobs queued but never claimed | Worker cannot reach the database — compare `DATABASE_URL` between the api and worker blocks |
+| `bindery-worker` shows `(unhealthy)` but is still `Up` | Its event loop has stopped turning for more than two minutes. `docker restart bindery-worker`; in-flight claims are released on the way out or reclaimed by lease. See "When the worker goes unhealthy" |
+| `bindery-worker` never leaves `(health: starting)` | It has not written its first heartbeat at all. The heartbeat needs no database and no network, so this means the process is not getting as far as starting its tasks — read `docker logs bindery-worker`, it will be an import or config failure |
 | `curl` with a service token returns 302 | The Service Auth policy is below the Allow policy in precedence |
 | API client gets `403 error code: 1010` | Cloudflare's Browser Integrity Check rejecting the default user agent. Send a real `User-Agent` header |
 | Worker logs `relation "library" does not exist` at startup | It started before migrations were applied. It backs off and recovers on its own once the schema exists |

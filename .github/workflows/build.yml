@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Weekly, and not only for tidiness. Two things here only move on a schedule:
+  # `pip-audit` and `npm audit` are checks against advisory databases that change
+  # without this repository changing, and the published images are rebuilt against
+  # current base-image OS packages. Without this, a CVE disclosed on Tuesday is
+  # noticed whenever somebody next happens to push.
+  schedule:
+    - cron: "17 5 * * 1"
 
 # Four gates, in order, and nothing is published until all four pass.
 #
@@ -34,14 +41,40 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Install python tooling
+        # `-c requirements.lock` here for the same reason the Dockerfiles use it:
+        # otherwise this gate lints and tests one resolution while the `images`
+        # job publishes another, and a green pipeline says nothing about the
+        # artifact it produced.
         run: |
           python infra/extract-deps.py dev > requirements.txt
-          pip install -r requirements.txt
+          pip install -c requirements.lock -r requirements.txt
       - name: ruff
         run: ruff check api worker tests
+      - name: pip-audit
+        # The whole locked closure, including the worker extra that this runner
+        # does not install — the shipped images do, and this is the gate that
+        # gets to know about them. `--no-deps` audits the pinned lines verbatim
+        # rather than re-resolving; `--strict` fails rather than skipping a
+        # package it could not look up, because a scanner that quietly examines
+        # nothing is the badge that is always on.
+        #
+        # Blocking, not advisory: both ecosystems are clean as of this commit,
+        # so there is no pre-existing failure to grandfather in, and an advisory
+        # warning on a green build is one nobody reads.
+        run: |
+          pip install "pip-audit>=2.10,<3"
+          pip-audit --strict --no-deps -r requirements.lock
       - name: Install web dependencies
+        # `--no-audit` is deliberately gone. It suppressed the one report this
+        # pipeline got for free; `npm audit` below is the gate, and this is
+        # simply no longer opting out of hearing about it.
         working-directory: web
-        run: npm ci --no-audit --no-fund
+        run: npm ci --no-fund
+      - name: npm audit
+        # `high` and above fails. Moderate advisories in a dev-only build chain
+        # are the noise that teaches people to ignore this step.
+        working-directory: web
+        run: npm audit --audit-level=high
       - name: eslint
         working-directory: web
         # --max-warnings 0: a warning nobody has to fix is the same trap as a
@@ -86,9 +119,10 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install
+        # Under the lock, so the suite tests the resolution the images ship.
         run: |
           python infra/extract-deps.py dev > requirements.txt
-          pip install -r requirements.txt
+          pip install -c requirements.lock -r requirements.txt
       - name: pytest
         # The default run excludes `live_api` and `slow`, so this never makes a
         # billable API call and never needs the OCR toolchain.
@@ -226,6 +260,62 @@ jobs:
         env:
           BINDERY_EMAIL: demo@example.com
           CI: "true"
+
+      - name: Back up the seeded archive
+        # The ordering rule, run for real: integrity check, then `pg_dump`, then
+        # blobs (REQ-096). This is `make backup` without the Makefile, and it is
+        # here rather than in its own job because the drill below needs the
+        # generation it writes and the corpus this job seeded.
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T api \
+            python -m api.export.cli backup
+
+      - name: Restore drill — the deliverable (REQ-097)
+        # CR-041. "The restore drill is the deliverable, not the backup" — and
+        # nothing had ever run it. A unit test read the script as text and
+        # asserted six substrings were present, every one of which survives a
+        # script whose control flow is broken.
+        #
+        # This restores the dump this job just took into a genuinely empty
+        # Postgres, checks every original the restored database references is in
+        # the backup beside it, and searches the restored data for a term the
+        # seeded corpus contains — the same term web/e2e/search.spec.ts uses,
+        # so the two fail together rather than one quietly drifting.
+        #
+        # pgvector rather than the script's default postgres:16-alpine: the
+        # dump's tables use the `vector` type and the plain image has no such
+        # extension to create. The image is already pulled by the stack above.
+        env:
+          PG_IMAGE: pgvector/pgvector:pg16
+        run: |
+          generation=$(ls -1d /tmp/bindery-ci-data/backups/*/ | sort | tail -1)
+          echo "drilling $generation"
+          bash scripts/restore-drill.sh "$generation" Northwood
+
+      - name: Restore drill — proven able to fail
+        # A drill that cannot fail is a ceremony. The same generation with one
+        # original removed has to be refused: `pg_restore` returning zero says
+        # nothing about the blob pool beside the dump, and this is the check
+        # that does.
+        env:
+          PG_IMAGE: pgvector/pgvector:pg16
+        run: |
+          generation=$(ls -1d /tmp/bindery-ci-data/backups/*/ | sort | tail -1)
+          sudo cp -a "$generation" /tmp/bindery-broken-generation
+          sudo chown -R "$(id -u):$(id -g)" /tmp/bindery-broken-generation
+          victim=$(find /tmp/bindery-broken-generation/blobs -type f | head -1)
+          [ -n "$victim" ] || { echo "the backup held no originals to remove"; exit 1; }
+          echo "removing $victim"
+          rm -f "$victim"
+          if bash scripts/restore-drill.sh /tmp/bindery-broken-generation Northwood \
+               > drill-negative.log 2>&1; then
+            echo "the drill passed over a backup missing an original — it cannot fail"
+            cat drill-negative.log
+            exit 1
+          fi
+          grep -q "MISSING BLOB" drill-negative.log
+          echo "the drill refused an incomplete backup, as it must"
+
       - name: What the stack said, if it failed
         if: failure()
         run: |
@@ -279,6 +369,17 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # The dependency layer's cache key is the content hash of
+          # pyproject.toml and requirements.lock, so an ordinary push reuses it
+          # and a dependency change busts it — which is what we want, and what
+          # was missing while there was no lock to hash.
+          #
+          # It still cannot pick up a base-image OS patch, because nothing about
+          # `FROM python:3.13-slim` changes when Debian publishes one. So the
+          # weekly run rebuilds from scratch. It republishes the same tags for
+          # the same commit, deliberately: same source, current packages.
+          no-cache: ${{ github.event_name == 'schedule' }}
+          pull: ${{ github.event_name == 'schedule' }}
           # Derived from the build, never hand-maintained (REQ-152). A version
           # somebody has to remember to bump is a version that is wrong, and
           # "which code is actually running" is the first question of every

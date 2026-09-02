@@ -114,6 +114,26 @@ services:
     environment: *bindery-env
     volumes:
       - /media/Main-Storage/bindery/data:/data
+    # The worker is the process that does the work, and its two bad days are
+    # "hung" and "dead" — both of which leave the container reporting `Up` with
+    # no logs, indistinguishable from a quiet Tuesday. `worker/runner.py` stamps
+    # /tmp/bindery-worker.heartbeat every 15s from the pipeline's own event
+    # loop, so a loop that has stopped turning stops stamping it and this goes
+    # `unhealthy` within about three minutes.
+    #
+    # Marking it is all Docker will do: `restart: unless-stopped` acts on
+    # process exit, not on health. See docs/zimaos-deploy.md, "when the worker
+    # goes unhealthy", for how to make that actionable on this host.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,sys,time; p='/tmp/bindery-worker.heartbeat'; sys.exit(0 if os.path.exists(p) and time.time() - os.path.getmtime(p) < 120 else 1)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     deploy:
       resources:
         limits:

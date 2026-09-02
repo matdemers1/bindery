@@ -30,9 +30,9 @@ from datetime import date, datetime
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.db import scope as scoping
 from api.db.enums import SourceFileState
 from api.db.models import Document, KnownForm, Page, SourceFile, Tag
-from api.vault import boundary as vault
 
 # ts_headline settings: two short fragments, marked up for the results list.
 HEADLINE_OPTIONS = (
@@ -137,16 +137,17 @@ def _form_names_the_query(query: str):
 def _filters(
     filters: SearchFilters, allowed: list[uuid.UUID], viewer: uuid.UUID | None = None
 ) -> list:
+    # One condition, carrying the library filter and the vault together
+    # (`api/db/scope.py`). It used to be two, and the vault half was applied
+    # only `if viewer is not None` — a boundary whose default was off, on the
+    # path that matters most: search reads page *text*, so a leak here surfaces
+    # as the actual words rather than as a title, and it feeds the snippets,
+    # the facets and the hit count as well as the results. `viewer` is still
+    # accepted, and no longer decides anything.
     conditions = [
-        Document.library_id.in_(allowed),
+        scoping.for_libraries(allowed, viewer=viewer).only(Document),
         Document.superseded_at.is_(None),
     ]
-    # The vault, in the one place every search condition is assembled. Search
-    # is the path that matters most here: it reads page *text*, so a leak
-    # surfaces as the actual words rather than as a title — and it feeds the
-    # snippets, the facets and the hit count as well as the results.
-    if viewer is not None:
-        conditions.append(vault.document_clause(viewer))
     if filters.received_from:
         conditions.append(SourceFile.received_at >= filters.received_from)
     if filters.received_to:
@@ -409,22 +410,25 @@ async def suggest(
     join this union in Phase 5.
     """
     similarity = sa.func.similarity
+    bound = scoping.for_libraries(allowed, viewer=viewer)
     titles = sa.select(
         Document.title.label("name"), similarity(Document.title, query).label("score")
     ).where(
         Document.title.is_not(None),
-        Document.library_id.in_(allowed),
-        Document.superseded_at.is_(None),
         # A vaulted document's *title* offered as a spelling suggestion is a
         # leak that never touches a results list — exactly the shape the leak
-        # suite exists to find.
-        vault.document_clause(viewer) if viewer else sa.true(),
+        # suite exists to find. Applied unconditionally: this was
+        # `vault.document_clause(viewer) if viewer else sa.true()`, which is a
+        # boundary a caller could switch off by not knowing about it.
+        bound.only(Document),
+        Document.superseded_at.is_(None),
         similarity(Document.title, query) > SUGGESTION_THRESHOLD,
     )
     tags = sa.select(
         Tag.name.label("name"), similarity(Tag.name, query).label("score")
     ).where(
-        sa.or_(Tag.library_id.in_(allowed), Tag.library_id.is_(None)),
+        # Global tags (no library) are everyone's, hence the `or_`.
+        sa.or_(bound.only(Tag), Tag.library_id.is_(None)),
         similarity(Tag.name, query) > SUGGESTION_THRESHOLD,
     )
     forms = sa.select(

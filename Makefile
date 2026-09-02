@@ -3,10 +3,26 @@
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: up down build logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite e2e lint-web lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
+.PHONY: up down build lock logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite e2e lint-web lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
 
 build:            ## build all images
 	$(COMPOSE) build
+
+# `make lock` freezes, it does not resolve. The point of requirements.lock is
+# that what is pinned is what was tested, so this reads versions out of a built
+# image rather than asking PyPI what it would install today. The worker's `dev`
+# target is the one image carrying every group — base, the OCR extra and the
+# test toolchain — so its site-packages is the union of all three.
+#
+# Run it whenever pyproject.toml changes, in the same commit, and read the diff:
+# it is the only place a dependency upgrade is visible.
+lock:             ## regenerate requirements.lock from a freshly built image
+	$(COMPOSE) --profile test build test-worker
+	@sed -n '/^[^#]/q;p' requirements.lock > requirements.lock.tmp
+	@$(COMPOSE) --profile test run --rm --no-deps -T test-worker \
+	  python -m pip freeze --exclude-editable | tr -d '\r' | sort >> requirements.lock.tmp
+	@mv requirements.lock.tmp requirements.lock
+	@echo 'requirements.lock regenerated. Review the diff, then run: make test'
 
 up:               ## start the stack (no tunnel; add `make tunnel` for ingress)
 	$(COMPOSE) up -d

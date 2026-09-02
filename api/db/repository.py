@@ -5,9 +5,17 @@ individual call sites. Routers ask for "the documents this user can see" and are
 given a query that is already constrained. Phase 7 hardens this with the leak
 suite; the seam exists from the baseline so there is never a call site that
 learned to do its own filtering.
+
+This module is the entry point for routes that hold a `user_id` rather than a
+`Scope`, and it is **not** a second implementation of the boundary. It resolves
+a `Scope` (narrowed to the caller's token) and asks that for its queries. It did
+build its own once, and the cost is on the record: the vault clause was written
+here and in `api/db/scope.py`, only one copy was updated, and five read paths
+went straight past it (`api/vault/boundary.py`). One filter, two doors.
 """
 
 import contextvars
+import dataclasses
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -15,11 +23,12 @@ from dataclasses import dataclass
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.db.enums import MembershipRole
+from api.db import scope as scoping
 from api.db.models import Document, Job, Library, Membership, Page, SourceFile
-from api.vault import boundary as vault
 
-WRITE_ROLES = (MembershipRole.OWNER, MembershipRole.CONTRIBUTOR)
+# `WRITE_ROLES` used to be declared here as well as in `api/db/scope.py`, which
+# is the shape this module exists to stop having: one rule, two copies, and no
+# way to notice when they disagree.
 
 
 @dataclass(frozen=True)
@@ -67,21 +76,30 @@ def _within_the_token(
     return [lid for lid in library_ids if lid in boundary.library_ids]
 
 
+async def scope_for(session: AsyncSession, user_id: uuid.UUID) -> scoping.Scope:
+    """This caller's boundary, narrowed to their token, as a `Scope`.
+
+    The one function in this module that talks to `api/db/scope.py`, and the
+    reason everything below is a two-line delegation rather than a query with a
+    filter on it. A route that needs a shape this module does not offer should
+    take this and call `scope.only(Model)`, so it gets the whole boundary rather
+    than the half it remembered.
+    """
+    resolved = await scoping.resolve(session, user_id)
+    return dataclasses.replace(
+        resolved,
+        visible=tuple(_within_the_token(user_id, list(resolved.visible))),
+        writable=tuple(_within_the_token(user_id, list(resolved.writable), writing=True)),
+    )
+
+
 async def visible_library_ids(session: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
     """Every library the user holds any membership in."""
-    result = await session.execute(
-        sa.select(Membership.library_id).where(Membership.user_id == user_id)
-    )
-    return _within_the_token(user_id, list(result.scalars().all()))
+    return list((await scope_for(session, user_id)).visible)
 
 
 async def writable_library_ids(session: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
-    result = await session.execute(
-        sa.select(Membership.library_id).where(
-            Membership.user_id == user_id, Membership.role.in_(WRITE_ROLES)
-        )
-    )
-    return _within_the_token(user_id, list(result.scalars().all()), writing=True)
+    return list((await scope_for(session, user_id)).writable)
 
 
 async def can_write_library(
@@ -106,19 +124,11 @@ async def list_documents(
     session: AsyncSession, user_id: uuid.UUID, *, limit: int = 50, offset: int = 0
 ) -> Sequence[Document]:
     """Live documents the user can see. Superseded segments are history."""
-    library_ids = await visible_library_ids(session, user_id)
-    if not library_ids:
+    bound = await scope_for(session, user_id)
+    if not bound.visible:
         return []
     result = await session.execute(
-        sa.select(Document)
-        .where(
-            Document.library_id.in_(library_ids),
-            Document.superseded_at.is_(None),
-            vault.document_clause(user_id),
-        )
-        .order_by(Document.created_at.desc())
-        .limit(limit)
-        .offset(offset)
+        bound.documents().order_by(Document.created_at.desc()).limit(limit).offset(offset)
     )
     return result.scalars().all()
 
@@ -127,32 +137,21 @@ async def get_document(
     session: AsyncSession, user_id: uuid.UUID, document_id: uuid.UUID
 ) -> Document | None:
     """A live document, or None if it does not exist *or* is not the caller's."""
-    library_ids = await visible_library_ids(session, user_id)
-    if not library_ids:
+    bound = await scope_for(session, user_id)
+    if not bound.visible:
         return None
-    result = await session.execute(
-        sa.select(Document).where(
-            Document.id == document_id,
-            Document.library_id.in_(library_ids),
-            Document.superseded_at.is_(None),
-            vault.document_clause(user_id),
-        )
-    )
+    result = await session.execute(bound.documents().where(Document.id == document_id))
     return result.scalar_one_or_none()
 
 
 async def list_source_files(
     session: AsyncSession, user_id: uuid.UUID, *, limit: int = 50, offset: int = 0
 ) -> Sequence[SourceFile]:
-    library_ids = await visible_library_ids(session, user_id)
-    if not library_ids:
+    bound = await scope_for(session, user_id)
+    if not bound.visible:
         return []
     result = await session.execute(
-        sa.select(SourceFile)
-        .where(
-            SourceFile.library_id.in_(library_ids),
-            SourceFile.id.not_in(vault.hidden_source_file_ids(user_id)),
-        )
+        bound.source_files()
         .order_by(SourceFile.received_at.desc())
         .limit(limit)
         .offset(offset)
@@ -192,15 +191,11 @@ async def get_source_file(
     Deliberately one answer for both cases: whether a document exists in a
     library you cannot see is itself information.
     """
-    library_ids = await visible_library_ids(session, user_id)
-    if not library_ids:
+    bound = await scope_for(session, user_id)
+    if not bound.visible:
         return None
     result = await session.execute(
-        sa.select(SourceFile).where(
-            SourceFile.id == source_file_id,
-            SourceFile.id.not_in(vault.hidden_source_file_ids(user_id)),
-            SourceFile.library_id.in_(library_ids),
-        )
+        bound.source_files().where(SourceFile.id == source_file_id)
     )
     return result.scalar_one_or_none()
 
@@ -208,17 +203,12 @@ async def get_source_file(
 async def get_page(
     session: AsyncSession, user_id: uuid.UUID, source_file_id: uuid.UUID, page_number: int
 ) -> Page | None:
-    library_ids = await visible_library_ids(session, user_id)
-    if not library_ids:
+    bound = await scope_for(session, user_id)
+    if not bound.visible:
         return None
     result = await session.execute(
-        sa.select(Page)
-        .join(SourceFile, SourceFile.id == Page.source_file_id)
-        .where(
-            Page.source_file_id == source_file_id,
-            Page.page_number == page_number,
-            SourceFile.library_id.in_(library_ids),
-            Page.source_file_id.not_in(vault.hidden_source_file_ids(user_id)),
+        bound.pages().where(
+            Page.source_file_id == source_file_id, Page.page_number == page_number
         )
     )
     return result.scalar_one_or_none()
@@ -227,20 +217,52 @@ async def get_page(
 async def list_pages(
     session: AsyncSession, user_id: uuid.UUID, source_file_id: uuid.UUID
 ) -> Sequence[Page]:
-    library_ids = await visible_library_ids(session, user_id)
-    if not library_ids:
+    """Every page of a file, as entities — `text` and its tsvector included.
+
+    Only for the callers that read the text. Anything rendering a page list
+    wants `list_pages_in_range`, which is three columns.
+    """
+    bound = await scope_for(session, user_id)
+    if not bound.visible:
         return []
     result = await session.execute(
-        sa.select(Page)
-        .join(SourceFile, SourceFile.id == Page.source_file_id)
+        bound.pages().where(Page.source_file_id == source_file_id).order_by(Page.page_number)
+    )
+    return result.scalars().all()
+
+
+async def list_pages_in_range(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    source_file_id: uuid.UUID,
+    page_start: int,
+    page_end: int,
+) -> Sequence[sa.Row]:
+    """The pages of one document's range, as the three scalars a viewer draws.
+
+    Opening a document used to load every page of its *file* as a `Page` entity
+    and then drop the ones outside the range in Python. A DD-214 is two pages
+    inside a 300-page service-records bundle, so that read the whole bundle's
+    OCR text and its persisted `text_tsv` — megabytes across the wire, ~99% of
+    it discarded — on the one request the product is measured by.
+
+    Two changes, and both matter: the columns are named (`PageOut` is
+    `{page_number, render_path, thumb_path}` and nothing else), and the range is
+    a SQL `BETWEEN` so the page index can skip the rest of the bundle.
+    """
+    bound = await scope_for(session, user_id)
+    if not bound.visible:
+        return []
+    result = await session.execute(
+        sa.select(Page.page_number, Page.render_path, Page.thumb_path)
         .where(
+            bound.only(Page),
             Page.source_file_id == source_file_id,
-            SourceFile.library_id.in_(library_ids),
-            Page.source_file_id.not_in(vault.hidden_source_file_ids(user_id)),
+            Page.page_number.between(page_start, page_end),
         )
         .order_by(Page.page_number)
     )
-    return result.scalars().all()
+    return result.all()
 
 
 def visible_jobs(library_ids: list[uuid.UUID]):

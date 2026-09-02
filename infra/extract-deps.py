@@ -6,6 +6,12 @@ place where dependencies are declared.
 
     python infra/extract-deps.py            -> base dependencies
     python infra/extract-deps.py worker dev -> base + those optional groups
+
+This answers "which packages", not "which versions". Versions come from
+`requirements.lock`, which every install passes as `-c requirements.lock` — a
+constraints file pins whatever is being installed and ignores the rest, so one
+lock serves all three groups without the api image gaining the OCR toolchain.
+Regenerate the lock with `make lock`.
 """
 
 import pathlib

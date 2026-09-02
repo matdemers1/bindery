@@ -167,7 +167,8 @@ function Row({
         {code && (
           <div className="mt-2 rounded border border-amber-900/60 bg-amber-950/20 p-2">
             <div className="text-[11px] text-amber-300">
-              Read this out. It works once and expires in a day.
+              Read this out. It works once and expires in a day. They enter it
+              on the sign-in page, under <em>I have a reset code</em>.
             </div>
             <div className="mt-1 flex items-center gap-2">
               <code className="font-mono text-sm">{code}</code>

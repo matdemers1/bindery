@@ -31,6 +31,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.ai_ask import AskRequest, AskResponse, AskSource, Citation
+from api.db import scope as scoping
 from api.db.models import Document, Page, SourceFile
 from api.search import query as search_query
 
@@ -163,10 +164,13 @@ async def gather_sources(
             .where(
                 Document.id.in_(document_ids),
                 Page.text.is_not(None),
-                # The library filter is applied by search above; repeating it
-                # here is deliberate belt-and-braces on the one path that hands
-                # raw page text to a third party.
-                Document.library_id.in_(library_ids),
+                # Search above already applied the boundary; repeating it here
+                # is deliberate belt-and-braces on the one path that hands raw
+                # page text to a third party. Asked for as one condition
+                # (`api/db/scope.py`), so the second copy cannot be the half
+                # that gets left behind — which is how five read paths came to
+                # be missing the vault clause.
+                scoping.for_libraries(library_ids, viewer=viewer).only(Document),
             )
             .order_by(Document.id, Page.page_number)
         )

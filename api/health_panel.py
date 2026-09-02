@@ -430,3 +430,65 @@ async def collect(
         ],
         alerts=alerts,
     )
+
+
+async def badge_healthy(
+    session: AsyncSession, library_ids: list[uuid.UUID] | None = None
+) -> bool:
+    """`collect(...).healthy`, without paying for the panel that surrounds it.
+
+    The sidebar draws one warning light from this, and it subscribes to the
+    `jobs` topic — which the worker publishes on every state change of every
+    stage of every file. During an import that is a burst of refreshes per
+    second, and each one was answered by `collect`: eight aggregates over `job`,
+    every one of them re-evaluating the visibility subquery over
+    `job ⋈ source_file ⋈ document`, plus a thirty-day join across
+    `classification` and `document` to total up API spend. None of that was
+    read. The load was maximal exactly when the archive was busiest.
+
+    So this asks the same question and reads only what the answer turns on: the
+    three critical conditions over `job`, in one pass, and the offsite state,
+    which is a handful of single-row lookups on tiny tables.
+
+    It is a second definition of `healthy`, which is the risk here — a new
+    critical alert could light the panel and leave the badge dark.
+    `tests/test_health_badge.py` asserts the two agree, condition by condition,
+    so that drift fails the build rather than going unnoticed.
+    """
+    now = datetime.now(UTC)
+    scoped = library_ids is not None
+    in_scope = (
+        Job.id.in_(repository.visible_job_ids(library_ids)) if scoped else sa.true()
+    )
+
+    dead_letter, running, stuck, oldest_queued = (
+        await session.execute(
+            sa.select(
+                sa.func.count().filter(
+                    Job.state == JobState.DEAD_LETTER,
+                    Job.acknowledged_at.is_(None),
+                ),
+                sa.func.count().filter(Job.state == JobState.RUNNING),
+                sa.func.count().filter(
+                    Job.state == JobState.RUNNING,
+                    Job.locked_at.is_not(None),
+                    Job.locked_at < now - STALE_LOCK,
+                ),
+                sa.func.min(Job.scheduled_for).filter(Job.state == JobState.QUEUED),
+            )
+            .select_from(Job)
+            .where(in_scope)
+        )
+    ).one()
+
+    oldest_seconds = (now - oldest_queued).total_seconds() if oldest_queued else None
+    stalled = bool(
+        oldest_seconds
+        and oldest_seconds > STALL_AFTER.total_seconds()
+        and running == 0
+    )
+    if dead_letter or stalled or stuck:
+        return False
+    return not any(
+        alert.severity == "critical" for alert in await _offsite_alerts(session, now)
+    )

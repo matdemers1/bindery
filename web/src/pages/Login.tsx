@@ -128,6 +128,17 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
         >
           {busy ? "Signing in…" : needsCode ? "Confirm" : "Sign in"}
         </button>
+
+        {/* The only way back in. There is no email here to send a link to, so
+            recovery is an administrator reading a code out and this form
+            accepting it — and a code with nowhere to be typed is an account
+            lost. A whole-document load: /reset is handled above the router. */}
+        <a
+          href="/reset"
+          className="mt-4 block text-center text-sm text-muted hover:text-neutral-100"
+        >
+          I have a reset code
+        </a>
       </form>
     </div>
   );

@@ -874,6 +874,17 @@ export const api = {
 
   healthPanel: () => request<HealthPanel>("/health/panel"),
 
+  /**
+   * The sidebar's two numbers, and only those.
+   *
+   * The badges follow the `jobs` topic, which moves on every stage of every
+   * file, so this is the most frequently requested read in the application. It
+   * used to be answered by `healthPanel` and `review` together — roughly twenty
+   * queries and two and a half kilobytes — of which a count and a boolean were
+   * kept. The panel is still what the Trust screen asks for.
+   */
+  healthBadge: () => request<HealthBadge>("/health/badge"),
+
   apiTokens: () => request<ApiTokenRecord[]>("/tokens"),
   createApiToken: (body: {
     name: string;
@@ -1098,6 +1109,11 @@ export interface HealthAlert {
   code: string;
   message: string;
   detail: Record<string, unknown>;
+}
+
+export interface HealthBadge {
+  review_total: number;
+  healthy: boolean;
 }
 
 export interface HealthPanel {

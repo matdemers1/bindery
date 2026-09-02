@@ -15,7 +15,8 @@ import logging
 import os
 import signal
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import sqlalchemy as sa
 
@@ -65,6 +66,27 @@ OFFSITE_INTERVAL_SECONDS = 600.0
 # abandoned row is an outage, not untidiness.
 OFFSITE_LEASE = timedelta(hours=6)
 SHUTDOWN_GRACE_SECONDS = 20.0
+
+# Liveness for the container healthcheck (see infra/docker-compose.yml and
+# infra/zimaos/bindery.zimaos.yaml). Deliberately container-local: the check
+# runs inside this container, and writing it under /data would put a
+# per-15-second churn file in the archive.
+#
+# The point is to distinguish a worker that is *idle* from one that is *stuck*,
+# which from outside look identical — `Up`, no logs, nothing being claimed. This
+# is written from a task on the same event loop the pipeline runs on, so a loop
+# that has stopped turning stops refreshing it, and the container goes unhealthy
+# instead of sitting there looking fine (invariant 8).
+HEARTBEAT_PATH = Path(os.environ.get("WORKER_HEARTBEAT_PATH", "/tmp/bindery-worker.heartbeat"))
+HEARTBEAT_INTERVAL_SECONDS = 15.0
+# The manifests call the heartbeat stale at 120s — eight missed writes, and then
+# three failing checks on top of that before the container is marked unhealthy.
+# Generous on purpose: the heavy work is offloaded (`asyncio.to_thread`,
+# `create_subprocess_exec`), but a GIL-bound stretch inside a thread can still
+# starve the loop for seconds, and a healthcheck that flaps is one that gets
+# switched off. Keep this constant well under the manifests' threshold; a test
+# asserts the relationship.
+HEARTBEAT_STALE_SECONDS = 120.0
 
 
 class _NotConfigured(Exception):
@@ -263,6 +285,32 @@ async def _reclaimer(stopping: asyncio.Event) -> None:
             await asyncio.wait_for(stopping.wait(), timeout=RECLAIM_INTERVAL_SECONDS)
 
 
+async def _heartbeat(stopping: asyncio.Event) -> None:
+    """Say, to anything outside this process, that the event loop is still turning.
+
+    The container healthcheck reads the file's age and nothing else — no
+    database, no HTTP, no import of this package — so it stays a few
+    milliseconds of a bare interpreter and cannot itself wedge on the thing it
+    is checking.
+
+    Written inline rather than through `asyncio.to_thread`: a handful of bytes
+    to a container-local path, and putting it on a worker thread would mean the
+    file kept being stamped by that thread's scheduler for a while after the
+    loop it is meant to attest to had stopped.
+    """
+    while not stopping.is_set():
+        try:
+            HEARTBEAT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            HEARTBEAT_PATH.write_text(f"{datetime.now(UTC).isoformat()}\n")
+        except OSError:
+            # Never fatal. A worker that cannot write /tmp is a worker that will
+            # be restarted by the healthcheck going stale, which is the correct
+            # outcome; crashing here would only make it louder and less useful.
+            log.exception("could not write the liveness heartbeat to %s", HEARTBEAT_PATH)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stopping.wait(), timeout=HEARTBEAT_INTERVAL_SECONDS)
+
+
 async def _health_monitor(stopping: asyncio.Event) -> None:
     """Notice a stopped pipeline and say so out loud (REQ-110).
 
@@ -270,7 +318,15 @@ async def _health_monitor(stopping: asyncio.Event) -> None:
     is *the worker not working*, and a check that lives in the thing being
     checked is not much of a check. It is still not perfect — a worker that dies
     entirely takes this with it — which is why the api serves the same panel on
-    demand and the ZimaOS healthcheck restarts a dead container.
+    demand and the container healthcheck reports a worker whose loop has stopped
+    turning as `unhealthy` (`_heartbeat`, above).
+
+    What that healthcheck does *not* do is restart anything: a plain Docker
+    Engine healthcheck marks the container and stops there, and
+    `restart: unless-stopped` acts on process exit only. `docs/zimaos-deploy.md`
+    says how to make `unhealthy` actionable on the host. Do not write a comment
+    here claiming an automatic restart until one exists — the previous version
+    of this docstring did, and the mechanism it named had never been deployed.
     """
     notifier: notify.Notifier | None = None
     while not stopping.is_set():
@@ -470,6 +526,9 @@ async def main() -> None:
     tasks.append(asyncio.create_task(_reclaimer(stopping), name="reclaimer"))
     tasks.append(asyncio.create_task(watch_inbox(stopping), name="watched-folder"))
     tasks.append(asyncio.create_task(_health_monitor(stopping), name="health-monitor"))
+    # Before anything else that could be slow: the healthcheck's start_period is
+    # generous, but the first stamp should not be waiting behind a boot.
+    tasks.append(asyncio.create_task(_heartbeat(stopping), name="heartbeat"))
     tasks.append(
         asyncio.create_task(_offsite_replication(stopping), name="offsite-replication")
     )

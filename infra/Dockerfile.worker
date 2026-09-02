@@ -55,9 +55,12 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY pyproject.toml infra/extract-deps.py ./
+# See Dockerfile.api for why the lock is copied here: it pins the transitive
+# closure to what was tested, and it puts that pin into this layer's cache key
+# so a dependency change is the thing that busts the pip layer.
+COPY pyproject.toml requirements.lock infra/extract-deps.py ./
 RUN python extract-deps.py worker > /tmp/requirements.txt \
- && pip install --no-cache-dir -r /tmp/requirements.txt \
+ && pip install --no-cache-dir -c requirements.lock -r /tmp/requirements.txt \
  && rm extract-deps.py
 
 FROM base AS runtime
@@ -84,9 +87,9 @@ ENV BINDERY_COMMIT=$BINDERY_COMMIT \
 
 
 FROM base AS dev
-COPY pyproject.toml infra/extract-deps.py ./
+COPY pyproject.toml requirements.lock infra/extract-deps.py ./
 RUN python extract-deps.py dev > /tmp/dev-requirements.txt \
- && pip install --no-cache-dir -r /tmp/dev-requirements.txt \
+ && pip install --no-cache-dir -c requirements.lock -r /tmp/dev-requirements.txt \
  && rm extract-deps.py
 COPY . .
 CMD ["python", "-m", "pytest", "-m", "slow"]

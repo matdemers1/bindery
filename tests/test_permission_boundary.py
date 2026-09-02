@@ -234,6 +234,7 @@ EVERY_READ_PATH = [
     ("rules", "/api/rules"),
     ("household libraries", "/api/household/libraries"),
     ("health panel", "/api/health/panel"),
+    ("health badge", "/api/health/badge"),
     ("api tokens", "/api/tokens"),
     ("pending AI review", "/api/pipeline/reclassify/pending"),
     ("logs", "/api/logs"),

@@ -19,6 +19,7 @@ Originals are copied byte-for-byte. Nothing is re-encoded, because a re-encoded
 deed is a worse artifact than the one you scanned.
 """
 
+import asyncio
 import html
 import json
 import logging
@@ -27,6 +28,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -434,20 +436,26 @@ def _copy_originals(
     return copied, total_bytes, missing
 
 
-async def full_export(
-    session: AsyncSession,
-    library_ids: list[uuid.UUID],
+def _write_full_export(
+    entries: list[_Entry],
+    by_file: dict[str, list[_Entry]],
+    root: Path,
     *,
-    name: str = "bindery-export",
-    destination: Path | None = None,
+    sealed: int,
 ) -> ExportResult:
-    """Originals in a semantic tree, metadata, and a static index (REQ-093)."""
-    entries = await collect(session, library_ids)
-    sealed = await vaulted_count(session, library_ids)
-    by_file = plan_layout(entries)
+    """The blocking half of `full_export` — mkdir, copy, write.
 
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    root = destination or (export_root() / f"{name}-{stamp}")
+    A separate function only so the whole of it can be handed to a thread in one
+    call (CR-010). It used to sit inline in an `async def`, interleaved with the
+    database awaits, which meant `asyncio.to_thread` could not wrap it from the
+    router and every `shutil.copy2` of a scanned original ran on the one event
+    loop uvicorn serves the entire application from. Pressing "Export" — the
+    button whose purpose is reassurance — froze search, login, `/api/live` and
+    the container healthcheck for as long as the copy took.
+
+    The layout itself is unchanged and lives in exactly one place: this is the
+    same `_copy_originals` and the same three files, moved, not forked.
+    """
     root.mkdir(parents=True, exist_ok=True)
 
     copied, total_bytes, missing = _copy_originals(by_file, root)
@@ -484,17 +492,37 @@ async def full_export(
     )
 
 
-async def correspondent_packet(
+async def full_export(
     session: AsyncSession,
     library_ids: list[uuid.UUID],
-    correspondent_id: uuid.UUID,
+    *,
+    name: str = "bindery-export",
+    destination: Path | None = None,
+) -> ExportResult:
+    """Originals in a semantic tree, metadata, and a static index (REQ-093).
+
+    Reads the database on the event loop and writes the tree off it: the awaits
+    stay here, the file work goes to a thread in a single call (CR-010).
+    """
+    entries = await collect(session, library_ids)
+    sealed = await vaulted_count(session, library_ids)
+    by_file = plan_layout(entries)
+
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    root = destination or (export_root() / f"{name}-{stamp}")
+
+    return await asyncio.to_thread(
+        _write_full_export, entries, by_file, root, sealed=sealed
+    )
+
+
+def _write_packet(
+    entries: list[_Entry],
+    by_file: dict[str, list[_Entry]],
+    root: Path,
     name: str,
 ) -> ExportResult:
-    """One correspondent's documents, for handing to an accountant or a lawyer."""
-    entries = await collect(session, library_ids, correspondent_id=correspondent_id)
-    by_file = plan_layout(entries)
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    root = export_root() / f"packet-{safe_component(name, 'packet')}-{stamp}"
+    """The blocking half of `correspondent_packet`. Same reason as above."""
     root.mkdir(parents=True, exist_ok=True)
 
     copied, total_bytes, missing = _copy_originals(by_file, root)
@@ -506,6 +534,21 @@ async def correspondent_packet(
         path=root, document_count=len(entries), file_count=copied,
         byte_size=total_bytes, missing_blobs=missing,
     )
+
+
+async def correspondent_packet(
+    session: AsyncSession,
+    library_ids: list[uuid.UUID],
+    correspondent_id: uuid.UUID,
+    name: str,
+) -> ExportResult:
+    """One correspondent's documents, for handing to an accountant or a lawyer."""
+    entries = await collect(session, library_ids, correspondent_id=correspondent_id)
+    by_file = plan_layout(entries)
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    root = export_root() / f"packet-{safe_component(name, 'packet')}-{stamp}"
+
+    return await asyncio.to_thread(_write_packet, entries, by_file, root, name)
 
 
 async def go_bag(
@@ -539,6 +582,27 @@ async def go_bag(
 
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     target = destination or (export_root() / f"go-bag-{stamp}.zip")
+
+    return await asyncio.to_thread(
+        _write_go_bag, pyzipper, entries, by_file, target, passphrase
+    )
+
+
+def _write_go_bag(
+    pyzipper: ModuleType,
+    entries: list[_Entry],
+    by_file: dict[str, list[_Entry]],
+    target: Path,
+    passphrase: str,
+) -> ExportResult:
+    """The blocking half of `go-bag` — mkdir, AES-256 deflate, write.
+
+    Threaded for the same reason as the full export (CR-010): compressing and
+    encrypting every vital original is seconds of pure CPU and disk, and it was
+    running on the event loop that serves every other request. `pyzipper` is
+    passed in rather than imported here so the "an unencrypted go-bag is worse
+    than none" refusal still happens before anything is written.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
 
     total_bytes = 0

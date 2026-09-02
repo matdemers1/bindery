@@ -417,7 +417,7 @@
     },
     {
       "question": "I forgot my password.",
-      "answer": "There is no reset email, because there is no email service. Ask whoever runs the server for a one-time code; they generate it and read it to you, and you choose your own new password. They never learn what it is."
+      "answer": "There is no reset email, because there is no email service. Ask whoever runs the server for a one-time code; they generate it and read it to you, and you choose your own new password. They never learn what it is. Enter it on the sign-in page under **I have a reset code**. Codes last a day and each works once."
     },
     {
       "question": "Why is a document waiting for review instead of being filed?",

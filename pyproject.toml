@@ -11,6 +11,12 @@ requires-python = ">=3.13"
 # Base = what `api` needs. The OCR toolchain lives in the `worker` extra so the
 # api image does not carry it. infra/extract-deps.py reads these lists directly,
 # so this file is the single source of truth for both images.
+#
+# Versions are NOT declared here, on purpose: `requirements.lock` pins the whole
+# transitive closure and every pip install in this repository passes it as
+# `-c requirements.lock`. This list answers "which packages", the lock answers
+# "which versions". The only bounds written here are for the two libraries whose
+# *observable behaviour* this code parses rather than calls — see below.
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
@@ -33,7 +39,11 @@ dependencies = [
     "cryptography",
     # The api needs it too: /api/settings/test-ai validates a key against the
     # live API, and Q&A (REQ-116) is a synchronous request, not a worker stage.
-    "anthropic",
+    #
+    # Bounded to the major whose citations shape api/ask.py depends on. Q&A
+    # refuses to answer without a citation, so a response schema that moved
+    # under us would not degrade the feature, it would disable it.
+    "anthropic>=1,<2",
     # AES-256 ZIP for the go-bag export. Standard enough that 7-Zip and Keka
     # open it, which is the point: the recipient may not have Bindery.
     "pyzipper",
@@ -48,7 +58,13 @@ dependencies = [
 
 [project.optional-dependencies]
 worker = [
-    "ocrmypdf",
+    # Bounded to a major, unlike everything else here, because
+    # worker/stages/normalize.py branches on OCRmyPDF's *exit codes* (6, 7, 10)
+    # and on literal substrings of its stderr. Those are not API; a major that
+    # renumbered or reworded them would not fail a build, it would silently
+    # reclassify a failed scan as a success — in a pipeline whose invariant 8 is
+    # that nothing fails silently.
+    "ocrmypdf>=17,<18",
     "pypdf",
     "pillow",
     # HEIC/HEIF from an iPhone camera roll (REQ-006).

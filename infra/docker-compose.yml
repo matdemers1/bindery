@@ -48,6 +48,21 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # A wedged worker and an idle worker look identical from outside — `Up`, no
+    # logs, nothing claimed — so this asks the one question that separates them:
+    # is the event loop still turning? `worker/runner.py`'s heartbeat task
+    # stamps the file every 15s; 120s is eight missed stamps. Stdlib only, so
+    # the check cannot wedge on whatever wedged the worker.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,sys,time; p='/tmp/bindery-worker.heartbeat'; sys.exit(0 if os.path.exists(p) and time.time() - os.path.getmtime(p) < 120 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   web:
     build:
@@ -108,6 +123,11 @@ services:
       - ../alembic:/app/alembic:ro
       # ruff and pytest read their config from here.
       - ../pyproject.toml:/app/pyproject.toml:ro
+      # And the lock beside it, for the same reason as infra/: the supply-chain
+      # guard asserts the Dockerfiles and the lock agree, and reading the copy
+      # baked into this image would report on a repository that no longer
+      # exists.
+      - ../requirements.lock:/app/requirements.lock:ro
       # test_trust_and_export.py asserts on the restore drill's own contents.
       - ../scripts:/app/scripts:ro
       # test_docs.py reads the guides, the routes they must cover, and the
@@ -118,6 +138,11 @@ services:
       # Read-only, and only so the screenshot staleness check can ask git when
       # a screen last changed. Nothing in the suite writes here.
       - ../.git:/app/.git:ro
+      # The supply-chain guard reads the workflow and dependabot.yml — that CI
+      # installs under the lock, audits both ecosystems, and rebuilds on a
+      # schedule are assertions about *this* tree, not about whichever copy was
+      # baked into this image.
+      - ../.github:/app/.github:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -155,8 +180,15 @@ services:
       - ../alembic:/app/alembic:ro
       # ruff and pytest read their config from here.
       - ../pyproject.toml:/app/pyproject.toml:ro
+      # And the lock beside it, for the same reason as infra/: the supply-chain
+      # guard asserts the Dockerfiles and the lock agree, and reading the copy
+      # baked into this image would report on a repository that no longer
+      # exists.
+      - ../requirements.lock:/app/requirements.lock:ro
       # test_trust_and_export.py asserts on the restore drill's own contents.
       - ../scripts:/app/scripts:ro
+      # Same reason as in `test`: the supply-chain guard reads the workflow.
+      - ../.github:/app/.github:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -188,6 +220,11 @@ services:
     # `npm ci` against the repo's lockfile, so the browsers in the image and
     # the @playwright/test that drives them stay the same version. A mismatch
     # fails with an executable-not-found several layers down.
+    #
+    # `--no-audit` stays *here* and nowhere else. The audit gate is in CI's lint
+    # job, which runs long before this and fails the build; repeating it in the
+    # middle of an e2e run would print the same report a second time, minutes
+    # later, where it gates nothing.
     command:
       - sh
       - -c
