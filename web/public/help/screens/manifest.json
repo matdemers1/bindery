@@ -59,7 +59,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "f4ac422da5c2897e497ae6bc0d3caf4bda1e595a"
+      "source_commit": "6daccc6b0a4417dcd80ebcaeb82b636dba444a07"
     },
     {
       "route": "/organise",
