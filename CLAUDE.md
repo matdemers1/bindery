@@ -475,6 +475,12 @@ never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
   document from such an import whose pipeline has finished, while the owner's
   vault is open. Refused up front if the vault is shut at creation. "Finished
   and waiting" is a named state, because it looks like a bug otherwise.
+- **The unlock session lives in the api *process*.** `docker exec bindery-api
+  python -c "sessions.is_unlocked(...)"` spawns a **new** process that shares no
+  memory with uvicorn, so it always answers `False`. It is not a way to check
+  whether a vault is open, and reading it as one turns a working vault into an
+  apparent bug. Ask the running app — `GET /api/vault` — or look at what the
+  sweep actually did.
 - **The watched folder reads `/data/inbox/<library-slug>/` only.** A file at the
   inbox root is found by Import's inbox preset and ignored by the watcher. By
   design — the folder is how a file knows its library.
