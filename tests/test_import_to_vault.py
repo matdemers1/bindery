@@ -184,3 +184,137 @@ async def test_the_log_is_scoped_to_the_imports_files(client, session, bound_imp
     messages = [row["message"] for row in response.json()]
     assert "OCR fell over" in messages
     assert "somebody else's file" not in messages
+
+
+# --------------------------------------------------------------------------
+# The flag belongs to the import, not the scan
+# --------------------------------------------------------------------------
+
+
+async def test_a_completed_import_can_be_bound_afterwards(client, session, bound_import):
+    """The bug, stated plainly: 309 files went into the ordinary archive with
+    the box ticked, because the flag was read at scan time and the person
+    ticked it after scanning — the natural order. Binding afterwards is also
+    how those files get where they were meant to go."""
+    user, _vault, import_session, docs = bound_import
+    # Plain value now: the sweep may roll the shared session back, which
+    # expires `user`, and a sync attribute access on it afterwards fails.
+    user_id = user.id
+    import_session.to_vault = False
+    import_session.state = ImportState.COMPLETED
+    await session.commit()
+
+    response = await client.patch(
+        f"/api/imports/{import_session.id}", json={"to_vault": True}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["to_vault"] is True
+    # The finished one is now waiting for the sweep; the next tick seals it.
+    assert response.json()["awaiting_vault"] == 1
+
+    # `>= 1`, not `== 1`: the sweep is global by design and other tests in
+    # this module leave bound, unlocked sessions behind. The claim here is
+    # about *this* document.
+    assert await sweep.sweep_once(session) >= 1
+    await session.refresh(docs["done.jpg"])
+    assert docs["done.jpg"].vaulted_by == user_id
+
+
+async def test_binding_is_refused_while_the_vault_is_locked(client, session, bound_import):
+    user, _vault, import_session, _docs = bound_import
+    import_session.to_vault = False
+    await session.commit()
+    sessions.lock(user.id)
+
+    response = await client.patch(
+        f"/api/imports/{import_session.id}", json={"to_vault": True}
+    )
+    assert response.status_code == 423
+    await session.refresh(import_session)
+    assert import_session.to_vault is False
+
+
+async def test_unbinding_needs_no_unlock(client, session, bound_import):
+    """Taking the vault out of the plan is never something the vault has to be
+    open for."""
+    user, _vault, import_session, _docs = bound_import
+    sessions.lock(user.id)
+    response = await client.patch(
+        f"/api/imports/{import_session.id}", json={"to_vault": False}
+    )
+    assert response.status_code == 200
+    assert response.json()["to_vault"] is False
+
+
+async def test_the_run_call_carries_the_choice_made_at_that_moment(
+    client, session, bound_import
+):
+    _user, _vault, import_session, _docs = bound_import
+    import_session.to_vault = False
+    await session.commit()
+
+    response = await client.post(f"/api/imports/{import_session.id}/run?to_vault=true")
+    assert response.status_code == 200, response.text
+    await session.refresh(import_session)
+    assert import_session.to_vault is True
+
+
+async def test_binding_is_audited(client, session, bound_import):
+    from api.db.models import AuditEvent
+
+    _user, _vault, import_session, _docs = bound_import
+    import_session.to_vault = False
+    await session.commit()
+    await client.patch(f"/api/imports/{import_session.id}", json={"to_vault": True})
+
+    event = (
+        await session.execute(
+            sa.select(AuditEvent).where(
+                AuditEvent.entity_id == import_session.id,
+                AuditEvent.action == "import_to_vault",
+            )
+        )
+    ).scalars().first()
+    assert event is not None
+    assert event.before == {"to_vault": False}
+
+
+
+async def test_one_refused_seal_does_not_stop_the_rest_of_the_tick(session, bound_import):
+    """The first version rolled back after a refusal and then touched the next
+    document's expired attributes, so one file with a missing blob broke the
+    whole tick — every tick — and nothing else in the import ever sealed."""
+    from api.db.models import ImportItem
+
+    user, _vault, import_session, docs = bound_import
+    user_id = user.id  # see test_a_completed_import_can_be_bound_afterwards
+    body = b"gone" + uuid.uuid4().bytes
+    digest = hashlib.sha256(body).hexdigest()
+    source = SourceFile(
+        library_id=docs["done.jpg"].library_id, sha256=digest, byte_size=len(body),
+        original_filename="gone.jpg", mime_type="image/jpeg",
+        ingest_source=IngestSource.BULK_IMPORT, page_count=1,
+        state=SourceFileState.PROCESSED,
+    )
+    session.add(source)
+    await session.flush()
+    gone = Document(
+        library_id=source.library_id, source_file_id=source.id, page_start=1, page_end=1,
+        title="gone.jpg", review_state=ReviewState.FILED,
+    )
+    session.add(gone)
+    session.add(
+        ImportItem(
+            session_id=import_session.id, path="/data/inbox/gone.jpg",
+            state=ImportItemState.INGESTED, source_file_id=source.id, sha256=digest,
+        )
+    )
+    await session.commit()
+
+    sealed = await sweep.sweep_once(session)
+
+    assert sealed >= 1, "the refusal took the whole tick down"
+    await session.refresh(docs["done.jpg"])
+    await session.refresh(gone)
+    assert docs["done.jpg"].vaulted_by == user_id, "the good file was not sealed"
+    assert gone.vaulted_by is None, "a file with no original must not be marked vaulted"

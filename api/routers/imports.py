@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import bulk as bulk_module
@@ -242,18 +242,70 @@ async def sample(
     return await _out(session, import_session, await progress_of(session, import_session))
 
 
+@router.patch("/imports/{session_id}", response_model=ImportSessionOut)
+async def set_import_options(
+    session_id: uuid.UUID,
+    to_vault: bool = Body(..., embed=True),
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> ImportSessionOut:
+    """Bind an import to the vault — or unbind it — at any point (REQ-197).
+
+    The first version took the flag at *scan* time only. A person who scanned,
+    read what was found, and then ticked "straight into the vault" before
+    pressing Import had their choice dropped in silence: 309 files went into
+    the ordinary archive with the box ticked. The flag belongs to the import,
+    not the scan, and it must be settable afterwards too — binding a completed
+    import is how those 309 get where they were meant to go.
+    """
+    from api.backlog.session import progress as progress_of
+
+    import_session = await _owned(session, user, session_id)
+    if to_vault and not vault_sessions.is_unlocked(user.id):
+        raise HTTPException(
+            status.HTTP_423_LOCKED,
+            "unlock your vault first — files are sealed as they finish, and that "
+            "needs the vault open",
+        )
+    before = import_session.to_vault
+    import_session.to_vault = to_vault
+    await record(
+        session, entity_type="import_session", entity_id=import_session.id,
+        action="import_to_vault" if to_vault else "import_not_to_vault",
+        actor_type=ActorType.HUMAN, actor_id=user.id,
+        before={"to_vault": before}, after={"to_vault": to_vault},
+    )
+    await session.commit()
+    return await _out(session, import_session, await progress_of(session, import_session))
+
+
 @router.post("/imports/{session_id}/run", response_model=ImportSessionOut)
 async def run(
     session_id: uuid.UUID,
     batch: int = Query(50, ge=1, le=500),
+    to_vault: bool | None = Query(
+        None, description="bind this import to the vault as part of starting it"
+    ),
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ImportSessionOut:
-    """Ingest the next slice. Idempotent — calling it again is the resume."""
+    """Ingest the next slice. Idempotent — calling it again is the resume.
+
+    `to_vault` here rather than only at scan time: the choice belongs to the
+    moment of importing, and the screen sends what the box says *now*.
+    """
     from api.backlog.session import ingest_batch, mark_backlog
     from api.backlog.session import progress as progress_of
 
     import_session = await _owned(session, user, session_id)
+    if to_vault is not None and to_vault != import_session.to_vault:
+        if to_vault and not vault_sessions.is_unlocked(user.id):
+            raise HTTPException(
+                status.HTTP_423_LOCKED,
+                "unlock your vault first — files are sealed as they finish, and "
+                "that needs the vault open",
+            )
+        import_session.to_vault = to_vault
     if import_session.state is ImportState.PAUSED:
         import_session.state = ImportState.IMPORTING
 

@@ -72,49 +72,63 @@ async def vaulted(session: AsyncSession, import_session: ImportSession) -> int:
 
 
 async def sweep_once(session: AsyncSession) -> int:
-    """One pass over every vault-bound import whose owner is unlocked."""
-    bound = (
-        await session.execute(
-            sa.select(ImportSession).where(
-                ImportSession.to_vault.is_(True), ImportSession.created_by.is_not(None)
+    """One pass over every vault-bound import whose owner is unlocked.
+
+    Works from plain ids throughout. A refused seal rolls the session back,
+    which expires every ORM object loaded before it — the import row, the vault
+    row, the documents — and touching any of them afterwards fails. The first
+    version did exactly that, so one file with a missing blob broke the whole
+    tick, every tick, and nothing else in the import ever sealed.
+    """
+    bound = [
+        (row.id, row.created_by)
+        for row in (
+            await session.execute(
+                sa.select(ImportSession.id, ImportSession.created_by).where(
+                    ImportSession.to_vault.is_(True), ImportSession.created_by.is_not(None)
+                )
             )
-        )
-    ).scalars().all()
+        ).all()
+    ]
 
     sealed = 0
-    for import_session in bound:
-        owner = import_session.created_by
+    for import_id, owner in bound:
         if not sessions.is_unlocked(owner):
             continue
-        vault = (
-            await session.execute(sa.select(Vault).where(Vault.user_id == owner))
+        vault_id = (
+            await session.execute(sa.select(Vault.id).where(Vault.user_id == owner))
         ).scalar_one_or_none()
-        if vault is None:
+        if vault_id is None:
             continue
         try:
             key = service.require_key(owner)
         except service.VaultLocked:
             continue
 
-        ready = (await session.execute(_ready_documents(import_session.id))).scalars().all()
-        for document in ready:
-            source = await session.get(SourceFile, document.source_file_id)
+        ready_ids = [
+            (row.id, row.source_file_id)
+            for row in (await session.execute(_ready_documents(import_id))).scalars().all()
+        ]
+        for document_id, source_file_id in ready_ids:
+            document = await session.get(Document, document_id)
+            source = await session.get(SourceFile, source_file_id)
+            if document is None or source is None:
+                continue
             try:
-                result = await store.seal(session, document, source, vault.id, owner, key)
+                result = await store.seal(session, document, source, vault_id, owner, key)
             except store.VaultRefused as error:
                 # Left as it is, and said so. The next tick tries again; a file
                 # that never becomes sealable stays visible on the import screen
                 # as "awaiting", which is the honest state.
                 await session.rollback()
                 log.warning(
-                    "could not seal %s from import %s: %s",
-                    document.id, import_session.id, error,
+                    "could not seal %s from import %s: %s", document_id, import_id, error
                 )
                 continue
             await record(
-                session, entity_type="document", entity_id=document.id, action="vault_in",
+                session, entity_type="document", entity_id=document_id, action="vault_in",
                 actor_type=ActorType.SYSTEM, actor_id=owner,
-                after={"import_session": str(import_session.id), "bytes": result.byte_size},
+                after={"import_session": str(import_id), "bytes": result.byte_size},
             )
             await session.commit()
             sealed += 1

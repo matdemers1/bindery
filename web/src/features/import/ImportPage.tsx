@@ -66,6 +66,7 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
   const [vault, setVault] = useState<VaultState | null>(null);
   const [path, setPath] = useState("");
   const [toVault, setToVault] = useState(false);
+  const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [runningAll, setRunningAll] = useState(false);
@@ -113,6 +114,7 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
         to_vault: toVault,
       });
       setActive(made);
+      setTouched(false);
       setNotice("Scanned. Nothing has been imported yet — review what it found below.");
       await load();
     } catch (error) {
@@ -216,9 +218,26 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
         >
           <input
             type="checkbox"
-            checked={toVault && vaultReady}
+            // Optimistic: reflects the click at once rather than after the
+            // round-trip, or the box appears not to respond for a beat.
+            checked={(touched ? toVault : active ? active.to_vault : toVault) && vaultReady}
             disabled={!vaultReady}
-            onChange={(event) => setToVault(event.target.checked)}
+            onChange={(event) => {
+              const wanted = event.target.checked;
+              setTouched(true);
+              setToVault(wanted);
+              // Persisted the moment it is ticked, on the import that is on
+              // screen. The first version kept this in the browser until the
+              // scan, so ticking it *after* scanning — the natural order —
+              // was dropped in silence, and 309 files went into the ordinary
+              // archive with the box ticked.
+              if (active) {
+                void act(() => api.setImportVault(active.id, wanted),
+                  wanted
+                    ? "This import now goes into the vault. Files already imported are sealed as soon as your vault is open."
+                    : "This import will stay in the ordinary archive.");
+              }
+            }}
             className="mt-0.5"
           />
           <span>

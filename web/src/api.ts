@@ -625,6 +625,12 @@ export const api = {
     request<ImportItem[]>(`/imports/${id}/items${state ? `?state=${state}` : ""}`),
   sampleImport: (id: string) =>
     request<ImportSession>(`/imports/${id}/sample`, { method: "POST" }),
+  setImportVault: (id: string, to_vault: boolean) =>
+    request<ImportSession>(`/imports/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to_vault }),
+    }),
   runImport: (id: string, batch = 50) =>
     request<ImportSession>(`/imports/${id}/run?batch=${batch}`, { method: "POST" }),
   pauseImport: (id: string) =>
