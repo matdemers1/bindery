@@ -35,8 +35,11 @@ async def vaulted(session, signed_in, tmp_path, monkeypatch):
         )
         # The bytes and the digest must agree, or `seal` refuses the move —
         # as it should, and as it did when this fixture hashed one thing and
-        # wrote another.
-        body = BODY + filename.encode()
+        # wrote another. Unique per call, too: each `signed_in()` makes a fresh
+        # library, so a filename reused across tests put identical bytes in
+        # several libraries at once, which `seal` now refuses because unlinking
+        # a shared blob would destroy the other library's original.
+        body = BODY + filename.encode() + uuid.uuid4().bytes
         digest = hashlib.sha256(body).hexdigest()
         path = blob_path(digest)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,7 +139,7 @@ async def test_the_original_is_served_as_an_image(client, session, vaulted):
     # Still never cached: a decrypted vault document in a browser cache
     # outlives the unlock that authorised it.
     assert "no-store" in response.headers["cache-control"]
-    assert response.content == BODY + b"holiday.jpg"
+    assert response.content.startswith(BODY + b"holiday.jpg")
 
 
 @pytest.mark.parametrize(

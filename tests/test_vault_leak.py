@@ -261,3 +261,25 @@ def test_every_route_that_selects_documents_applies_the_vault_boundary() -> None
         + "\nApply `boundary.document_clause(user.id)`, or add the module to "
         "VIA_SCOPE with a reason."
     )
+
+
+async def test_the_home_screen_does_not_list_a_vaulted_vital_record(
+    client, session, a_vaulted_document
+):
+    """`GET /api/vital` was the one read path with no vault clause.
+
+    A vital record is the likeliest thing anyone vaults — ADR-012 names the
+    deed and the discharge papers itself — and `seal` never touches
+    `sensitivity`, so a sealed VITAL document kept matching this filter and
+    kept appearing on the home screen, locked or unlocked.
+    """
+    from api.db.enums import Sensitivity
+
+    _user, _library, document, _source = a_vaulted_document
+    document.sensitivity = Sensitivity.VITAL
+    await session.commit()
+
+    response = await client.get("/api/vital")
+    assert response.status_code == 200, response.text
+    assert str(document.id) not in [row["id"] for row in response.json()]
+    assert SECRET_PHRASE not in response.text

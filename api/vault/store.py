@@ -122,6 +122,76 @@ async def _refuse_if_busy(session: AsyncSession, source_file_id: uuid.UUID) -> N
         )
 
 
+async def _refuse_if_shared_file(
+    session: AsyncSession, source: SourceFile, document: Document
+) -> None:
+    """Refuse when other live documents sit on the same file (CR-001).
+
+    `seal` encrypts and then destroys the **whole original file**, every `Page`
+    row belonging to it, and every derived render — because that is what a
+    vault object is: one file, sealed. A document, though, is only a page range
+    over that file (invariant 2, ADR-001), and a 100-page bundle routinely
+    carries thirty of them.
+
+    So vaulting one document of a bundle used to delete the pages, renders and
+    original of every sibling, leaving them listed in the archive with nothing
+    behind them. Refusing is the only correct answer available here: sealing
+    just the range would mean writing a new PDF of those pages, and an original
+    is never modified or split (invariant 1). Splitting a bundle first, then
+    vaulting a whole file, is a product decision rather than a bug fix.
+    """
+    siblings = (
+        await session.execute(
+            sa.select(sa.func.count(Document.id)).where(
+                Document.source_file_id == source.id,
+                Document.id != document.id,
+                Document.superseded_at.is_(None),
+            )
+        )
+    ).scalar_one()
+    if siblings:
+        raise VaultRefused(
+            f"this document shares {source.original_filename or 'its file'} with "
+            f"{siblings} other document{'' if siblings == 1 else 's'}. Vaulting "
+            "seals the whole file, so those would lose their pages and their "
+            "original — they are not yours to destroy by vaulting this one. "
+            "Separate them onto their own file first, or vault the whole thing."
+        )
+
+
+async def _refuse_if_blob_is_shared(
+    session: AsyncSession, source: SourceFile
+) -> None:
+    """Refuse when another library's file is the same bytes (CR-002).
+
+    Blobs are content-addressed and deliberately shared: migration 0017 made
+    two libraries able to record holding one file, and `store_stream` reuses
+    the path when the hash already exists. `blob_path` has no tenant in it.
+
+    `seal` unlinks that path, so vaulting a document whose bytes another
+    household member also holds would delete *their* original — silent,
+    cross-library, irreversible loss from an ordinary action, against ADR-005
+    and invariant 4. Refuse instead; the other holder's copy is not ours.
+    """
+    # Scoped to *other* libraries deliberately: `get_source_file_by_hash` dedups
+    # within a library, so one library can hold only one row per hash, and a
+    # second row on the same blob is by construction somebody else's.
+    others = (
+        await session.execute(
+            sa.select(sa.func.count(SourceFile.id)).where(
+                SourceFile.sha256 == source.sha256,
+                SourceFile.library_id != source.library_id,
+            )
+        )
+    ).scalar_one()
+    if others:
+        raise VaultRefused(
+            "these exact bytes are also held elsewhere in the archive, and the "
+            "stored file is shared between them. Vaulting would destroy the "
+            "other copy's original, which belongs to somebody else."
+        )
+
+
 def _write_atomically(path: Path, payload: bytes) -> None:
     """Write beside, fsync, then rename.
 
@@ -155,6 +225,8 @@ async def seal(
     the plaintext, the derived renders and the page rows.
     """
     await _refuse_if_busy(session, source.id)
+    await _refuse_if_shared_file(session, source, document)
+    await _refuse_if_blob_is_shared(session, source)
 
     plaintext_path = blob_path(source.sha256)
     if not plaintext_path.is_file():
@@ -298,6 +370,18 @@ async def seal(
 
     for page in pages:
         await session.delete(page)
+
+    # Commit before destroying anything (CR-003). Up to here the ciphertext is
+    # on disk but the only record of its name lives in an uncommitted VaultItem
+    # row — and the per-file key is derived from that name, so a rollback after
+    # the unlink would leave an unopenable orphan and no original. The
+    # documented ordering (encrypt → write → read back → compare → only then
+    # delete) was right about the disk and silent about the transaction.
+    #
+    # The caller writes its audit row and commits again afterwards. A failure
+    # there costs an audit entry, which is recoverable; a failure here used to
+    # cost the document, which is not.
+    await session.commit()
 
     warnings: list[str] = []
     # Derived renders and thumbnails are reproducible from the original, and the

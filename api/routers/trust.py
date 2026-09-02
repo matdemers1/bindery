@@ -46,6 +46,7 @@ from api.schemas import (
     OffsiteStatusOut,
 )
 from api.segments import live
+from api.vault import boundary as vault_boundary
 
 log = logging.getLogger("bindery.trust")
 
@@ -94,6 +95,13 @@ async def vital_records(
                     Document.library_id.in_(library_ids),
                     Document.sensitivity == Sensitivity.VITAL,
                     live(),
+                    # The home screen is a read path like any other, and this
+                    # one had no vault clause (CR-007). A vital record is the
+                    # likeliest thing anyone vaults — ADR-012 names the deed
+                    # and the discharge papers itself — and `seal` never
+                    # touches `sensitivity`, so a sealed VITAL document kept
+                    # matching here whether the vault was open or shut.
+                    vault_boundary.document_clause(user.id),
                 )
                 .order_by(Document.document_date.desc().nullslast(), Document.title)
             )
