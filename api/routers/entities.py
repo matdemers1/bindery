@@ -19,6 +19,7 @@ from api.db.enums import ActorType, AssetKind, TagSource
 from api.db.models import (
     AppUser,
     Asset,
+    AuditEvent,
     Correspondent,
     CorrespondentAlias,
     Document,
@@ -53,12 +54,49 @@ log = logging.getLogger("bindery.entities")
 
 router = APIRouter(tags=["entities"])
 
+# What each kind of merge event leaves standing, keyed by the entity type the
+# audit row carries. A merge of anything not in here is not undoable through
+# this route, which is the safe direction to fail.
+_MERGE_SURVIVOR = {
+    "correspondent": Correspondent,
+    "tag": Tag,
+    "document_type": DocumentType,
+}
+
 
 async def _writable(session: AsyncSession, user: AppUser) -> list[uuid.UUID]:
     ids = await repository.writable_library_ids(session, user.id)
     if not ids:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "no writable libraries")
     return ids
+
+
+async def _in_scope(session: AsyncSession, model, entity_id: uuid.UUID, library_ids: list):
+    """One record of a library-scoped model, or None when it is out of reach.
+
+    Asking `_writable` and then looking the record up by id alone makes the id
+    itself the permission — and ids are not secrets here: they travel in audit
+    blobs, export manifests, URLs and merge previews, and outlive the membership
+    that showed them. The caller 404s on a miss rather than 403s, because a 403
+    confirms the record exists, which is the whole answer a probe is after
+    (ADR-005).
+    """
+    return (
+        await session.execute(
+            sa.select(model).where(
+                model.id == entity_id, model.library_id.in_(library_ids)
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _merge_pair(session: AsyncSession, model, payload: MergeIn, library_ids: list):
+    """Both ends of a merge, resolved inside the caller's boundary."""
+    source = await _in_scope(session, model, payload.source_id, library_ids)
+    target = await _in_scope(session, model, payload.target_id, library_ids)
+    if source is None or target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    return source, target
 
 
 # --------------------------------------------------------------------------
@@ -233,7 +271,8 @@ async def preview_merge(
     session: AsyncSession = Depends(get_session),
 ) -> MergePreviewOut:
     """What the merge would touch. Writes nothing."""
-    await _writable(session, user)
+    library_ids = await _writable(session, user)
+    await _merge_pair(session, Correspondent, payload, library_ids)
     try:
         preview = await entities.preview_correspondent_merge(
             session, payload.source_id, payload.target_id
@@ -253,7 +292,8 @@ async def merge_correspondents(
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> MergePreviewOut:
-    await _writable(session, user)
+    library_ids = await _writable(session, user)
+    await _merge_pair(session, Correspondent, payload, library_ids)
     try:
         preview = await entities.preview_correspondent_merge(
             session, payload.source_id, payload.target_id
@@ -278,11 +318,8 @@ async def merge_tags(
     session: AsyncSession = Depends(get_session),
 ) -> MergePreviewOut:
     """Merge two tags retroactively across every document (REQ-076)."""
-    await _writable(session, user)
-    source = await session.get(Tag, payload.source_id)
-    target = await session.get(Tag, payload.target_id)
-    if source is None or target is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    library_ids = await _writable(session, user)
+    source, target = await _merge_pair(session, Tag, payload, library_ids)
     try:
         operation_id = await entities.merge_tags(
             session, payload.source_id, payload.target_id, actor_id=user.id
@@ -303,7 +340,14 @@ async def undo_merge(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Reverse a merge — the record and every link row it moved — in one action."""
-    await _writable(session, user)
+    library_ids = await _writable(session, user)
+    # An operation id reaches as far as the record the merge left standing, so
+    # that record's library is the boundary the undo has to be inside — an undo
+    # rewrites exactly the rows the merge did.
+    event = await session.get(AuditEvent, operation_id)
+    model = _MERGE_SURVIVOR.get(event.entity_type) if event is not None else None
+    if model is None or await _in_scope(session, model, event.entity_id, library_ids) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     try:
         restored = await entities.undo_merge(session, operation_id, actor_id=user.id)
     except entities.MergeError as exc:

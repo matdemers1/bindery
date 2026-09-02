@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
 
 from api.db.enums import ActorType, IngestSource, Sensitivity, SourceFileState
 from api.db.models import (
@@ -715,3 +716,96 @@ async def test_the_dump_is_readable_by_the_restore_tool(session, archive) -> Non
         f"server versions have drifted apart:\n{listing.stderr.decode()}"
     )
     assert b"document" in listing.stdout, "the dump should contain the schema"
+
+# --------------------------------------------------------------------------
+# Who may ask for a replication run (CR-006, ADR-009, ADR-010)
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def offsite_configured(session):
+    """A complete destination, and no history — then put both back.
+
+    Settings are account-wide and the suite migrates once per session, so a
+    module that leaves a bucket configured changes what every later module
+    sees.
+    """
+    from api import settings_store
+    from api.db.models import OffsiteRun, Setting
+
+    await session.execute(sa.delete(OffsiteRun))
+    for key, value in (
+        (settings_store.AWS_ACCESS_KEY_ID, "AKIAIOSFODNN7EXAMPLE"),
+        (settings_store.AWS_SECRET_ACCESS_KEY, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
+        (settings_store.OFFSITE_BUCKET, "bindery-offsite-authorisation"),
+        (settings_store.OFFSITE_REGION, "us-east-1"),
+        (settings_store.OFFSITE_KMS_KEY_ID, "alias/bindery-offsite"),
+    ):
+        await settings_store.set_(session, key, value, actor_id=None)
+    await session.commit()
+
+    yield
+
+    await session.execute(sa.delete(OffsiteRun))
+    await session.execute(
+        sa.delete(Setting).where(
+            Setting.key.in_(
+                [
+                    settings_store.AWS_ACCESS_KEY_ID,
+                    settings_store.AWS_SECRET_ACCESS_KEY,
+                    settings_store.OFFSITE_BUCKET,
+                    settings_store.OFFSITE_REGION,
+                    settings_store.OFFSITE_KMS_KEY_ID,
+                ]
+            )
+        )
+    )
+    await session.commit()
+
+
+async def test_a_household_member_cannot_ask_for_a_replication_run(
+    client, session, signed_in, offsite_configured
+) -> None:
+    """A run is a whole-host operation, and `_visible` is not a claim about the host.
+
+    It pg_dumps every library and ships every blob and every vault object to
+    the configured bucket. Belonging to a library says nothing about whether
+    you may start that.
+    """
+    from api.db.models import OffsiteRun
+
+    await signed_in()
+
+    response = await client.post("/api/offsite/replicate")
+    assert response.status_code == 403
+    assert "administrator" in response.text
+
+    runs = (await session.execute(sa.select(OffsiteRun))).scalars().all()
+    assert runs == [], "a refused request must not queue a run"
+
+
+async def test_reading_the_replication_status_stays_open_to_every_member(
+    client, signed_in
+) -> None:
+    """"Has a copy left the building?" is a question about your own documents.
+
+    The gate is on the trigger, not on the answer — hiding the status from
+    household members would make the archive less trustworthy, not more.
+    """
+    await signed_in()
+    assert (await client.get("/api/offsite")).status_code == 200
+
+
+async def test_an_administrator_can_still_ask_for_a_run(
+    client, session, signed_in, offsite_configured
+) -> None:
+    from api import offsite_runs
+    from api.db.models import OffsiteRun
+
+    user, _ = await signed_in()
+    user.is_admin = True
+    await session.commit()
+
+    assert (await client.post("/api/offsite/replicate")).status_code == 200
+    run = (await session.execute(sa.select(OffsiteRun))).scalars().one()
+    assert run.state == offsite_runs.REQUESTED

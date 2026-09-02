@@ -18,7 +18,13 @@ import sqlalchemy as sa
 
 from api.backlog.dryrun import estimate_cost
 from api.backlog.walker import walk
-from api.db.enums import ImportItemState, ImportState, IngestSource, SourceFileState
+from api.db.enums import (
+    ImportItemState,
+    ImportState,
+    IngestSource,
+    Sensitivity,
+    SourceFileState,
+)
 from api.db.models import (
     AuditEvent,
     Document,
@@ -468,3 +474,183 @@ async def test_an_unsupported_bulk_action_is_refused(client, many_documents) -> 
     })
     assert response.status_code == 422
     assert "unsupported bulk action" in response.json()["detail"]
+
+
+# --------------------------------------------------------------------------
+# What an import is allowed to read (CR-005)
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def data_mount(tmp_path, monkeypatch):
+    """DATA_ROOT and the inbox, moved somewhere a test may write."""
+    from api.config import get_settings
+
+    (tmp_path / "inbox").mkdir()
+    get_settings.cache_clear()
+    monkeypatch.setenv("DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("INBOX_ROOT", str(tmp_path / "inbox"))
+    get_settings.cache_clear()
+    yield tmp_path
+    get_settings.cache_clear()
+
+
+async def test_the_inbox_and_a_folder_beside_it_stay_importable(
+    client, signed_in, data_mount
+) -> None:
+    """The feature itself: the preset, and a folder the worker can see."""
+    _, library = await signed_in()
+    (data_mount / "backlog" / "2019").mkdir(parents=True)
+
+    for root in (data_mount / "inbox", data_mount / "backlog" / "2019"):
+        response = await client.post(
+            "/api/imports", json={"library_id": str(library.id), "root_path": str(root)}
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["root_path"] == str(root)
+
+
+@pytest.mark.parametrize(
+    "folder",
+    ["derived", "blobs", "vault", "vault/objects", "mirror", "exports", "backups", ""],
+)
+async def test_an_import_cannot_read_the_archives_own_storage(
+    client, signed_in, data_mount, folder
+) -> None:
+    """The whole attack in one request.
+
+    `derived/<sha>/normalized.pdf` and `derived/<sha>/pages/0001.webp` are every
+    household's documents in exactly the shapes the walker admits. Importing
+    that tree would register them as source files in the caller's own library,
+    where search, the viewer and the originals endpoint would all serve them —
+    correctly, because by then they really would be his (invariant 4, ADR-009).
+    """
+    _, library = await signed_in()
+    target = data_mount / folder if folder else data_mount
+    (target / "af" / "pages").mkdir(parents=True)
+    (target / "af" / "normalized.pdf").write_bytes(b"%PDF-1.7\nsomeone else\n%%EOF\n")
+    (target / "af" / "pages" / "0001.webp").write_bytes(b"RIFF____WEBP")
+
+    response = await client.post(
+        "/api/imports", json={"library_id": str(library.id), "root_path": str(target)}
+    )
+
+    assert response.status_code == 422, response.text
+    assert "may only read from" in response.json()["detail"]
+    assert (await client.get("/api/imports")).json() == [], (
+        "a refused scan still created an import session"
+    )
+
+
+async def test_dot_dot_does_not_walk_out_of_the_mount(
+    client, signed_in, data_mount
+) -> None:
+    """`..` and a symlink are how a contained-looking path stops being one."""
+    _, library = await signed_in()
+
+    response = await client.post(
+        "/api/imports",
+        json={
+            "library_id": str(library.id),
+            "root_path": f"{data_mount}/inbox/../derived",
+        },
+    )
+    assert response.status_code == 422, response.text
+
+
+async def test_a_relative_path_is_still_refused(client, signed_in, data_mount) -> None:
+    _, library = await signed_in()
+    response = await client.post(
+        "/api/imports", json={"library_id": str(library.id), "root_path": "inbox"}
+    )
+    assert response.status_code == 422
+    assert "absolute" in response.json()["detail"]
+
+
+def test_the_walk_does_not_follow_a_symlink_out_of_the_tree(tmp_path) -> None:
+    """One symlink in the inbox would otherwise reach the whole data pool."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "someone-elses.pdf").write_bytes(b"%PDF-1.7\nprivate\n%%EOF\n")
+    inside = tmp_path / "inbox"
+    inside.mkdir()
+    (inside / "mine.pdf").write_bytes(b"%PDF-1.7\nmine\n%%EOF\n")
+    (inside / "theirs.pdf").symlink_to(outside / "someone-elses.pdf")
+
+    result = walk(inside)
+
+    assert [p.name for p in result.files] == ["mine.pdf"]
+    assert any("outside" in message for _, message in result.errors)
+
+
+async def test_an_item_pointing_outside_the_scanned_root_is_not_ingested(
+    session, import_session
+) -> None:
+    """The stored per-item path is a string; the ingest is what opens it."""
+    from api.backlog.session import ingest_batch
+
+    _library, record, tree = import_session
+    outside = tree.parent / "outside.pdf"
+    outside.write_bytes(b"%PDF-1.7\nnot in the scan\n%%EOF\n")
+    session.add(
+        ImportItem(
+            session_id=record.id, path=str(outside), state=ImportItemState.PENDING
+        )
+    )
+    await session.flush()
+
+    await ingest_batch(session, record, states=[ImportItemState.PENDING], limit=50)
+
+    item = (
+        await session.execute(
+            sa.select(ImportItem).where(
+                ImportItem.session_id == record.id, ImportItem.path == str(outside)
+            )
+        )
+    ).scalar_one()
+    assert item.state is ImportItemState.FAILED
+    assert item.source_file_id is None
+
+
+# --------------------------------------------------------------------------
+# An operation id is not a permission (CR-036)
+# --------------------------------------------------------------------------
+
+
+async def test_bulk_undo_refuses_another_households_operation(
+    client, session, many_documents, signed_in
+) -> None:
+    """Ids are not secrets here: they appear in audit rows, exports and URLs,
+    and a member who has left keeps every one they ever saw."""
+    _, documents = many_documents
+    applied = (await client.post("/api/bulk/apply", json={
+        "document_ids": [str(d.id) for d in documents],
+        "actions": {"set_sensitivity": "vital"},
+    })).json()
+    operation_id = applied["operation_id"]
+
+    await client.post("/api/auth/logout")
+    await signed_in(library_name="Someone Else")
+
+    response = await client.post(f"/api/bulk/{operation_id}/undo")
+
+    assert response.status_code == 404, response.text
+    await session.refresh(documents[0])
+    assert documents[0].sensitivity is Sensitivity.VITAL, (
+        "another library's bulk edit was reversed by someone holding its id"
+    )
+
+
+async def test_bulk_undo_still_works_for_the_library_that_owns_it(
+    client, session, many_documents
+) -> None:
+    _, documents = many_documents
+    applied = (await client.post("/api/bulk/apply", json={
+        "document_ids": [str(d.id) for d in documents],
+        "actions": {"set_sensitivity": "vital"},
+    })).json()
+
+    response = await client.post(f"/api/bulk/{applied['operation_id']}/undo")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["matched"] == 20

@@ -27,6 +27,7 @@ from api.db.models import AppUser, AuditEvent, Document, Library, Rule
 from api.db.scope import resolve
 from api.db.session import get_session
 from api.export import archive_export, backup, integrity, mirror
+from api.routers.settings import admin_only
 from api.schemas import (
     AskIn,
     AskOut,
@@ -307,8 +308,16 @@ async def offsite_replicate_now(
     request handler holds a connection open for minutes and dies with the
     request — and a half-finished replication is exactly the state the ordering
     rules in `offsite.replicate` exist to avoid.
+
+    Administrator-only, for the same reason the credentials are (CR-006): a run
+    is a whole-host operation — a pg_dump of every library plus every blob and
+    every vault object — and `_visible` is satisfied by belonging to any
+    library, which is not a statement about the host. Reading the *status* stays
+    open to everyone, because "has a copy left the building?" is a question
+    every member is entitled to ask about their own documents.
     """
     await _visible(session, user)
+    admin_only(user)
     config = await offsite.config_from_settings(session)
     if not config.complete:
         raise HTTPException(

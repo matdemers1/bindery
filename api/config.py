@@ -61,3 +61,69 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+# --------------------------------------------------------------------------
+# Startup validation
+# --------------------------------------------------------------------------
+
+# The placeholder that ships in .env.example and in the ZimaOS manifest. It is
+# in the repository, so a deployment still carrying it is not weakly configured
+# — it is unconfigured, and the difference is invisible from the outside.
+PLACEHOLDER_JWT_SECRET = "change-me-to-a-long-random-string"
+PLACEHOLDER_MARKER = "change-me"
+# Not an entropy check — a real secret is 32+ random characters and the message
+# below says so. This floor only catches someone typing a word into the
+# variable, and is set low enough that the short values CI and local
+# development deliberately use still boot.
+MIN_JWT_SECRET_LENGTH = 16
+
+
+class UnusableConfiguration(RuntimeError):
+    """The process must not start with this configuration."""
+
+
+def configuration_problems(settings: Settings) -> list[str]:
+    """Every reason this configuration must not be served, each naming its variable.
+
+    `jwt_secret` is the one that cannot be allowed to fail quietly. It signs
+    every session (ADR-008) and `api/settings_store.py` derives the key
+    protecting the stored AWS and Anthropic credentials from it, so a
+    placeholder means anyone holding the repository can mint an administrator
+    session and read the offsite credentials out of a dump. A wrong
+    DATABASE_URL announces itself on the first query; a wrong JWT_SECRET never
+    announces itself at all.
+    """
+    problems: list[str] = []
+
+    secret = settings.jwt_secret.strip()
+    if not secret or secret == PLACEHOLDER_JWT_SECRET or PLACEHOLDER_MARKER in secret:
+        problems.append(
+            "JWT_SECRET is still the placeholder from .env.example. It signs every "
+            "session and protects the stored offsite credentials, and its value is "
+            "public. Set JWT_SECRET to at least 32 random characters — "
+            "`openssl rand -base64 48` — and restart."
+        )
+    elif len(secret) < MIN_JWT_SECRET_LENGTH:
+        problems.append(
+            f"JWT_SECRET is {len(secret)} characters, which is short enough to be "
+            "guessed. Set it to at least 32 random characters — "
+            "`openssl rand -base64 48` — and restart."
+        )
+
+    if PLACEHOLDER_MARKER in settings.database_url:
+        problems.append(
+            "DATABASE_URL still contains the .env.example placeholder "
+            f"{PLACEHOLDER_MARKER!r}. Set it to the real connection string."
+        )
+
+    return problems
+
+
+def require_usable_configuration(settings: Settings | None = None) -> None:
+    """Refuse to start rather than to serve. See `configuration_problems`."""
+    problems = configuration_problems(settings or get_settings())
+    if problems:
+        raise UnusableConfiguration(
+            "Bindery refuses to start: " + " ".join(problems)
+        )

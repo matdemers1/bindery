@@ -129,6 +129,23 @@ async def totp_start(
     user: AppUser = Depends(current_user),
 ) -> TotpEnrolOut:
     """Generate a secret. It is not active until a code from it is verified."""
+    if user.totp_enabled:
+        # Starting an enrolment clears `totp_confirmed_at`, which is right while
+        # there is nothing to lose and wrong the moment there is: it would turn
+        # the live second factor off before anything had been proved, with no
+        # password asked for, so a stolen session alone would strip it — and it
+        # would walk straight past the refusal in `totp_disable` that exists so
+        # an administrator is never left with a password alone (REQ-156).
+        #
+        # There is nowhere to hold a second, pending secret, so the only honest
+        # answer while one is active is no. Replacing an authenticator means
+        # turning the factor off first, which is what the screen offers and what
+        # an administrator is deliberately not allowed to do.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "two-factor is already on for this account. Turn it off first, then "
+            "set it up again with the new authenticator.",
+        )
     secret = totp.new_secret()
     user.totp_secret = secret
     user.totp_confirmed_at = None

@@ -138,10 +138,19 @@ async def ingest_batch(
         )
     ).scalars().all()
 
+    # Checked again here, against the root the scan was authorised for: the
+    # per-item path is a stored string, and the ingest is what actually opens
+    # it. A row that points somewhere else is refused rather than read.
+    root = Path(import_session.root_path).resolve()
+
     done = 0
     for item in items:
         path = Path(item.path)
         try:
+            if not path.resolve().is_relative_to(root):
+                item.state = ImportItemState.FAILED
+                item.error = "outside the folder that was scanned"
+                continue
             if not path.is_file():
                 item.state = ImportItemState.FAILED
                 item.error = "file disappeared between the scan and the import"

@@ -18,7 +18,14 @@ from api.auth.dependencies import current_user
 from api.config import get_settings
 from api.db import repository
 from api.db.enums import ActorType, ImportItemState, ImportState
-from api.db.models import AppUser, EventLog, ImportItem, ImportSession
+from api.db.models import (
+    AppUser,
+    AuditEvent,
+    Document,
+    EventLog,
+    ImportItem,
+    ImportSession,
+)
 from api.db.session import get_session
 from api.schemas import (
     BulkEditIn,
@@ -29,10 +36,56 @@ from api.schemas import (
     ImportSessionOut,
     ImportStartIn,
 )
+from api.vault import boundary as vault
 from api.vault import sweep as vault_sweep
 from api.vault.session import sessions as vault_sessions
 
 router = APIRouter(tags=["import"])
+
+# Subtrees of DATA_ROOT that are the application's, not the operator's. Nothing
+# may be imported *from* them: they hold every household's originals, OCR'd
+# derivatives, mirrors, exports and sealed vault objects, and the walker admits
+# exactly the shapes they are written in (`normalized.pdf`, `pages/0001.webp`).
+# An import reading one of them would copy another library's documents into the
+# caller's own, where they would then be legitimately searchable — invariant 4,
+# ADR-005 and ADR-009 all in one request.
+RESERVED_SUBTREES = ("blobs", "tmp", "derived", "vault", "mirror", "exports", "backups")
+
+
+def _import_root(raw: str) -> Path:
+    """The one place a requested import root is turned into a path we will read.
+
+    The feature is deliberately "point it at a folder the worker can see", so
+    this is containment rather than a fixed list of folders: the inbox, or
+    anything else the operator has put under the DATA_ROOT mount. Resolved
+    first, because `..` and a symlink are how a path that looks contained stops
+    being contained.
+    """
+    settings = get_settings()
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "the path must be absolute"
+        )
+    candidate = candidate.resolve()
+
+    inbox = settings.inbox_root.resolve()
+    data = settings.data_root.resolve()
+    refused = HTTPException(
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        f"imports may only read from {inbox} or another folder under {data}",
+    )
+
+    # Refused before anything is allowed, so an INBOX_ROOT pointed somewhere
+    # careless cannot open them. The mount itself is refused for the same
+    # reason: a walk from there descends into every one of them.
+    if candidate == data or any(
+        candidate.is_relative_to(data / name) for name in RESERVED_SUBTREES
+    ):
+        raise refused
+    if candidate.is_relative_to(inbox) or candidate.is_relative_to(data):
+        return candidate
+    raise refused
 
 
 async def _owned(session: AsyncSession, user: AppUser, session_id: uuid.UUID) -> ImportSession:
@@ -111,11 +164,7 @@ async def start_import(
     if not await repository.can_write_library(session, user.id, payload.library_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "no write access to that library")
 
-    root = Path(payload.root_path)
-    if not root.is_absolute():
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "the path must be absolute"
-        )
+    root = _import_root(payload.root_path)
 
     if payload.to_vault and not vault_sessions.is_unlocked(user.id):
         # Refused now rather than accepted and never honoured: an import bound
@@ -425,6 +474,47 @@ async def bulk_apply(
     )
 
 
+async def _undoable(
+    session: AsyncSession, user: AppUser, operation_id: uuid.UUID
+) -> None:
+    """Refuse an operation id that reaches outside the caller's boundary.
+
+    `bulk.undo` resolves the operation's audit event and each document in its
+    manifest by id alone, so without this the id *is* the permission: anyone
+    who has ever seen one — they appear in audit rows, export manifests and
+    URLs — can reverse another household's bulk edit, including after their
+    membership ended. The boundary is the library, not the actor: a co-owner
+    undoing what the other did is the ordinary case (invariant 4). The vault
+    clause is here for the same reason it is on every other archive write — an
+    undo that reaches a sealed document is a write to something the archive is
+    supposed to be unable to see at all (ADR-012).
+    """
+    event = await session.get(AuditEvent, operation_id)
+    if event is None or event.action != "bulk_edit":
+        # Not ours to judge — `bulk.undo` says what is wrong with it.
+        return
+
+    document_ids = {
+        uuid.UUID(entry["document_id"])
+        for entry in (event.before or {}).get("manifest", [])
+        if entry.get("document_id")
+    }
+    library_ids = await repository.writable_library_ids(session, user.id)
+    mine = (
+        await session.execute(
+            sa.select(sa.func.count())
+            .select_from(Document)
+            .where(
+                Document.id.in_(document_ids),
+                Document.library_id.in_(library_ids or [uuid.uuid4()]),
+                vault.document_clause(user.id),
+            )
+        )
+    ).scalar_one()
+    if mine != len(document_ids):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+
+
 @router.post("/bulk/{operation_id}/undo", response_model=BulkResultOut)
 async def bulk_undo(
     operation_id: uuid.UUID,
@@ -432,6 +522,7 @@ async def bulk_undo(
     session: AsyncSession = Depends(get_session),
 ) -> BulkResultOut:
     """Reverse the whole operation in one action, not one document at a time."""
+    await _undoable(session, user, operation_id)
     try:
         restored = await bulk_module.undo(session, operation_id, actor_id=user.id)
     except bulk_module.BulkError as exc:

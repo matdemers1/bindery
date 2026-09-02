@@ -7,8 +7,10 @@ suite; the seam exists from the baseline so there is never a call site that
 learned to do its own filtering.
 """
 
+import contextvars
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,12 +22,57 @@ from api.vault import boundary as vault
 WRITE_ROLES = (MembershipRole.OWNER, MembershipRole.CONTRIBUTOR)
 
 
+@dataclass(frozen=True)
+class TokenBoundary:
+    """What a bearer token narrows its owner down to, for one request."""
+
+    user_id: uuid.UUID
+    library_ids: frozenset[uuid.UUID]
+    may_write: bool
+
+
+# `None` for a browser session and for the worker, which is why the auth layer
+# *sets* it on every authenticated request rather than leaving it alone.
+_token_boundary: contextvars.ContextVar[TokenBoundary | None] = contextvars.ContextVar(
+    "bindery_token_boundary", default=None
+)
+
+
+def bind_token_boundary(boundary: TokenBoundary | None) -> None:
+    """Narrow the rest of this request to what its bearer token may reach.
+
+    The narrowing lives here for the same reason the library filter does
+    (invariant 4, ADR-005): nineteen routers ask this module for "the libraries
+    this user can see", and a second, narrower question asked at each of those
+    call sites is one that will be forgotten at one of them. It was — every
+    router but `household` handed a token everything its creator could reach.
+    """
+    _token_boundary.set(boundary)
+
+
+def _within_the_token(
+    user_id: uuid.UUID, library_ids: list[uuid.UUID], *, writing: bool = False
+) -> list[uuid.UUID]:
+    """`library_ids`, intersected with the caller's token if there is one.
+
+    Only ever narrows. A token is a subset of the person who issued it, so a
+    boundary this returns is never wider than the memberships it was given, and
+    a caller asking about somebody else is left alone.
+    """
+    boundary = _token_boundary.get()
+    if boundary is None or boundary.user_id != user_id:
+        return library_ids
+    if writing and not boundary.may_write:
+        return []
+    return [lid for lid in library_ids if lid in boundary.library_ids]
+
+
 async def visible_library_ids(session: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
     """Every library the user holds any membership in."""
     result = await session.execute(
         sa.select(Membership.library_id).where(Membership.user_id == user_id)
     )
-    return list(result.scalars().all())
+    return _within_the_token(user_id, list(result.scalars().all()))
 
 
 async def writable_library_ids(session: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
@@ -34,7 +81,7 @@ async def writable_library_ids(session: AsyncSession, user_id: uuid.UUID) -> lis
             Membership.user_id == user_id, Membership.role.in_(WRITE_ROLES)
         )
     )
-    return list(result.scalars().all())
+    return _within_the_token(user_id, list(result.scalars().all()), writing=True)
 
 
 async def can_write_library(
@@ -50,7 +97,9 @@ async def list_libraries(session: AsyncSession, user_id: uuid.UUID) -> Sequence[
         .where(Membership.user_id == user_id)
         .order_by(Library.name)
     )
-    return result.scalars().all()
+    libraries = list(result.scalars().all())
+    reachable = set(_within_the_token(user_id, [library.id for library in libraries]))
+    return [library for library in libraries if library.id in reachable]
 
 
 async def list_documents(

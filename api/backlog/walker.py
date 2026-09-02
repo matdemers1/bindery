@@ -87,6 +87,10 @@ class WalkResult:
 def walk(root: Path, *, follow_symlinks: bool = False) -> WalkResult:
     result = WalkResult()
     seen_dirs: set[tuple[int, int]] = set()
+    # A symlink is a path, not a copy. Following one out of the tree would read
+    # a file nobody pointed the import at — and the blob store and the derived
+    # tree sit one directory away from every folder anyone imports from.
+    boundary = root.resolve()
 
     for current, dirnames, filenames in os.walk(root, followlinks=follow_symlinks,
                                                 onerror=lambda e: result.errors.append(
@@ -116,6 +120,14 @@ def walk(root: Path, *, follow_symlinks: bool = False) -> WalkResult:
                 continue
             if path.suffix.lower() not in SUPPORTED:
                 result.skipped_unsupported += 1
+                continue
+            try:
+                inside = path.resolve().is_relative_to(boundary)
+            except OSError as exc:
+                result.errors.append((str(path), str(exc)))
+                continue
+            if not inside:
+                result.errors.append((str(path), "leads outside the folder being imported"))
                 continue
             try:
                 size = path.stat().st_size

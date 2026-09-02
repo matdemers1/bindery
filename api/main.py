@@ -11,7 +11,7 @@ import logging
 from fastapi import FastAPI
 
 from api import eventlog, events
-from api.config import get_settings
+from api.config import get_settings, require_usable_configuration
 from api.db.session import SessionFactory
 from api.routers import accounts as accounts_router
 from api.routers import (
@@ -51,6 +51,12 @@ async def lifespan(_app: FastAPI):
     outlive it — the interesting lines are the ones written by requests that
     failed.
     """
+    # First, and before anything is served. A placeholder JWT_SECRET produces an
+    # app that looks completely normal and hands out sessions signed with a
+    # value published in this repository — there is no wrong-looking screen to
+    # notice, so refusing to boot is the only signal that cannot be missed.
+    require_usable_configuration(get_settings())
+
     eventlog.install()
     stopping = asyncio.Event()
     drain = asyncio.create_task(

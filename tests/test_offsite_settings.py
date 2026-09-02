@@ -27,8 +27,17 @@ async def _save(client, **fields):
 
 
 @pytest.fixture
-async def owner(signed_in):
-    await signed_in()
+async def owner(session, signed_in):
+    """An administrator, because the offsite panel is now the administrator's.
+
+    Owning a library is not a statement about the host, and every invited
+    account owns its own personal library — see `test_a_household_member_cannot_
+    repoint_replication` below for what that let anyone do.
+    """
+    user, _ = await signed_in()
+    user.is_admin = True
+    await session.commit()
+    return user
 
 
 async def test_the_secret_never_comes_back(client, owner):
@@ -190,3 +199,85 @@ async def test_settings_store_refuses_keys_outside_the_closed_set(session):
     """A stray request cannot invent configuration."""
     with pytest.raises(ValueError):
         await settings_store.set_(session, "aws_session_token", "x", actor_id=None)
+
+
+# --------------------------------------------------------------------------
+# Who may configure the destination (CR-006, ADR-009, ADR-010)
+# --------------------------------------------------------------------------
+
+
+async def test_a_household_member_cannot_repoint_replication(client, signed_in):
+    """The whole reason this gate exists.
+
+    The settings table is account-wide and single-row-per-key, so one account's
+    write is everyone's configuration — and the old gate was "owns a library",
+    which every invited account satisfies by owning its own. A household member
+    could therefore name a bucket they control and let the next daily run hand
+    them the pg_dump, every blob and every vault object.
+    """
+    await signed_in()  # an owner of their own library, and not an administrator
+
+    response = await _save(
+        client,
+        aws_access_key_id=GOOD_KEY_ID,
+        aws_secret_access_key=GOOD_SECRET,
+        offsite_bucket="attacker-owned-bucket",
+        offsite_region="us-east-1",
+        offsite_kms_key_id="alias/attacker",
+    )
+    assert response.status_code == 403
+    assert "administrator" in response.text
+
+    body = (await client.get("/api/settings")).json()
+    assert body["offsite_bucket"] != "attacker-owned-bucket"
+
+
+async def test_the_refusal_lands_before_the_first_field_is_written(client, signed_in):
+    """A partially applied refusal is the state this panel is built to avoid.
+
+    A single valid-looking field must not slip through on its own — the bucket
+    alone is enough to be worth refusing.
+    """
+    await signed_in()
+    before = (await client.get("/api/settings")).json()
+
+    assert (await _save(client, offsite_bucket="attacker-owned-bucket")).status_code == 403
+
+    after = (await client.get("/api/settings")).json()
+    assert after["offsite_bucket"] == before["offsite_bucket"]
+
+
+async def test_probing_the_bucket_is_the_administrators_too(client, signed_in):
+    """It spends money and writes to a bucket only an administrator can name."""
+    await signed_in()
+    assert (await client.post("/api/settings/test-offsite")).status_code == 403
+
+
+async def test_the_rest_of_the_screen_is_still_the_owners(client, signed_in):
+    """The gate is per key, not per screen.
+
+    Choosing a model and adding an API key are library-owner decisions and stay
+    that way; narrowing them would take away something an owner has today for
+    no gain against this attack.
+    """
+    await signed_in()
+    assert (await _save(client, model="claude-sonnet-5")).status_code == 200
+
+
+async def test_the_audit_names_the_destination_it_replaced(client, owner, session):
+    """"Which bucket was it pointing at before?" is the question a swapped
+    destination raises, and `after` alone cannot answer it."""
+    from api.db.models import AuditEvent
+
+    await _save(client, offsite_bucket="bindery-offsite-first")
+    await _save(client, offsite_bucket="bindery-offsite-second")
+
+    event = (
+        await session.execute(
+            sa.select(AuditEvent)
+            .where(AuditEvent.action == "update_settings")
+            .order_by(AuditEvent.sequence.desc())
+        )
+    ).scalars().first()
+    assert event.before["offsite_bucket"] == "bindery-offsite-first"
+    assert event.after == {"changed": ["offsite_bucket"]}

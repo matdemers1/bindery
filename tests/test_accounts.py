@@ -300,6 +300,49 @@ async def test_a_secret_is_not_trusted_until_a_code_proves_it(
     assert len(codes) == accounts.RECOVERY_CODE_COUNT
 
 
+async def test_starting_an_enrolment_cannot_disable_a_live_second_factor(
+    client, session, signed_in
+) -> None:
+    """The factor that stops a stolen password must not come off with a session.
+
+    Starting an enrolment used to clear `totp_confirmed_at`, so one POST — no
+    password, no code — left the account on a password alone, and did it past
+    the refusal in `totp_disable` that exists so an administrator never is.
+    """
+    user, _ = await signed_in()
+    user.totp_secret = totp.new_secret()
+    await accounts.confirm_totp(
+        session, user=user,
+        code=totp._code_for_step(user.totp_secret, totp.current_step()),
+    )
+    await session.commit()
+    assert user.totp_enabled is True
+
+    response = await client.post("/api/account/totp/start")
+    assert response.status_code == 409, response.text
+
+    await session.refresh(user)
+    assert user.totp_enabled is True
+    assert (await client.get("/api/account")).json()["totp_enabled"] is True
+
+
+async def test_an_account_with_no_second_factor_can_still_enrol(
+    client, session, signed_in
+) -> None:
+    """The refusal above is about replacing a live factor, not about enrolling."""
+    user, _ = await signed_in()
+    started = await client.post("/api/account/totp/start")
+    assert started.status_code == 200, started.text
+
+    confirmed = await client.post("/api/account/totp/confirm", json={
+        "code": totp._code_for_step(started.json()["secret"], totp.current_step())
+    })
+    assert confirmed.status_code == 200, confirmed.text
+
+    await session.refresh(user)
+    assert user.totp_enabled is True
+
+
 async def test_the_same_totp_code_cannot_be_used_twice(session, user_factory) -> None:
     """Without the replay guard a code stays valid across the whole window —
     up to ninety seconds, which is ample to reuse one that was captured."""

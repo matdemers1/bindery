@@ -145,9 +145,11 @@ async def test_a_second_pass_seals_nothing_twice(session, bound_import):
 
 
 async def test_an_import_bound_for_a_locked_vault_is_refused_up_front(
-    client, session, signed_in, tmp_path
+    client, session, signed_in
 ):
     """Refused now rather than accepted and never honoured."""
+    from api.config import get_settings
+
     user, library = await signed_in()
     await service.create(session, user.id, "a-long-enough-passphrase", "481516")
     await session.commit()
@@ -155,7 +157,13 @@ async def test_an_import_bound_for_a_locked_vault_is_refused_up_front(
 
     response = await client.post(
         "/api/imports",
-        json={"library_id": str(library.id), "root_path": str(tmp_path), "to_vault": True},
+        # An importable root, so the refusal under test is the locked vault and
+        # not the containment check an arbitrary path now meets first.
+        json={
+            "library_id": str(library.id),
+            "root_path": str(get_settings().inbox_root),
+            "to_vault": True,
+        },
     )
     assert response.status_code == 423
     assert "unlock" in response.json()["detail"]

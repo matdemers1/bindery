@@ -26,6 +26,19 @@ async def clean(session):
     await session.commit()
 
 
+async def as_administrator(session, signed_in):
+    """Asking for a run is the administrator's (CR-006, ADR-009).
+
+    A run pg_dumps every library and ships every blob and every vault object,
+    so it is a host operation rather than a library one. Reading the *status*
+    stays open to every member, and the tests above still sign in as one.
+    """
+    user, library = await signed_in()
+    user.is_admin = True
+    await session.commit()
+    return user, library
+
+
 async def configure(session, user_id=None):
     for key, value in (
         (settings_store.AWS_ACCESS_KEY_ID, "AKIAIOSFODNN7EXAMPLE"),
@@ -103,7 +116,7 @@ async def test_the_history_is_newest_first(client, session, signed_in):
 async def test_replicate_now_queues_a_run_rather_than_uploading(client, session, signed_in):
     """The api never uploads. A few hundred megabytes inside a request handler
     holds a connection open for minutes and dies with the request."""
-    await signed_in()
+    await as_administrator(session, signed_in)
     await configure(session)
 
     response = await client.post("/api/offsite/replicate")
@@ -119,7 +132,7 @@ async def test_replicate_now_queues_a_run_rather_than_uploading(client, session,
 async def test_two_presses_do_not_become_two_uploads(client, session, signed_in):
     """With versioning on and no delete permission, a duplicate object version
     is permanent."""
-    await signed_in()
+    await as_administrator(session, signed_in)
     await configure(session)
 
     assert (await client.post("/api/offsite/replicate")).status_code == 200
@@ -131,9 +144,11 @@ async def test_two_presses_do_not_become_two_uploads(client, session, signed_in)
     assert count == 1
 
 
-async def test_replicate_now_is_refused_when_nothing_is_configured(client, signed_in):
+async def test_replicate_now_is_refused_when_nothing_is_configured(
+    client, session, signed_in
+):
     """And names what is missing, rather than queueing a run that would fail."""
-    await signed_in()
+    await as_administrator(session, signed_in)
     response = await client.post("/api/offsite/replicate")
     assert response.status_code == 409
     assert "not configured" in response.text
@@ -143,7 +158,7 @@ async def test_replicate_now_is_refused_when_nothing_is_configured(client, signe
 async def test_the_request_is_audited(client, session, signed_in):
     from api.db.models import AuditEvent
 
-    user, _ = await signed_in()
+    user, _ = await as_administrator(session, signed_in)
     await configure(session)
     await client.post("/api/offsite/replicate")
 
@@ -160,7 +175,7 @@ async def test_the_request_is_audited(client, session, signed_in):
 
 
 async def test_a_weekly_run_can_be_asked_for_explicitly(client, session, signed_in):
-    await signed_in()
+    await as_administrator(session, signed_in)
     await configure(session)
     assert (await client.post("/api/offsite/replicate?kind=weekly")).status_code == 200
     run = (await session.execute(sa.select(OffsiteRun))).scalars().one()
@@ -168,7 +183,7 @@ async def test_a_weekly_run_can_be_asked_for_explicitly(client, session, signed_
 
 
 async def test_an_unknown_kind_is_refused(client, session, signed_in):
-    await signed_in()
+    await as_administrator(session, signed_in)
     await configure(session)
     assert (await client.post("/api/offsite/replicate?kind=hourly")).status_code == 422
 

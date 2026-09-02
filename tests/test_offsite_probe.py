@@ -195,8 +195,14 @@ async def test_the_probe_writes_under_the_expiring_prefix():
     assert fake.put_calls[0]["Key"].startswith(offsite.PROBE_PREFIX)
 
 
-async def test_the_endpoint_requires_an_owner(client, signed_in):
-    await signed_in()
+async def test_the_endpoint_requires_an_administrator(client, session, signed_in):
+    """It spends money and writes to a bucket only an administrator can name
+    (CR-006), so it is gated with the credentials rather than below them."""
+    user, _ = await signed_in()
+    assert (await client.post("/api/settings/test-offsite")).status_code == 403
+
+    user.is_admin = True
+    await session.commit()
     response = await client.post("/api/settings/test-offsite")
     assert response.status_code == 200
     # Unconfigured in the test database, which is the honest answer.

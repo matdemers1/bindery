@@ -37,6 +37,50 @@ async def _owner_only(session: AsyncSession, user: AppUser) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner access required")
 
 
+def admin_only(user: AppUser) -> None:
+    """The offsite destination is a statement about the host, not about a library.
+
+    `_owner_only` is satisfied by owning *any* library, and every invited
+    account owns its own personal library (`api/accounts.py`) — so it let any
+    household member repoint replication at a bucket they control, and the next
+    run would have shipped the pg_dump, every blob and every vault object there
+    (ADR-010). ADR-009 puts storage and the pipeline with the administrator, and
+    that is exactly what this is.
+
+    Public, and imported by `api/routers/trust.py` for the replicate trigger,
+    so the configuration and the thing it configures are gated by one
+    definition rather than two that can drift apart.
+
+    403 rather than the admin panel's 404: these routes exist for everyone — the
+    model and the API key are still owner-writable, and the replication *status*
+    is readable by any member — so there is nothing to hide by pretending they
+    are missing, and the person needs to know who to ask.
+    """
+    if not user.is_admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Offsite replication is the archive administrator's to configure and run.",
+        )
+
+
+# Written by one rule rather than five near-identical blocks: None leaves alone,
+# empty clears. Module level because both the write loop and the admin gate that
+# guards it have to agree on exactly which fields these are.
+_OFFSITE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("aws_access_key_id", settings_store.AWS_ACCESS_KEY_ID),
+    ("aws_secret_access_key", settings_store.AWS_SECRET_ACCESS_KEY),
+    ("offsite_bucket", settings_store.OFFSITE_BUCKET),
+    ("offsite_region", settings_store.OFFSITE_REGION),
+    ("offsite_kms_key_id", settings_store.OFFSITE_KMS_KEY_ID),
+)
+# The secret is excluded on purpose: the audit records *that* it changed, never
+# a value. The other four are identifiers, and "which bucket was it before" is
+# the question asked after a destination has been swapped.
+_OFFSITE_AUDITED = tuple(
+    (field, key) for field, key in _OFFSITE_FIELDS if field != "aws_secret_access_key"
+)
+
+
 # S3 bucket naming, the subset that matters: 3-63 characters, lowercase
 # alphanumeric plus hyphens and dots, starting and ending alphanumeric.
 _BUCKET = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
@@ -136,6 +180,14 @@ async def update_settings(
     # believes they have broken something.
     _check_offsite(payload)
 
+    before: dict[str, str | None] = {}
+    if any(getattr(payload, field) is not None for field, _ in _OFFSITE_FIELDS):
+        admin_only(user)
+        # Read before the first write, so the audit answers "where was it
+        # pointing before?" — the question a swapped destination raises.
+        for field, setting_key in _OFFSITE_AUDITED:
+            before[field] = await settings_store.get(session, setting_key)
+
     changed: list[str] = []
     if payload.anthropic_api_key is not None:
         # An empty string clears it — that is how you turn classification off
@@ -174,15 +226,9 @@ async def update_settings(
         changed.append("notify_webhook_url")
 
     # The offsite fields take no interpretation, so they are written by the same
-    # rule rather than five near-identical blocks: None leaves alone, empty
-    # clears. Validation already happened above.
-    for field, setting_key in (
-        ("aws_access_key_id", settings_store.AWS_ACCESS_KEY_ID),
-        ("aws_secret_access_key", settings_store.AWS_SECRET_ACCESS_KEY),
-        ("offsite_bucket", settings_store.OFFSITE_BUCKET),
-        ("offsite_region", settings_store.OFFSITE_REGION),
-        ("offsite_kms_key_id", settings_store.OFFSITE_KMS_KEY_ID),
-    ):
+    # rule (see `_OFFSITE_FIELDS`). Validation and the admin gate already
+    # happened above.
+    for field, setting_key in _OFFSITE_FIELDS:
         value = getattr(payload, field)
         if value is not None:
             await settings_store.set_(
@@ -199,6 +245,7 @@ async def update_settings(
             action="update_settings",
             actor_type=ActorType.HUMAN,
             actor_id=user.id,
+            before=before or None,
             after={"changed": changed},
         )
         await events.publish(session, events.Topic.SETTINGS)
@@ -262,10 +309,12 @@ async def test_offsite(
     separate permissions — PutObject, kms:GenerateDataKey, GetObject,
     kms:Decrypt — and they fail independently.
 
-    Owner-only, like every other write on this screen: it costs money, however
-    little, and it writes to the bucket.
+    Administrator-only, like every other action on this panel: it spends money,
+    however little, and it writes to the bucket whose credentials only an
+    administrator can set.
     """
     await _owner_only(session, user)
+    admin_only(user)
     result = await offsite.probe(await offsite.config_from_settings(session))
     return OffsiteTestOut(
         ok=result.ok,

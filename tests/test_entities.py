@@ -215,6 +215,79 @@ async def test_merging_a_correspondent_into_itself_is_refused(
 
 
 # --------------------------------------------------------------------------
+# Merge across the library boundary (ADR-005)
+# --------------------------------------------------------------------------
+
+
+async def test_a_correspondent_id_is_not_a_capability_across_libraries(
+    client, session, two_correspondents, signed_in
+) -> None:
+    """An id seen once — in an export, an audit blob, a URL — must not stay
+    usable after the membership that showed it has gone. 404, never 403: a 403
+    would confirm the record exists, which is the whole answer a probe wants."""
+    _, documents, a, b = two_correspondents
+    await client.post("/api/auth/logout")
+    await signed_in(library_name="Someone Else")
+
+    preview = await client.post("/api/correspondents/merge/preview",
+                                json={"source_id": str(a.id), "target_id": str(b.id)})
+    assert preview.status_code == 404
+    assert documents[0].title not in preview.text, "a preview lists document titles"
+
+    merge = await client.post("/api/correspondents/merge",
+                              json={"source_id": str(a.id), "target_id": str(b.id)})
+    assert merge.status_code == 404
+
+    await session.refresh(a)
+    assert a.merged_at is None, "another library's taxonomy is untouched"
+
+
+async def test_a_tag_id_is_not_a_capability_across_libraries(
+    client, session, library_with_documents, signed_in
+) -> None:
+    library, _ = library_with_documents
+    old = Tag(library_id=library.id, name="reciept", slug=f"r-{uuid.uuid4().hex[:6]}")
+    new = Tag(library_id=library.id, name="receipt", slug=f"n-{uuid.uuid4().hex[:6]}")
+    session.add_all([old, new])
+    await session.commit()
+
+    await client.post("/api/auth/logout")
+    await signed_in(library_name="Someone Else")
+
+    response = await client.post("/api/tags/merge",
+                                 json={"source_id": str(old.id), "target_id": str(new.id)})
+    assert response.status_code == 404
+
+    await session.refresh(old)
+    assert old.merged_at is None
+
+
+async def test_an_operation_id_is_not_a_capability_across_libraries(
+    client, session, two_correspondents, signed_in
+) -> None:
+    """Undo rewrites the same rows the merge did, so it needs the same boundary."""
+    _, _, a, b = two_correspondents
+    operation = (await client.post("/api/correspondents/merge", json={
+        "source_id": str(a.id), "target_id": str(b.id)
+    })).json()["operation_id"]
+
+    await client.post("/api/auth/logout")
+    await signed_in(library_name="Someone Else")
+
+    assert (await client.post(f"/api/merges/{operation}/undo")).status_code == 404
+
+    await session.refresh(a)
+    assert a.merged_into_id == b.id, "the merge still stands"
+    still = (
+        await session.execute(
+            sa.select(sa.func.count()).select_from(Document)
+            .where(Document.correspondent_id == b.id)
+        )
+    ).scalar_one()
+    assert still == 6
+
+
+# --------------------------------------------------------------------------
 # Tag merge (T-5.5, REQ-076)
 # --------------------------------------------------------------------------
 
