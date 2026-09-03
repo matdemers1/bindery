@@ -172,6 +172,31 @@ async def test_a_queued_classification_elsewhere_does_not_stop_the_sweep(
     assert docs["done.jpg"].vaulted_by == user_id
 
 
+async def test_the_import_screen_polling_is_not_activity(client, session, bound_import):
+    """The same defect as the sweep's, one layer up and easier to hit.
+
+    `ImportPage` refetches the session every five seconds while a vault-bound
+    import is still sealing, and that route reported whether the vault was
+    open. Reading it through a *touching* check meant an open browser tab held
+    the vault unlocked for as long as it stayed open — so ADR-012's fifteen
+    minutes became "until somebody closes the tab", on the one screen a person
+    is most likely to leave up while an import runs.
+    """
+    user, _vault, import_session, _docs = bound_import
+
+    held = sessions._by_user[user.id]
+    held.touched_at = datetime.now(UTC) - timedelta(minutes=14)
+    idle_since = held.touched_at
+
+    response = await client.get(f"/api/imports/{import_session.id}")
+    assert response.status_code == 200, response.text
+    assert response.json()["vault_unlocked"] is True, "the status must still be correct"
+
+    assert sessions._by_user[user.id].touched_at == idle_since, (
+        "polling the import screen counted as using the vault, so it never closes"
+    )
+
+
 async def test_a_sweep_tick_is_not_activity(session, bound_import):
     """ADR-012's idle timeout has to survive the sweep that reads it.
 

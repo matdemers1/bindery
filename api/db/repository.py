@@ -231,6 +231,48 @@ async def list_pages(
     return result.scalars().all()
 
 
+async def list_page_summaries(
+    session: AsyncSession, user_id: uuid.UUID, source_file_id: uuid.UUID
+) -> Sequence[sa.Row]:
+    """Every page of a file, as the three scalars a page list draws.
+
+    `list_pages_in_range`'s whole-file sibling. The file detail screen renders
+    `PageOut` — `{page_number, render_path, thumb_path}` — and was loading the
+    entity for it, so opening a 300-page bundle's detail view carried that
+    bundle's entire OCR text and its persisted `text_tsv` to build a thumbnail
+    strip. Same defect as the document view had, one route along.
+    """
+    bound = await scope_for(session, user_id)
+    if not bound.visible:
+        return []
+    result = await session.execute(
+        sa.select(Page.page_number, Page.render_path, Page.thumb_path)
+        .where(bound.only(Page), Page.source_file_id == source_file_id)
+        .order_by(Page.page_number)
+    )
+    return result.all()
+
+
+async def list_page_text(
+    session: AsyncSession, user_id: uuid.UUID, source_file_id: uuid.UUID
+) -> Sequence[sa.Row]:
+    """Every page's text, without the tsvector beside it.
+
+    `GET /files/{id}/text` needs `text` and genuinely cannot avoid it — but it
+    has no use for `text_tsv`, which is roughly the same size again and was
+    coming along for the ride on every read of a large bundle.
+    """
+    bound = await scope_for(session, user_id)
+    if not bound.visible:
+        return []
+    result = await session.execute(
+        sa.select(Page.page_number, Page.text)
+        .where(bound.only(Page), Page.source_file_id == source_file_id)
+        .order_by(Page.page_number)
+    )
+    return result.all()
+
+
 async def list_pages_in_range(
     session: AsyncSession,
     user_id: uuid.UUID,

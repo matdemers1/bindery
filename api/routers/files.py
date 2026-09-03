@@ -102,7 +102,7 @@ async def get_file(
     source_file = await repository.get_source_file(session, user.id, source_file_id)
     if source_file is None:
         raise _NOT_FOUND
-    pages = await repository.list_pages(session, user.id, source_file_id)
+    pages = await repository.list_page_summaries(session, user.id, source_file_id)
     return SourceFileDetailOut(
         source_file=SourceFileOut.model_validate(source_file),
         pages=[PageOut.model_validate(page) for page in pages],
@@ -275,7 +275,7 @@ async def ocr_text(
     if source_file is None:
         raise _NOT_FOUND
 
-    pages = await repository.list_pages(session, user.id, source_file_id)
+    pages = await repository.list_page_text(session, user.id, source_file_id)
     entries = [
         OcrPageTextOut(
             page_number=page.page_number,

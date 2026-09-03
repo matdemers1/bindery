@@ -111,8 +111,12 @@ class Sessions:
     def is_unlocked(self, user_id: uuid.UUID) -> bool:
         """Asked on a person's behalf, so it counts as use, like `key`.
 
-        Every caller of this is inside a request that person made. A background
-        reader must use `peek`, or its own polling keeps the vault open.
+        A background reader must use `peek`, or its own polling keeps the vault
+        open. So must a request handler a screen *polls* — this docstring used
+        to claim every caller was a person's own action, and the Import status
+        route disproved it on a five-second timer. The test is whether the read
+        happens because somebody did something, not whether it is inside a
+        request.
         """
         return self.key(user_id) is not None
 

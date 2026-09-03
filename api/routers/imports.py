@@ -125,8 +125,15 @@ async def _out(
         to_vault=import_session.to_vault,
         vaulted=vaulted,
         awaiting_vault=awaiting,
+        # `peek`, not `is_unlocked`: the Import screen polls this route every
+        # five seconds while a vault-bound import is still sealing, so a
+        # touching read here meant an open tab held the vault unlocked
+        # indefinitely — ADR-012's fifteen minutes became "until the browser
+        # closes", for exactly the screen most likely to be left open.
+        # Reporting that the vault is open is not using it.
         vault_unlocked=bool(
-            import_session.created_by and vault_sessions.is_unlocked(import_session.created_by)
+            import_session.created_by
+            and vault_sessions.peek(import_session.created_by) is not None
         ),
     )
 
