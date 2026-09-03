@@ -301,16 +301,34 @@ jobs:
         # failure pointing at the wrong subsystem — or passed, on an archive
         # whose pipeline never ran. The summary below used to be printed and
         # never read; now it is asserted on.
+        #
+        # `classify` is excluded, and that is not a loophole. There is no
+        # ANTHROPIC_API_KEY in CI and there never will be — retrieval must not
+        # depend on the Claude API (invariant 7), so a classify job with no
+        # provider retries forever *without counting an attempt*, by design
+        # (REQ-055). It is permanently `queued` and draining is not a state it
+        # can reach. Asserting otherwise made this gate demand a condition the
+        # architecture forbids, which is how it failed on its first real run.
+        # What can still be caught is a classify job that *failed* rather than
+        # deferred: the unexpected-failures check below covers every stage.
         run: |
           drained=
           for i in $(seq 1 60); do
             pending=$(docker compose --env-file .env -f infra/docker-compose.yml \
               exec -T postgres psql -U bindery -d bindery -tAc \
-              "select count(*) from job where state in ('queued','running')" | tr -d '[:space:]')
+              "select count(*) from job
+                where state in ('queued','running') and stage <> 'classify'" | tr -d '[:space:]')
             echo "  in flight: $pending"
             if [ "$pending" = "0" ]; then drained=yes; break; fi
             sleep 5
           done
+          # Said out loud rather than left implicit, so a reader of this log can
+          # see the deferral is expected and how much of it there is.
+          deferred=$(docker compose --env-file .env -f infra/docker-compose.yml \
+            exec -T postgres psql -U bindery -d bindery -tAc \
+            "select count(*) from job
+              where state = 'queued' and stage = 'classify'" | tr -d '[:space:]')
+          echo "  classify deferred, waiting on a provider that CI does not have: $deferred"
           docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
             psql -U bindery -d bindery -c \
             "select state, count(*) from job group by state order by 1;"
