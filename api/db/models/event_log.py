@@ -38,12 +38,29 @@ class EventLog(Base):
     somebody typed. An unbound line is now shown to the person who caused it,
     or, when nothing caused it, only if its logger is on the operational
     allowlist (REQ-144).
+
+    **This table is deliberately never pruned**, and that is a decision with a
+    cost attached: rows accumulate for the life of the deployment — seven
+    stages over a twenty-thousand-file backlog is ~280K of them from the
+    start/finish lines alone — while the log viewer's search is
+    `message ILIKE '%q%'`, which no ordinary index can serve. The answer is the
+    trigram index below, not a scheduled delete: invariant 3 governs documents
+    and originals, but a job that removes rows on a timer is the one shape of
+    unattended destruction this codebase does not have, and diagnostics are not
+    worth introducing it for.
     """
 
     __tablename__ = "event_log"
     __table_args__ = (
         sa.Index("ix_event_log_source_file", "source_file_id", "sequence"),
         sa.Index("ix_event_log_level", "level", "sequence"),
+        # The log viewer's `q`. `pg_trgm` is installed by migration 0001.
+        sa.Index(
+            "ix_event_log_message_trgm",
+            "message",
+            postgresql_using="gin",
+            postgresql_ops={"message": "gin_trgm_ops"},
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()

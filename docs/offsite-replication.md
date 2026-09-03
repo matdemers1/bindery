@@ -78,6 +78,15 @@ exists. Guarded two ways, because they catch different mistakes:
 make lifecycle-check   # audits the LIVE bucket; non-zero on any finding
 ```
 
+The worker also runs that audit on its own, hourly, from the same loop that
+drives replication — it already holds the client and the credentials, and it is
+one signed API call. A rule that would delete something meant to be kept raises a
+`critical` alert, which leaves the building through the notifier; a credential
+that cannot read the lifecycle configuration raises a `warning`, because a check
+that examines nothing and reports nothing wrong is the shape of every silent
+monitoring failure. Until then this audit had one caller, and it was a human
+typing the command above (CR-099).
+
 The test suite audits `infra/aws/lifecycle.json`, which is what gets deployed —
 that catches a bad rule at the moment it is written. `make lifecycle-check`
 audits what the bucket actually has, which is a different question the moment

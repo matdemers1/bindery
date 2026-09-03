@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { Check, Plus, Undo2, X } from "lucide-react";
 
 import {
@@ -7,6 +7,7 @@ import {
   type DocumentEdit,
   type TaxonomyOption,
 } from "../../api";
+import { useLiveQuery } from "../../live/LiveProvider";
 import MetadataPanel from "../media/MetadataPanel";
 import SourceBadge from "./SourceBadge";
 
@@ -76,12 +77,10 @@ export default function EditPanel({
     setTagOptions(tags);
   }, []);
 
-  useEffect(() => {
-    // Three list endpoints: the pickers genuinely are not available at first
-    // render, and the form is useless without them.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadOptions();
-  }, [loadOptions]);
+  // No topics: these are the pickers' contents, read once when the form opens.
+  // A correspondent appearing while you are mid-edit is not worth a refetch,
+  // and the field you are typing in is the one it would fight with.
+  useLiveQuery([], loadOptions);
 
   /** Omitted means "leave it alone"; null means "clear it". */
   function changed(): DocumentEdit {

@@ -13,7 +13,7 @@ on:
   schedule:
     - cron: "17 5 * * 1"
 
-# Four gates, in order, and nothing is published until all four pass.
+# Five gates, in order, and nothing is published until all five pass.
 #
 #   lint  →  unit  →  integration  →  e2e  →  images
 #
@@ -63,6 +63,30 @@ jobs:
           pip install -c requirements.lock -r requirements.txt
       - name: ruff
         run: ruff check api worker tests
+      - name: api contract
+        # The wire contract is written twice by hand: 123 Pydantic models in
+        # api/schemas.py and 96 TypeScript interfaces mirroring them in
+        # web/src/api.ts. `tsc --noEmit` below proves the client agrees with
+        # itself, not that it agrees with the server, so a renamed or narrowed
+        # response field used to pass all four gates and arrive in the browser as
+        # `undefined` on whichever screen the e2e specs happen not to assert on.
+        #
+        # Here rather than in the unit gate because it is the cheapest check in
+        # the pipeline — two files parsed on disk, no app, no database — and this
+        # is the gate the sequencing argument above exists for (CR-059).
+        run: python scripts/check_api_contract.py
+      - name: mypy
+        # Not a clean run: a ratchet against scripts/mypy-baseline.json. The
+        # posture and the reason for it are in CLAUDE.md's Conventions section —
+        # the defect (CR-089) was that mypy was a declared dev dependency with no
+        # configuration, no invocation and nothing anywhere saying whether that
+        # was deliberate.
+        #
+        # mypy's answer depends on which packages are installed, so this must
+        # keep running with the base + `dev` groups and no `worker` extra, which
+        # is what the step above installs and what the compose `test` service
+        # carries. Any other environment and the diff is the environment.
+        run: python scripts/typecheck.py
       - name: pip-audit
         # The whole locked closure, including the worker extra that this runner
         # does not install — the shipped images do, and this is the gate that

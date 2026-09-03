@@ -1,7 +1,7 @@
 import { ShieldCheck } from "lucide-react";
 
 import PageHeader from "../../components/PageHeader";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router";
 
 import { useLiveQuery } from "../../live/LiveProvider";
@@ -355,17 +355,15 @@ function OffsitePanel() {
     () => api.offsiteStatus().then(setStatus).catch(() => {}),
     [],
   );
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // While a run is queued or in flight the worker owns it, so the only way to
-  // learn it finished is to ask again.
-  useEffect(() => {
-    if (!status?.in_flight) return;
-    const timer = setInterval(() => void load(), 5000);
-    return () => clearInterval(timer);
-  }, [status?.in_flight, load]);
+  // A replication run is the worker's the moment it is queued, and the worker
+  // announces it to nobody: `Topic` has files, jobs, review, documents, logs
+  // and settings, and a run is none of those — it is not a job, so the job
+  // runner's `_announce` never fires for it. So asking again really is the
+  // only way to learn a run finished, and the honest place to say that is the
+  // seam, which owns the timer, rather than a `setInterval` on this screen.
+  // The moment the server grows a topic for replication this becomes
+  // `useLiveQuery(["trust"], load)` and the escape hatch goes.
+  useLiveQuery([], load, { unannouncedMs: status?.in_flight ? 5000 : null });
 
   async function replicate() {
     setBusy(true);
@@ -519,12 +517,11 @@ function AuditPanel() {
     [actorType, entityId, since],
   );
 
-  useEffect(() => {
-    // An async data load: the state is genuinely unavailable on the first
-    // render, so the extra pass is the point rather than a mistake.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
+  // No topics: the audit log is a record you come here to read, and a page
+  // that reshuffled under you while you were reading it would be worse than
+  // one that is a few seconds old. `key` is the filter, so changing who or
+  // what you are asking about does fetch the first page again.
+  useLiveQuery([], load, { key: `${actorType} ${entityId} ${since}` });
 
   return (
     <div className="space-y-3">

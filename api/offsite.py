@@ -20,9 +20,10 @@ import logging
 import secrets
 import tempfile
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -31,6 +32,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import settings_store
 from api.db.models import OffsiteObject
 from api.version import build_of_this_process
+
+if TYPE_CHECKING:
+    # Only for the annotation on `lifecycle_alerts`. At runtime the import stays
+    # inside the function: `api.health_panel` reaches back into this module, and
+    # a module-level import here would close the loop.
+    from api.health_panel import Alert
 
 log = logging.getLogger("bindery.offsite")
 
@@ -1122,7 +1129,28 @@ def _expires_objects(rule: dict) -> bool:
     return bool(rule.get("NoncurrentVersionExpiration"))
 
 
+@dataclass(frozen=True)
+class LifecycleFinding:
+    """One thing wrong with the bucket's rules, and how alarming it is.
+
+    Severity is not decoration. `critical` means a rule would *remove* something
+    that has no second copy — the blob pool, or a sealed vault object — and that
+    is the one offsite failure mode ADR-010 says Bindery could never notice on
+    its own, because it holds no delete permission and would not be the one
+    doing it. `warning` means something would accumulate forever instead: a bill
+    and an untidy bucket, not a lost archive.
+    """
+
+    severity: str  # "warning" | "critical"
+    message: str
+
+
 def audit_lifecycle(rules: list[dict]) -> list[str]:
+    """The findings as sentences — the CLI's shape, and every existing caller's."""
+    return [finding.message for finding in audit_lifecycle_detailed(rules)]
+
+
+def audit_lifecycle_detailed(rules: list[dict]) -> list[LifecycleFinding]:
     """Findings, empty when the rules are safe (REQ-166).
 
     Two failures are being defended against, and the first is catastrophic:
@@ -1138,15 +1166,18 @@ def audit_lifecycle(rules: list[dict]) -> list[str]:
     check is against what is actually stored rather than against what the rules
     look like.
     """
-    findings: list[str] = []
+    findings: list[LifecycleFinding] = []
 
     for rule in rules:
         if not _expires_objects(rule):
             continue
         if not _rule_prefix(rule):
             findings.append(
-                f"lifecycle rule {rule.get('ID', '(unnamed)')!r} expires objects with no "
-                "prefix filter — it would delete the blob pool, which is the archive"
+                LifecycleFinding(
+                    "critical",
+                    f"lifecycle rule {rule.get('ID', '(unnamed)')!r} expires objects with no "
+                    "prefix filter — it would delete the blob pool, which is the archive",
+                )
             )
 
     for name, key in sample_keys().items():
@@ -1158,13 +1189,19 @@ def audit_lifecycle(rules: list[dict]) -> list[str]:
         expected = EXPECTED_EXPIRY[name]
         if expected is None and matched:
             findings.append(
-                f"{name} objects ({key}) would be expired by {matched} — they are "
-                "meant to be kept"
+                LifecycleFinding(
+                    "critical",
+                    f"{name} objects ({key}) would be expired by {matched} — they are "
+                    "meant to be kept",
+                )
             )
         elif expected is not None and expected not in matched:
             findings.append(
-                f"{name} objects ({key}) are not covered by {expected!r} "
-                f"(matched: {matched or 'nothing'}) — they would never be rotated"
+                LifecycleFinding(
+                    "warning",
+                    f"{name} objects ({key}) are not covered by {expected!r} "
+                    f"(matched: {matched or 'nothing'}) — they would never be rotated",
+                )
             )
     return findings
 
@@ -1182,6 +1219,115 @@ def live_lifecycle_rules(client, config: Config) -> list[dict]:
             # reporting "nothing wrong" would be the wrong answer.
             return []
         raise
+
+
+# How often the worker re-reads the bucket's rules. The rules change when a human
+# changes them in a console, which is rare and never urgent to the minute — and
+# it is one signed API call, so the cost of being wrong in either direction is
+# small. Hourly is frequent enough that a rule added in the morning is alarming
+# by lunchtime.
+LIFECYCLE_AUDIT_INTERVAL = timedelta(hours=1)
+
+
+@dataclass(frozen=True)
+class LifecycleAudit:
+    """What the last look at the live bucket found.
+
+    `unreadable` is its own state rather than an empty finding list, because
+    "the credential cannot read the lifecycle configuration" and "the lifecycle
+    configuration is fine" are the two answers that must never be confused. The
+    first is the shape of every silent monitoring failure: a check that examines
+    nothing and reports nothing wrong.
+    """
+
+    checked_at: datetime
+    findings: tuple[LifecycleFinding, ...] = ()
+    unreadable: str | None = None
+
+    @property
+    def worst(self) -> str | None:
+        if self.unreadable is not None:
+            return "warning"
+        for severity in ("critical", "warning"):
+            if any(finding.severity == severity for finding in self.findings):
+                return severity
+        return None
+
+
+def check_lifecycle(client, config: Config) -> LifecycleAudit:
+    """Read the live rules and judge them. Blocking — call it in a thread.
+
+    Never raises for an S3 answer. A bucket policy that withholds
+    `GetLifecycleConfiguration` is a thing to report, not a stack trace in the
+    replication loop, and it must not be able to stop a run happening.
+    """
+    from botocore.exceptions import ClientError
+
+    now = datetime.now(UTC)
+    try:
+        rules = live_lifecycle_rules(client, config)
+    except ClientError as error:
+        code = error.response.get("Error", {}).get("Code", "") or type(error).__name__
+        return LifecycleAudit(now, unreadable=code)
+    return LifecycleAudit(now, tuple(audit_lifecycle_detailed(rules)))
+
+
+def lifecycle_alerts(audit: LifecycleAudit | None) -> "list[Alert]":
+    """The audit as health alerts (R-21, REQ-166, REQ-110).
+
+    This is the whole point of the exercise. The audit existed as
+    `python -m api.cli lifecycle-check` and nothing else — a command someone had
+    to remember to type, with no record of when it was last run — guarding the
+    one failure ADR-010 identifies as able to erase the offsite archive without
+    producing an error anywhere. Every other resilience signal in this system was
+    deliberately moved onto the panel and through the notifier for exactly this
+    reason: a screen only helps someone who opens it, and a command only helps
+    someone who remembers it.
+
+    `critical` so it leaves the building — `Notifier.dispatch` sends only those —
+    and one alert per severity rather than one per finding, so a badly written
+    rule set pages once and says how many things it broke.
+    """
+    from api.health_panel import Alert
+
+    if audit is None:
+        return []
+    if audit.unreadable is not None:
+        return [
+            Alert(
+                "warning",
+                "offsite_lifecycle_unreadable",
+                "The offsite credential cannot read the bucket's lifecycle rules "
+                f"({audit.unreadable}), so nothing is checking whether a rule "
+                "would delete the archive.",
+                {"error": audit.unreadable},
+            )
+        ]
+
+    alerts = []
+    critical = [f.message for f in audit.findings if f.severity == "critical"]
+    warning = [f.message for f in audit.findings if f.severity == "warning"]
+    if critical:
+        alerts.append(
+            Alert(
+                "critical",
+                "offsite_lifecycle_deletes",
+                "A lifecycle rule on the offsite bucket would delete objects that "
+                f"are meant to be kept: {critical[0]}",
+                {"findings": critical},
+            )
+        )
+    if warning:
+        alerts.append(
+            Alert(
+                "warning",
+                "offsite_lifecycle_rotation",
+                f"The offsite bucket's rotation rules do not match what this build "
+                f"writes: {warning[0]}",
+                {"findings": warning},
+            )
+        )
+    return alerts
 
 
 # ---------------------------------------------------------------------------

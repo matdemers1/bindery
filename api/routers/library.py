@@ -208,61 +208,62 @@ async def browse(
 
 
 async def _stats(session: AsyncSession, bound: Scope) -> ArchiveStatsOut:
-    documents = (
-        await session.execute(
-            sa.select(sa.func.count()).select_from(Document)
-            .where(bound.only(Document), live())
-        )
-    ).scalar_one()
-    # The file and page totals had the library filter and no vault filter, so a
-    # vaulted file was hidden from every list on this screen and still counted
-    # in the header above them. `only(SourceFile)` is both halves at once.
-    files = (
-        await session.execute(
-            sa.select(sa.func.count()).select_from(SourceFile).where(bound.only(SourceFile))
-        )
-    ).scalar_one()
-    pages = (
-        await session.execute(
-            sa.select(sa.func.coalesce(sa.func.sum(SourceFile.page_count), 0))
-            .select_from(SourceFile)
-            .where(bound.only(SourceFile))
-        )
-    ).scalar_one()
+    """The header line: one round trip, one scan of each table.
+
+    This was six independent statements — four full counts of `document` and
+    two of `source_file` — and none of them depends on `q`, the facets, the
+    sort, the limit or the offset. They are the same six numbers on every
+    keystroke and every pagination click, and at 100K documents each one is a
+    heap-touching scan, because `live()` and the vault clause are row
+    predicates no index-only scan can answer.
+
+    Four questions about `document` are one scan with `count(*) FILTER`. The
+    two about `source_file` are another. `ON true` rather than a comma so the
+    cross join of two one-row aggregates is stated rather than inferred.
+    """
     # Counted separately, because they go to different places. The header used
     # to add them together and link the total to the daily queue — which
     # excludes backlog — so it advertised 408 documents awaiting review and
     # sent you to an empty screen.
-    needs_review = (
+    awaiting = Document.review_state == ReviewState.NEEDS_REVIEW.value
+    document_totals = (
+        sa.select(
+            sa.func.count().label("documents"),
+            sa.func.count().filter(awaiting, Document.is_backlog.is_(False))
+            .label("needs_review"),
+            sa.func.count().filter(awaiting, Document.is_backlog.is_(True))
+            .label("backlog_pending"),
+            sa.func.count()
+            .filter(Document.review_state == ReviewState.PENDING_CLASSIFICATION.value)
+            .label("unclassified"),
+        )
+        .select_from(Document)
+        .where(bound.only(Document), live())
+        .subquery("document_totals")
+    )
+    # The file and page totals had the library filter and no vault filter, so a
+    # vaulted file was hidden from every list on this screen and still counted
+    # in the header above them. `only(SourceFile)` is both halves at once.
+    file_totals = (
+        sa.select(
+            sa.func.count().label("files"),
+            sa.func.coalesce(sa.func.sum(SourceFile.page_count), 0).label("pages"),
+        )
+        .select_from(SourceFile)
+        .where(bound.only(SourceFile))
+        .subquery("file_totals")
+    )
+    row = (
         await session.execute(
-            sa.select(sa.func.count()).select_from(Document).where(
-                bound.only(Document), live(),
-                Document.review_state == ReviewState.NEEDS_REVIEW.value,
-                Document.is_backlog.is_(False),
+            sa.select(document_totals, file_totals).select_from(
+                document_totals.join(file_totals, sa.true())
             )
         )
-    ).scalar_one()
-    backlog_pending = (
-        await session.execute(
-            sa.select(sa.func.count()).select_from(Document).where(
-                bound.only(Document), live(),
-                Document.review_state == ReviewState.NEEDS_REVIEW.value,
-                Document.is_backlog.is_(True),
-            )
-        )
-    ).scalar_one()
-    unclassified = (
-        await session.execute(
-            sa.select(sa.func.count()).select_from(Document).where(
-                bound.only(Document), live(),
-                Document.review_state == ReviewState.PENDING_CLASSIFICATION.value,
-            )
-        )
-    ).scalar_one()
+    ).one()
     return ArchiveStatsOut(
-        documents=documents, files=files, pages=int(pages or 0),
-        needs_review=needs_review, backlog_pending=backlog_pending,
-        unclassified=unclassified,
+        documents=row.documents, files=row.files, pages=int(row.pages or 0),
+        needs_review=row.needs_review, backlog_pending=row.backlog_pending,
+        unclassified=row.unclassified,
     )
 
 

@@ -354,14 +354,21 @@ async def _health_monitor(stopping: asyncio.Event) -> None:
             #
             # One call, not one per alert, so the notifier's cooldown state is
             # still only ever touched from a single thread at a time.
-            deliveries = await asyncio.to_thread(notifier.dispatch, panel.alerts)
+            # The panel's own alerts plus the lifecycle audit's. The audit is
+            # driven by the replication loop, which has the client and the
+            # credentials; this is the pass that already owns the notifier and
+            # its cooldown state, so there is still exactly one path out of the
+            # building rather than two things to keep in step.
+            alerts = [*panel.alerts, *offsite.lifecycle_alerts(_lifecycle_audit)]
+
+            deliveries = await asyncio.to_thread(notifier.dispatch, alerts)
             for delivery in deliveries:
                 if delivery.sent:
                     log.warning("notified: %s", delivery.code)
                 elif delivery.reason not in ("within cooldown", "no webhook configured"):
                     log.error("could not notify %s: %s", delivery.code, delivery.reason)
 
-            for alert in panel.alerts:
+            for alert in alerts:
                 log.log(
                     logging.ERROR if alert.severity == "critical" else logging.WARNING,
                     "health: %s", alert.message,
@@ -387,6 +394,64 @@ def _report_unexpected_exit(task: asyncio.Task) -> None:
     else:
         log.warning("worker task %s exited", task.get_name())
 
+
+
+# The most recent look at the offsite bucket's lifecycle rules (T-13.9, REQ-166,
+# R-21). Deliberately in memory and not in a table: it is re-derived from the
+# bucket itself every hour, so a restart costs an hour of staleness, while a
+# stored copy is a row that can disagree with the thing it describes — and the
+# whole failure being guarded against is a rule that is true of the bucket and
+# not of anything Bindery holds.
+_lifecycle_audit: offsite.LifecycleAudit | None = None
+
+
+async def _refresh_lifecycle_audit() -> None:
+    """Re-read the bucket's expiry rules, at most hourly.
+
+    ADR-010 names a bucket-wide expiry rule as able to delete the blob prefix —
+    the actual archive — "with no error, no alert, and no way for Bindery to
+    notice, because Bindery has no delete permission and would not be the one
+    doing it". Until this ran, the only thing that would have noticed was a human
+    remembering to type `make lifecycle-check` (CR-099).
+
+    It reports; it never acts. Bindery must never delete an S3 object — expiry is
+    performed by S3 lifecycle rules and by nothing else (invariant 3, ADR-010).
+    """
+    global _lifecycle_audit
+
+    if (
+        _lifecycle_audit is not None
+        and datetime.now(UTC) - _lifecycle_audit.checked_at
+        < offsite.LIFECYCLE_AUDIT_INTERVAL
+    ):
+        return
+
+    async with SessionFactory() as session:
+        config = await offsite.config_from_settings(session)
+    if not config.complete:
+        # Nothing to audit, and no alert either: `_offsite_alerts` already says
+        # "no offsite copy is configured", and a second sentence about the
+        # lifecycle rules of a bucket that does not exist is noise.
+        _lifecycle_audit = None
+        return
+
+    # Both blocking: botocore loads its service model off disk, and the audit is
+    # a signed HTTP round trip. This loop is shared with three OCR slots, the
+    # reclaimer and the inbox watcher.
+    client = await asyncio.to_thread(offsite.make_client, config)
+    _lifecycle_audit = await asyncio.to_thread(offsite.check_lifecycle, client, config)
+
+    if _lifecycle_audit.unreadable is not None:
+        log.warning(
+            "cannot read the offsite bucket's lifecycle rules (%s) — nothing is "
+            "checking whether a rule would delete the archive",
+            _lifecycle_audit.unreadable,
+        )
+    for finding in _lifecycle_audit.findings:
+        log.log(
+            logging.ERROR if finding.severity == "critical" else logging.WARNING,
+            "offsite lifecycle: %s", finding.message,
+        )
 
 
 async def _offsite_replication(stopping: asyncio.Event) -> None:
@@ -479,6 +544,17 @@ async def _offsite_replication(stopping: asyncio.Event) -> None:
             pass
         except Exception:
             log.exception("offsite replication pass failed")
+
+        # Outside every branch above, deliberately. The audit has to happen
+        # whether or not a run was due — and a bucket nothing is replicating to
+        # this week is precisely the one a stray expiry rule empties unnoticed.
+        # It has its own try because a lifecycle rule Bindery cannot read must
+        # never be able to stop a copy leaving the building.
+        try:
+            await _refresh_lifecycle_audit()
+        except Exception:
+            log.exception("offsite lifecycle audit failed")
+
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stopping.wait(), timeout=OFFSITE_INTERVAL_SECONDS)
 

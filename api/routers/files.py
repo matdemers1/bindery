@@ -52,7 +52,9 @@ _NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, "not found")
 # Keyed on the artifact's identity *and* its mtime and size, so a re-run of
 # normalize that rewrites the file invalidates the entry rather than serving
 # yesterday's boxes. Bounded in bytes rather than entries, because the entries
-# differ in size by three orders of magnitude.
+# differ in size by three orders of magnitude — and the bound never evicts the
+# most recent entry, because the bundle large enough to break the budget is the
+# bundle this exists for (see `_remember_page_boxes`).
 _BOXES_CACHE_BYTES = 32 * 1024 * 1024
 _boxes_cache: OrderedDict[tuple[str, int, int], dict[int, bytes]] = OrderedDict()
 _boxes_cache_bytes = 0
@@ -73,16 +75,20 @@ def _remember_page_boxes(key: tuple[str, int, int], pages: dict[int, bytes]) -> 
     global _boxes_cache_bytes
 
     size = sum(len(payload) for payload in pages.values())
-    if size > _BOXES_CACHE_BYTES:
-        # One artifact larger than the whole budget would evict everything and
-        # then itself. Serve it and keep nothing.
-        return
     previous = _boxes_cache.pop(key, None)
     if previous is not None:
         _boxes_cache_bytes -= sum(len(payload) for payload in previous.values())
     _boxes_cache[key] = pages
     _boxes_cache_bytes += size
-    while _boxes_cache_bytes > _BOXES_CACHE_BYTES:
+    # Evict the least recently used until the budget is met — but never the
+    # entry just added. An artifact bigger than the whole budget used to be
+    # served and dropped, which meant the one file this cache exists for, the
+    # 300-page bundle whose boxes run to tens of megabytes, was the one file
+    # that re-read and re-parsed on every page turn. The bound is therefore
+    # "the budget, or one artifact, whichever is larger"; parsing that artifact
+    # already puts a larger object on the heap transiently, so keeping the
+    # compact encoded form raises no high-water mark that the read did not.
+    while _boxes_cache_bytes > _BOXES_CACHE_BYTES and len(_boxes_cache) > 1:
         _, evicted = _boxes_cache.popitem(last=False)
         _boxes_cache_bytes -= sum(len(payload) for payload in evicted.values())
 

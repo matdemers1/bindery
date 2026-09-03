@@ -3,10 +3,18 @@
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: up down build lock logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite e2e lint-web lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel screenshots typecheck
+.PHONY: help up down build lock logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite e2e lint-web typecheck contract lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel screenshots
 
 build:            ## build all images
 	$(COMPOSE) build
+
+# Every target below carrying a `## …` comment is listed by `make help`. The
+# comments were there for eleven phases with nothing rendering them, while the
+# README told the reader this file was twenty lines long and to go and read it
+# (CR-083). Four lines of awk is cheaper than either of those being wrong again.
+help:             ## list every command in this file
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z][a-zA-Z0-9_-]*:.*## / \
+	  {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # `make lock` freezes, it does not resolve. The point of requirements.lock is
 # that what is pinned is what was tested, so this reads versions out of a built
@@ -56,6 +64,19 @@ e2e:              ## end-to-end tests against the running stack (needs `make up`
 
 lint-web:         ## eslint + tsc for the web app
 	cd web && npm run lint && npm run typecheck
+
+# The api and worker are annotated — 95% of functions carry a return type and
+# there is not one `# type: ignore` — and until CR-089 nothing read a line of it.
+# The gate is a ratchet rather than a clean run: see scripts/typecheck.py for
+# why, and CLAUDE.md's Conventions section for the posture this project has
+# actually chosen, which was the part that was missing.
+typecheck:        ## mypy over api/ and worker/, against the checked-in baseline
+	$(COMPOSE) --profile test run --rm --no-deps test python scripts/typecheck.py
+
+# The wire contract is written twice by hand. `tsc --noEmit` proves the client
+# agrees with itself; this is what proves it agrees with api/schemas.py (CR-059).
+contract:         ## check web/src/api.ts against the server's response models
+	$(COMPOSE) --profile test run --rm --no-deps test python scripts/check_api_contract.py
 
 lifecycle-check:  ## audit the offsite bucket's expiry rules (R-21: a bucket-wide rule deletes the archive)
 	$(COMPOSE) exec api python -m api.cli lifecycle-check

@@ -127,10 +127,16 @@ Two things about copy 3 that are easy to get wrong:
   database being enough to attack a six-digit PIN, so the bucket holding the
   dump is the one place it must not live. It is in copy 2. Losing it costs the
   PIN, never data.
-- **`make lifecycle-check` is not optional.** A bucket-wide expiry rule would
+- **The lifecycle audit now runs itself.** A bucket-wide expiry rule would
   delete the blob prefix — the archive itself — with no error and no alert,
   because Bindery has no delete permission and would not be the one doing it
-  (ADR-010, R-21). Run it whenever anyone touches the bucket's configuration.
+  (ADR-010, R-21). The worker's replication loop re-reads the live rules hourly
+  and raises a **critical** alert — which means a notification, not just a line
+  on the Health screen — when a rule would delete something meant to be kept, and
+  a warning when the credential cannot read the rules at all.
+  `make lifecycle-check` is still there and still worth running the moment
+  anyone touches the bucket's configuration, rather than waiting an hour.
+  It **reports**; it never acts. Expiry is performed by S3 and by nothing else.
 
 The offsite copy is encrypted because it is, by definition, somewhere you do not
 control. `verify_encrypted` is cheap and catches the failure that matters: an

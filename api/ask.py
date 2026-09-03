@@ -135,13 +135,17 @@ async def gather_sources(
     it would be quoted back, and sent to Anthropic.
     """
     precise, broad = question_to_query(question)
+    # `facets=False`: Ask throws the breakdown away, and on the broad retry it
+    # would pay for it twice. The count stays exact either way.
     response = await search_query.search(
-        session, precise, library_ids, viewer=viewer, limit=MAX_SOURCE_PAGES
+        session, precise, library_ids, viewer=viewer, limit=MAX_SOURCE_PAGES,
+        facets=False,
     )
     if not response.results and broad != precise:
         log.debug("broadening %r to an OR query", question[:60])
         response = await search_query.search(
-            session, broad, library_ids, viewer=viewer, limit=MAX_SOURCE_PAGES
+            session, broad, library_ids, viewer=viewer, limit=MAX_SOURCE_PAGES,
+            facets=False,
         )
     if not response.results:
         return []

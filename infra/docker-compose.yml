@@ -179,6 +179,13 @@ services:
       # baked into this image would report on a repository that no longer
       # exists.
       - ../requirements.lock:/app/requirements.lock:ro
+      # `test_readme.py` parses the Makefile and the workflow and checks the
+      # README against them, so all three have to be *this* tree. Baked copies
+      # would let the suite go green on a README that has already drifted —
+      # which is the whole failure that guard exists to catch.
+      - ../README.md:/app/README.md:ro
+      - ../Makefile:/app/Makefile:ro
+      - ../CLAUDE.md:/app/CLAUDE.md:ro
       # test_trust_and_export.py asserts on the restore drill's own contents.
       - ../scripts:/app/scripts:ro
       # The operator runbooks. `test_operability.py` asserts they no longer
@@ -242,6 +249,13 @@ services:
       # baked into this image would report on a repository that no longer
       # exists.
       - ../requirements.lock:/app/requirements.lock:ro
+      # `test_readme.py` parses the Makefile and the workflow and checks the
+      # README against them, so all three have to be *this* tree. Baked copies
+      # would let the suite go green on a README that has already drifted —
+      # which is the whole failure that guard exists to catch.
+      - ../README.md:/app/README.md:ro
+      - ../Makefile:/app/Makefile:ro
+      - ../CLAUDE.md:/app/CLAUDE.md:ro
       # test_trust_and_export.py asserts on the restore drill's own contents.
       - ../scripts:/app/scripts:ro
       # Same reason as in `test`: the operator runbooks are asserted on.

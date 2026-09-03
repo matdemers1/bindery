@@ -82,16 +82,16 @@ class Scope:
     visible: tuple[uuid.UUID, ...]
     writable: tuple[uuid.UUID, ...]
     roles: dict[uuid.UUID, MembershipRole]
-    # Whether this caller has an unlocked vault right now (ADR-012). Resolved
-    # once per request like everything else here, so a route cannot ask twice
-    # and get two different answers halfway through.
-    #
-    # It lives on `Scope` rather than being checked at each call site for the
-    # same reason the library filter does: a boundary enforced in 27 places is
-    # a boundary that will be forgotten in one of them, and the one that gets
-    # forgotten will be a facet count or a search snippet rather than the
-    # document endpoint anybody would think to guard.
-    vault_unlocked: bool = False
+    # **Not an input to any filter, and never read here** (CR-084). A vaulted
+    # document is hidden whether the vault is open or shut (ADR-012), so unlock
+    # state cannot widen what this boundary returns — `api/vault/boundary.py`
+    # no longer accepts it, which is what makes that structural rather than a
+    # convention. It was resolved from the session store on every single
+    # request to be handed to two parameters that discarded it; that lookup is
+    # gone, and so is the field — a token narrowing used to restate that a
+    # bearer token cannot reach the vault, which was true and said nothing,
+    # because nothing read it. What keeps a token out of the vault is that the
+    # boundary hides vaulted rows unconditionally.
 
     # -- guards ------------------------------------------------------------
 
@@ -126,7 +126,7 @@ class Scope:
     # -- already-filtered queries -----------------------------------------
 
     def _vault_clause(self):
-        return vault.document_clause(self.user_id, unlocked=self.vault_unlocked)
+        return vault.document_clause(self.user_id)
 
     def only(self, model) -> sa.ColumnElement[bool]:
         """This caller's whole boundary for one model, as a single condition.
@@ -146,9 +146,7 @@ class Scope:
         if model is SourceFile:
             return sa.and_(
                 SourceFile.library_id.in_(self.visible),
-                SourceFile.id.not_in(
-                    vault.hidden_source_file_ids(self.user_id, unlocked=self.vault_unlocked)
-                ),
+                SourceFile.id.not_in(vault.hidden_source_file_ids(self.user_id)),
             )
         if model is Page:
             # Pages carry no library of their own; they inherit their file's,
@@ -238,9 +236,6 @@ def for_libraries(
         visible=tuple(library_ids),
         writable=(),
         roles={},
-        # Irrelevant to what is hidden (`api/vault/boundary.py`), and this
-        # boundary has no session behind it to ask.
-        vault_unlocked=False,
     )
 
 
@@ -260,8 +255,4 @@ async def resolve(session: AsyncSession, user_id: uuid.UUID) -> Scope:
         visible=tuple(roles),
         writable=tuple(lid for lid, role in roles.items() if role in WRITE_ROLES),
         roles=roles,
-        # Read once, here, from process memory. Resolving it per query would
-        # let a request that began locked finish unlocked, or the reverse, and
-        # a boundary that changes halfway through a request is not a boundary.
-        vault_unlocked=vault.is_unlocked(user_id),
     )

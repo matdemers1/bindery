@@ -1,9 +1,10 @@
 import { Users } from "lucide-react";
 
 import PageHeader from "../../components/PageHeader";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { ApiError, api, type LibraryDetail } from "../../api";
+import { useLiveQuery } from "../../live/LiveProvider";
 
 /**
  * Libraries — who is in the household, and what they may do (T-7.7).
@@ -38,12 +39,10 @@ export default function LibrariesPage() {
     }
   }, []);
 
-  useEffect(() => {
-    // An async data load: the state is genuinely unavailable on the first
-    // render, so the extra pass is the point rather than a mistake.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
+  // No topics: libraries change when someone on this screen changes them, and
+  // every one of those paths reloads explicitly. Empty is how the sanctioned
+  // hook says "once", so the suppression does not have to be repeated here.
+  useLiveQuery([], load);
 
   async function guard(action: () => Promise<unknown>) {
     setError(null);

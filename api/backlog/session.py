@@ -11,6 +11,7 @@ review queue entirely (REQ-083). That flag is the concrete mitigation for
 arriving in the queue you use every day turns triage into the new mess.
 """
 
+import asyncio
 import logging
 import random
 import uuid
@@ -20,7 +21,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import ingest
+from api import ingest, quota
 from api.backlog.dryrun import analyse
 from api.backlog.walker import walk
 from api.db.enums import (
@@ -28,8 +29,9 @@ from api.db.enums import (
     ImportItemState,
     ImportState,
     IngestSource,
+    MembershipRole,
 )
-from api.db.models import Document, ImportItem, ImportSession
+from api.db.models import AppUser, Document, ImportItem, ImportSession, Membership
 from api.storage.blobs import CHUNK_SIZE, store_stream
 
 log = logging.getLogger("bindery.import")
@@ -55,7 +57,14 @@ async def scan(session: AsyncSession, import_session: ImportSession) -> ImportSe
         await session.flush()
         return import_session
 
-    result = walk(root)
+    # Off the event loop. `walk` is a synchronous traversal of a tree meant to
+    # hold tens of thousands of files, and it stats every one of them — for a
+    # real archive that is tens of thousands of blocking syscalls on the api's
+    # only event loop, inside a request that already has a transaction open,
+    # with every other request queued behind it (CR-113). It touches no
+    # session and no ORM object, only the filesystem, so a thread is all it
+    # needs.
+    result = await asyncio.to_thread(walk, root)
     report, cost = await analyse(session, root, result)
 
     # One row per file, keyed on path, so re-scanning converges — in batches,
@@ -135,6 +144,40 @@ async def select_sample(session: AsyncSession, import_session: ImportSession) ->
     return len(chosen)
 
 
+async def charged_account(
+    session: AsyncSession, import_session: ImportSession
+) -> AppUser | None:
+    """The account this import's bytes are charged to.
+
+    `api/routers/upload.py` checks the uploader's storage quota before it
+    stores anything; this door checked nobody's, so pointing the importer at a
+    large folder walked straight past the limit that exists because the Zima
+    has one disk pool and the failure mode when it fills is that OCR, backups
+    and Postgres stop for every household.
+
+    Whoever started the import is the analogue of the uploader, and it is what
+    `api/vault/sweep.py` already resolves an import by. A row from before that
+    column existed falls back to the library's owner — the account whose
+    `usage_for` total these files land in either way.
+    """
+    if import_session.created_by is not None:
+        found = await session.get(AppUser, import_session.created_by)
+        if found is not None:
+            return found
+    return (
+        await session.execute(
+            sa.select(AppUser)
+            .join(Membership, Membership.user_id == AppUser.id)
+            .where(
+                Membership.library_id == import_session.library_id,
+                Membership.role == MembershipRole.OWNER,
+            )
+            .order_by(AppUser.created_at)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 async def ingest_batch(
     session: AsyncSession,
     import_session: ImportSession,
@@ -160,10 +203,21 @@ async def ingest_batch(
     # it. A row that points somewhere else is refused rather than read.
     root = Path(import_session.root_path).resolve()
 
+    # Resolved once for the batch. `None` means there is nobody to charge, and
+    # this refuses rather than importing free of charge — a library with no
+    # owner is a state `api/routers/household.py` will not create.
+    account = await charged_account(session, import_session)
+
     done = 0
     for item in items:
         path = Path(item.path)
         try:
+            if account is None:
+                item.state = ImportItemState.FAILED
+                item.error = (
+                    "this import has no account to charge its storage against"
+                )
+                continue
             if not path.resolve().is_relative_to(root):
                 item.state = ImportItemState.FAILED
                 item.error = "outside the folder that was scanned"
@@ -173,7 +227,31 @@ async def ingest_batch(
                 item.error = "file disappeared between the scan and the import"
                 continue
 
-            blob = await store_stream(_file_chunks(path))
+            # The same order the upload door uses: ask before the bytes are
+            # stored, because content-addressed storage never deletes and a
+            # refusal issued afterwards costs exactly the space it refused.
+            # Per item rather than per batch — `quota.check` re-reads the total
+            # each time and holds its advisory lock for the whole transaction,
+            # so file 40 is measured against the 39 in front of it.
+            try:
+                usage = await quota.check(session, account, item.byte_size or 0)
+            except quota.QuotaExceeded as full:
+                item.state = ImportItemState.FAILED
+                item.error = str(full)[:500]
+                continue
+
+            # And again as the bytes arrive, because the size in the row is
+            # what the scan saw and the file may have grown since.
+            # `store_stream` removes its own temp file when the stream raises.
+            chunks = _file_chunks(path)
+            if usage.remaining_bytes is not None:
+                chunks = quota.capped(chunks, usage.remaining_bytes)
+            try:
+                blob = await store_stream(chunks)
+            except quota.TooLarge as full:
+                item.state = ImportItemState.FAILED
+                item.error = str(full)[:500]
+                continue
             item.sha256 = blob.sha256
 
             # Everything decided so far goes in before the savepoint opens —

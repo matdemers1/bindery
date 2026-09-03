@@ -15,14 +15,9 @@ import uuid
 import sqlalchemy as sa
 
 from api.db.models import Document
-from api.vault.session import sessions
 
 
-def is_unlocked(user_id: uuid.UUID) -> bool:
-    return sessions.is_unlocked(user_id)
-
-
-def document_clause(user_id: uuid.UUID, *, unlocked: bool | None = None):
+def document_clause(_caller: uuid.UUID | None = None, /):
     """Documents this caller may see in an ordinary view, vault-wise.
 
     **A vaulted document is never one of them**, unlocked or not. It lives on
@@ -37,15 +32,25 @@ def document_clause(user_id: uuid.UUID, *, unlocked: bool | None = None):
     you glance at it. A feature whose privacy depends on remembering to lock it
     is not one people can rely on.
 
-    `unlocked` is still accepted so callers do not have to change and so the
-    session lookup can be avoided where the caller already knows — but it no
-    longer changes the answer. Being open governs whether the vault can be
-    *read*, not whether its contents leak into everything else.
+    An `unlocked` argument used to be accepted here and ignored (CR-084). A
+    parameter that is read by nothing and reads like it governs the boundary is
+    the shape that caused the worst leak this module exists to prevent: the
+    next person adding a "but show them while it is open" view would have
+    passed `unlocked=True`, got no error, and shipped something that looked
+    deliberate in review. It is gone, so that call is now a `TypeError`. Being
+    open governs whether the vault can be *read*, not whether its contents leak
+    into everything else.
+
+    The caller is accepted positionally, and its name says what the docstring
+    says: it does not reach the answer. Fourteen call sites pass it, and a
+    signature that reads as per-user filtering when the clause is global is the
+    other half of the same complaint — so it cannot be passed by keyword, where
+    it would read as meaningful.
     """
     return Document.vaulted_by.is_(None)
 
 
-def hidden_source_file_ids(user_id: uuid.UUID, *, unlocked: bool | None = None):
+def hidden_source_file_ids(_caller: uuid.UUID | None = None, /):
     """Files to hide from ordinary views, as a subquery.
 
     A file and a document are different rows. Hiding the document and listing

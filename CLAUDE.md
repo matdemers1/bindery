@@ -57,6 +57,7 @@ The compose file lives in `infra/`, so every raw invocation needs
 that flag — use it.
 
 ```bash
+make help          # every target in the Makefile, from its own `##` comments
 make up            # start the stack (no tunnel); `make tunnel` adds ingress
 make migrate       # alembic upgrade head — explicit, never on boot
 make logs          # watch the pipeline
@@ -181,6 +182,38 @@ decision currently happens at the end of `rules`.
   the lowercase types the migrations create.
 - `tests/test_no_destructive_paths.py` enforces REQ-090 by scanning `api/` and
   `worker/`. If it fails, revoke or tombstone — do not loosen the pattern list.
+- **Python type checking is gated, at the level the code already passes.**
+  `make typecheck` runs mypy over `api/` and `worker/` and compares the result to
+  `scripts/mypy-baseline.json`; CI's lint job runs the same thing. This is a
+  deliberate posture and it is written down here because the absence of one was
+  the actual defect (CR-089): mypy sat in the `dev` extra for eleven phases with
+  no `[tool.mypy]` section, no invocation, no gate and no note, against a
+  codebase where 95% of functions carry annotations and there is not one
+  `# type: ignore`. The expensive half was paid for and nothing read it.
+  - **Not strict, and not by accident.** `disallow_untyped_defs` across 30k lines
+    of SQLAlchemy 2.0 declarative models produces a number nobody burns down, and
+    a gate that is red on arrival is one somebody switches off. There are 79
+    known errors, and the gate is that a file may not *gain* one. Deliberately
+    one-directional: a change that fixes a type error must not turn somebody
+    else's build red. A run that finds fewer says so loudly and passes — refresh
+    the baseline when you see that, or it keeps room for a regression.
+  - **The environment is part of the answer.** A library that is installed and
+    typed is checked; the same library absent is `Any`. Baseline and gate both
+    run with the base + `dev` groups and no `worker` extra — the compose `test`
+    service and CI's lint runner. Anywhere else, the diff is the environment.
+  - Refresh with `python scripts/typecheck.py --update` (inside the `test`
+    service, so the environment matches) and read the diff. Tighten a flag in
+    `[tool.mypy]` once the baseline reaches zero, not before.
+- **The wire contract is checked, not trusted.** `api/schemas.py` and
+  `web/src/api.ts` are two hand-written halves of the same JSON.
+  `tsc --noEmit` proves the client agrees with itself; `make contract`
+  (`scripts/check_api_contract.py`, and a step in CI's lint gate) proves every
+  field the client reads exists on the server. Without it a renamed response
+  field passed all five gates and arrived in the browser as `undefined` on a
+  screen the e2e specs did not assert on — and on the Why panel, a blank field is
+  indistinguishable from an AI that had nothing to say (CR-059). A new interface
+  must pair with a model, be added to `ALIASES`, or be listed in `UNPAIRED` with
+  a reason.
 - **The `test` and `test-worker` compose services bind-mount `api/`, `worker/`,
   `tests/`, `alembic/`, `infra/`, `scripts/`, `web/src`, `web/public` and
   `pyproject.toml`.** Without those mounts the suite runs whatever source was
@@ -209,6 +242,17 @@ decision currently happens at the end of `rules`.
 - **The restore drill is the deliverable**, not the backup. `make drill b=<dir>`
   restores into a throwaway container and searches the restored data for the
   DD-214. Run it after every schema migration.
+- **The offsite bucket's lifecycle rules are audited hourly by the worker**, from
+  the loop that drives replication (`_refresh_lifecycle_audit` in
+  `worker/runner.py`, `offsite.check_lifecycle`). A rule that would delete
+  something meant to be kept — `blobs/` or `vault/` — is a **critical** alert and
+  leaves the building through the notifier; a credential that cannot read the
+  configuration is a warning, because a check that examines nothing and reports
+  nothing wrong is the shape of every silent monitoring failure. It reports and
+  never acts: **Bindery must never delete an S3 object** (invariant 3, ADR-010).
+  `make lifecycle-check` is the same audit on demand. Until CR-099 that command
+  was the only caller, which made R-21 — the one failure able to erase the
+  offsite archive — guarded by somebody remembering to type something.
 
 Bundles never become one file per document anywhere — not in the export, not in
 the mirror. A twelve-page scan holding three documents is one file plus an
@@ -425,8 +469,8 @@ scales to fit instead of losing its right-hand columns off the page.
 
 ## Deployment
 
-`docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) is four gates in
-series — **lint → unit → integration → e2e** — and only then publishes
+`docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) is five gates in
+series — **lint → unit → integration → e2e → images** — and the last one publishes
 `ghcr.io/matdemers1/bindery/{api,worker,web}` tagged `:main`, `:latest` and
 `:sha-<commit>`. The ZimaOS host pulls `:main`; rolling back means pinning a
 `:sha-` tag.
@@ -435,16 +479,20 @@ Sequential on purpose: parallel finishes sooner and also spends a full e2e run �
 three image builds, a Postgres, a seeded corpus, a browser — to tell you about a
 lint error. Cheapest gate first.
 
-- **lint** — `ruff`, then `eslint --max-warnings 0` and `tsc --noEmit` for the
-  web app and the e2e specs. Before this the only typecheck was `tsc -b` inside
-  `Dockerfile.web`, which runs *after* the tests, so a type error surfaced as an
-  opaque Docker build failure.
+- **lint** — `ruff`, the API contract check, `mypy` against its baseline,
+  `pip-audit`, `npm audit`, then `eslint --max-warnings 0`, `tsc --noEmit` for
+  the web app and the e2e specs, and the vitest unit suite. Before this the only
+  typecheck was `tsc -b` inside `Dockerfile.web`, which runs *after* the tests,
+  so a type error surfaced as an opaque Docker build failure. Everything cheap
+  and database-free belongs here rather than one gate later.
 - **unit** — the default pytest run, excluding `live_api` and `slow`.
 - **integration** — `pytest -m slow` in the **worker** image, where the OCR
   toolchain lives. ~30 tests.
 - **e2e** — Playwright against the real compose stack: build, migrate
   explicitly, seed, then drive a browser. `make e2e` runs it locally against
   `make up`.
+- **images** — the publish, `main` only. Every Dockerfile's shipped stage is
+  `runtime` and CI must keep saying so.
 
 **Actions does not support YAML merge keys.** An `env: &anchor` plus `<<: *anchor`
 parses locally and makes Actions refuse the whole file with "this run likely

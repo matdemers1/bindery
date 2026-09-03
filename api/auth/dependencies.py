@@ -166,10 +166,6 @@ async def current_scope(
                 else ()
             ),
             roles={lid: role for lid, role in scope.roles.items() if lid in permitted},
-            # Deliberately not carried over: an API token can never reach the
-            # vault. Unlocking is something a person did at a keyboard with a
-            # PIN, and a long-lived bearer token is the opposite of that.
-            vault_unlocked=False,
         )
 
     scope.require_any()

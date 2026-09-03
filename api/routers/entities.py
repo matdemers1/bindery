@@ -106,9 +106,26 @@ async def _merge_pair(session: AsyncSession, model, payload: MergeIn, library_id
 
 @router.get("/correspondents", response_model=list[CorrespondentOut])
 async def list_correspondents(
+    q: str | None = Query(None, description="prefix or substring of the name"),
+    limit: int | None = Query(
+        None, ge=1, le=1000, description="omit for every correspondent"
+    ),
+    offset: int = Query(0, ge=0),
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list:
+    """Every correspondent the caller can reach, with how many documents each has.
+
+    `q`, `limit` and `offset` exist because this list grows with the archive and
+    never shrinks: a household that has been through a backlog import
+    accumulates a correspondent per insurer, utility, clinic and bank, and the
+    response had no way to say "fewer than all of them".
+
+    The default is still the whole list, deliberately: the edit panel populates
+    a `<select>` from this, and a silent truncation there is a correspondent
+    that has quietly stopped being choosable, with nothing on screen to say so.
+    Narrowing is the caller's to ask for.
+    """
     library_ids = await repository.visible_library_ids(session, user.id)
     if not library_ids:
         return []
@@ -132,8 +149,11 @@ async def list_correspondents(
                 Correspondent.library_id.in_(library_ids),
                 # Merged-away records are history, not choices.
                 Correspondent.merged_at.is_(None),
+                Correspondent.name.ilike(f"%{q.strip()}%") if q else sa.true(),
             )
             .order_by(Correspondent.name)
+            .limit(limit)
+            .offset(offset or None)
         )
     ).all()
 
@@ -175,27 +195,46 @@ async def list_tags(
     Counts included so a near-duplicate is obvious while choosing — "banking
     (142)" next to "banking (1)" is the moment to notice, rather than on the
     Organise screen a month later.
+
+    One grouped join rather than a correlated count per tag. The subquery this
+    replaces was re-evaluated once per tag row and its only selective predicate
+    was `document_tag.tag_id`, which nothing indexed: the primary key is
+    `(document_id, tag_id)` in that order and `ix_document_tag_live` leads on
+    `document_id` too, so every evaluation scanned the whole link table. Two
+    hundred tags over a 300K-row link table is on the order of 60M row visits
+    for one keystroke in the edit panel's picker. `ix_document_tag_tag_live`
+    (migration 0030) is the index that makes this shape work; the correspondent
+    and document-type counts have had theirs since 0003.
     """
     library_ids = await repository.visible_library_ids(session, user.id)
     if not library_ids:
         return []
     rows = (
         await session.execute(
-            sa.select(
-                Tag,
-                sa.select(sa.func.count())
-                .select_from(DocumentTag)
-                .join(Document, Document.id == DocumentTag.document_id)
-                .where(
+            sa.select(Tag, sa.func.count(Document.id).label("document_count"))
+            .select_from(Tag)
+            .outerjoin(
+                DocumentTag,
+                sa.and_(
                     DocumentTag.tag_id == Tag.id,
                     DocumentTag.removed_at.is_(None),
+                ),
+            )
+            # Outer, and the boundary lives in the join rather than the WHERE:
+            # an inner join, or these predicates in the WHERE, would drop the
+            # tags whose only documents are vaulted or superseded instead of
+            # showing them as (0). A tag vanishing from the picker says more
+            # about what is hidden than a zero does.
+            .outerjoin(
+                Document,
+                sa.and_(
+                    Document.id == DocumentTag.document_id,
                     live(),
                     vault.document_clause(user.id),
-                )
-                .scalar_subquery()
-                .label("document_count"),
+                ),
             )
             .where(Tag.library_id.in_(library_ids), Tag.merged_at.is_(None))
+            .group_by(Tag.id)
             .order_by(Tag.name)
         )
     ).all()

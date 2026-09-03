@@ -1,9 +1,10 @@
 import PageThumb from "../../components/PageThumb";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Library as LibraryIcon } from "lucide-react";
 
 import { ApiError, api, type Archive, type ArchiveEntry, type BulkResult, type Tree } from "../../api";
+import { useLiveQuery } from "../../live/LiveProvider";
 import { SourceChip } from "../why/WhyPanel";
 
 /**
@@ -45,14 +46,22 @@ export default function ArchivePage() {
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
 
   const groupBy = params.get("group") ?? "year";
-  const filters = {
-    q: params.get("q") ?? "",
-    year: params.get("year") ?? "",
-    correspondent: params.getAll("correspondent"),
-    document_type: params.getAll("document_type"),
-    tag: params.getAll("tag"),
-    sort: params.get("sort") ?? "newest",
-  };
+  // Read back out of the query string rather than off `params`, and memoised
+  // on it. `params` is a fresh object every render, so building the filters
+  // from it directly made `load` fresh every render too — which is the shape
+  // that has already produced a request loop in this codebase, and which the
+  // previous version had to silence the dependency rule to hide.
+  const filters = useMemo(() => {
+    const current = new URLSearchParams(search);
+    return {
+      q: current.get("q") ?? "",
+      year: current.get("year") ?? "",
+      correspondent: current.getAll("correspondent"),
+      document_type: current.getAll("document_type"),
+      tag: current.getAll("tag"),
+      sort: current.get("sort") ?? "newest",
+    };
+  }, [search]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,15 +75,13 @@ export default function ArchivePage() {
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, groupBy]);
+  }, [filters, groupBy]);
 
-  useEffect(() => {
-    // An async data load: the state is genuinely unavailable on the first
-    // render, so the extra pass is the point rather than a mistake.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
+  // Everything on this screen is documents and the counts over them, so a
+  // document being filed, edited or superseded is exactly what makes it wrong.
+  // `key` carries the question — the filters and the grouping — because the
+  // topics say *when* to ask again and not *what* to ask.
+  useLiveQuery(["documents"], load, { key: `${search} ${groupBy}` });
 
   function update(mutate: (next: URLSearchParams) => void) {
     const next = new URLSearchParams(params);

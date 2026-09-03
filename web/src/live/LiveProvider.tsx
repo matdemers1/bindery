@@ -180,11 +180,33 @@ export function useLive(): LiveValue {
  * Refetches once on mount, then whenever the server says one of `topics`
  * changed. `fallbackMs` is used only while pushes are unavailable — it is the
  * safety net, not the mechanism, so it is deliberately slow.
+ *
+ * An empty `topics` is a real answer, not a mistake: it says "load this once
+ * and leave it alone", which is what a version string or an invitation needs.
+ * It exists so that case is still expressed here rather than as a hand-rolled
+ * effect with a lint suppression on it.
+ *
+ * `key` is for a screen whose load is parameterised — a folder path, a filter,
+ * a document id. `load` itself is deliberately not a dependency (see below),
+ * so without this a screen that changed its own question would go on showing
+ * the answer to the previous one.
+ *
+ * `unannouncedMs` is the escape hatch, and it is meant to look like one. Some
+ * work is done by the worker outside the job runner and announced by nothing —
+ * offsite replication, the integrity pass, the local backup — so a screen
+ * watching it has no hint to wait for. The timer belongs here rather than in
+ * the screen: one implementation, one place to review, and lint can then ban
+ * `setInterval` everywhere else so a screen cannot quietly grow its own again.
+ * Every use of it is a request for a topic that does not exist yet.
  */
 export function useLiveQuery(
   topics: Topic[],
   load: () => void | Promise<void>,
-  { fallbackMs = 15000 }: { fallbackMs?: number } = {},
+  {
+    fallbackMs = 15000,
+    key: reloadKey = "",
+    unannouncedMs = null,
+  }: { fallbackMs?: number; key?: string; unannouncedMs?: number | null } = {},
 ) {
   const { subscribe, degraded } = useLive();
   // The newest `load`, without it being a dependency of the subscription
@@ -201,17 +223,25 @@ export function useLiveQuery(
 
   // Topics are declared inline at every call site, so a fresh array each render
   // would resubscribe forever. The contents are what matter.
-  const key = topics.join(",");
+  const topicKey = topics.join(",");
 
   useEffect(() => {
     const run = () => void latest.current();
     run();
-    return subscribe(key.split(",") as Topic[], run);
-  }, [key, subscribe]);
+    // `"".split(",")` is `[""]`, which would register a subscriber listening
+    // for a topic that cannot arrive. Nothing subscribed is the honest shape.
+    return subscribe(topicKey ? (topicKey.split(",") as Topic[]) : [], run);
+  }, [topicKey, reloadKey, subscribe]);
 
   useEffect(() => {
     if (!degraded) return;
     const timer = setInterval(() => void latest.current(), fallbackMs);
     return () => clearInterval(timer);
   }, [degraded, fallbackMs]);
+
+  useEffect(() => {
+    if (unannouncedMs === null) return;
+    const timer = setInterval(() => void latest.current(), unannouncedMs);
+    return () => clearInterval(timer);
+  }, [unannouncedMs]);
 }

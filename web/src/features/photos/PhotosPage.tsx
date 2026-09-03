@@ -43,28 +43,38 @@ export default function PhotosPage() {
     chosen ?? (imageCount === 0 && (videoCount ?? 0) > 0 ? "video" : "image");
 
   const load = useCallback(async () => {
-    // Both counts every time, so each tab label says whether there is anything
-    // behind it without making you click to find out — and so the default tab
-    // can be decided from what is there.
-    const [images, videos] = await Promise.all([
-      api.photos({ kind: "image", limit: 1 }),
-      api.photos({ kind: "video", limit: 1 }),
+    // This was three requests: a COUNT for each tab label, then the wall. Two
+    // of them asked a question the third already answers — a tab count is the
+    // unfiltered number, and so is the wall's own total whenever nothing is
+    // filtering it — and all three re-ran on every documents/files hint, which
+    // during an import is several times a second, over a join Postgres has no
+    // index for. So: the wall, and one count for the tab you are not on.
+    const other: Kind = kind === "image" ? "video" : "image";
+    const filtered = Boolean(q) || (kind === "image" && undescribed);
+    const [wall, otherKind] = await Promise.all([
+      api.photos({
+        q: q || undefined,
+        undescribed: kind === "image" ? undescribed : false,
+        limit: 200,
+        kind,
+      }),
+      api.photos({ kind: other, limit: 1 }),
     ]);
-    setImageCount(images.total);
-    setVideoCount(videos.total);
-    const showing: Kind =
-      chosen ?? (images.total === 0 && videos.total > 0 ? "video" : "image");
-    const wall = await api.photos({
-      q: q || undefined,
-      undescribed: showing === "image" ? undescribed : false,
-      limit: 200,
-      kind: showing,
-    });
     setPhotos(wall.photos);
     setTotal(wall.total);
-  }, [q, undescribed, chosen]);
+    (other === "video" ? setVideoCount : setImageCount)(otherKind.total);
+    // While a filter is on, the wall's total is the answer to the filter and
+    // not to the tab. The label keeps the last unfiltered count it learned,
+    // which is still true: filtering changes the question, not the archive.
+    if (!filtered) (kind === "image" ? setImageCount : setVideoCount)(wall.total);
+  }, [kind, q, undescribed]);
 
-  useLiveQuery(["documents", "files"], load);
+  // `key` is what the wall is currently a picture of. Without it the grid held
+  // the previous answer: choosing Videos, or typing in the filter, relabelled
+  // the tabs and left the photographs underneath them.
+  useLiveQuery(["documents", "files"], load, {
+    key: `${kind} ${q} ${undescribed}`,
+  });
 
   const unread = kind === "image" ? photos.filter((photo) => !photo.described) : [];
 

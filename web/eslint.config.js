@@ -46,6 +46,31 @@ export default tseslint.config(
     },
   },
   {
+    // No screen owns a polling timer. That rule is stated in CLAUDE.md and was
+    // broken anyway, because the seam had nothing to offer a screen watching
+    // work the server does not announce — so the exception now lives in
+    // `useLiveQuery` (`unannouncedMs`), where there is one implementation to
+    // review, and the rest of the app cannot grow another one unnoticed.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/live/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.name='setInterval']",
+          message:
+            "Screens do not poll. Use useLiveQuery(topics, load) — and if the server has no topic for what you are watching, useLiveQuery's `unannouncedMs`, which is the one place a repeating timer is allowed to live.",
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='setInterval']",
+          message:
+            "Screens do not poll. Use useLiveQuery(topics, load) — and if the server has no topic for what you are watching, useLiveQuery's `unannouncedMs`, which is the one place a repeating timer is allowed to live.",
+        },
+      ],
+    },
+  },
+  {
     // End-to-end specs are Playwright, not React. `test.extend({ use })` is a
     // fixture callback, and `rules-of-hooks` reads the bare name `use` as
     // React's hook — a false positive that would otherwise be silenced with a

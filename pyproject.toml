@@ -97,6 +97,42 @@ ignore = ["B008"]
 "api/export/archive_export.py" = ["RUF001"]
 "tests/test_trust_and_export.py" = ["RUF001"]
 
+# Type checking is **gated, at the level the code already passes** — see
+# `scripts/typecheck.py` and `scripts/mypy-baseline.json`. mypy was a declared
+# dev dependency with no configuration, no invocation and no note for eleven
+# phases (CR-089), which is the worst of the three states: the annotations were
+# written and paid for (95%+ of functions carry them) and nothing ever read
+# them.
+#
+# The posture is deliberately not "strict". Turning `disallow_untyped_defs` on
+# across 30k lines produces a number nobody can burn down in a review round, and
+# a gate that is red on arrival is a gate that gets deleted. What is gated is the
+# *count*: `make typecheck` fails when a file gains an error it did not have, and
+# equally when it loses one without the baseline being refreshed, so the number
+# can only go down. Tighten a flag here once the baseline reaches zero.
+[tool.mypy]
+python_version = "3.13"
+# Cheap and free today: there is not one `# type: ignore` in api/ or worker/,
+# so these three cannot produce noise, and they stop the usual ways a suppressed
+# error outlives the problem it suppressed.
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+# Not installed in the api image or the lint runner (they live in the `worker`
+# extra), and none of them ship type information anyway. Without this the report
+# is dominated by "cannot find implementation" for libraries whose absence is
+# the point of the split.
+module = [
+    "ocrmypdf.*", "pillow_heif.*", "pypdf.*", "PIL.*", "pyzipper.*",
+    # Installed, but shipping no type information — `boto3` and `yaml`
+    # famously so. Nothing about that is this repository's to fix, and
+    # left on it drowns the report.
+    "boto3.*", "botocore.*", "yaml", "asyncpg.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # One event loop for the whole run. The async engine is module-level, so its

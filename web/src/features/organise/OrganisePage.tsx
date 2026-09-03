@@ -1,8 +1,10 @@
 import { Tags } from "lucide-react";
 
 import PageHeader from "../../components/PageHeader";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link, useSearchParams } from "react-router";
+
+import { useLiveQuery } from "../../live/LiveProvider";
 
 import {
   ApiError,
@@ -187,7 +189,7 @@ function Select({
 function Correspondents() {
   const [rows, setRows] = useState<CorrespondentRef[]>([]);
   const load = useCallback(() => api.correspondents().then(setRows).catch(() => {}), []);
-  useEffect(() => { void load(); }, [load]);
+  useLiveQuery([], load);
 
   return (
     <div className="space-y-4">
@@ -263,7 +265,7 @@ function Assets({ libraryId }: { libraryId?: string }) {
   const [kind, setKind] = useState("vehicle");
 
   const load = useCallback(() => api.assets().then(setRows).catch(() => {}), []);
-  useEffect(() => { void load(); }, [load]);
+  useLiveQuery([], load);
 
   return (
     <div className="space-y-4">
@@ -377,10 +379,9 @@ function Taxonomy() {
     setHealth(await api.taxonomyHealth());
     setDuplicates(await api.duplicates());
   }, []);
-  // An async data load: the state is genuinely unavailable on the first
-  // render, so the extra pass is the point rather than a mistake.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void load(); }, [load]);
+  // No topics: taxonomy health is a snapshot you act on, and every action on
+  // this panel reloads it.
+  useLiveQuery([], load);
 
   if (!health) return <Empty>Loading…</Empty>;
 

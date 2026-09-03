@@ -1,10 +1,11 @@
 import { FileText, Folder, FolderTree, Layers, ShieldCheck } from "lucide-react";
 
 import PageHeader from "../../components/PageHeader";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { ApiError, api, type FileTreeNode, type LibraryDetail, type MovePlan } from "../../api";
+import { useLiveQuery } from "../../live/LiveProvider";
 
 /**
  * The folder tree, in the app.
@@ -39,8 +40,15 @@ export default function FilesPage() {
 
   const path = params.get("path") ?? "";
 
+  // What the tree is currently showing. A background refresh must not replace
+  // the folder with a spinner: the pipeline pushes a hint for every file it
+  // touches, so during an import this screen would flash empty several times a
+  // second. Opening a *different* folder is the case that has genuinely
+  // nothing to show yet, and that is the one the loading state is for.
+  const showing = useRef<string | null>(null);
+
   const load = useCallback(async () => {
-    setLoading(true);
+    if (showing.current !== path) setLoading(true);
     try {
       const [result, held] = await Promise.all([
         api.fileTree(path),
@@ -48,17 +56,16 @@ export default function FilesPage() {
       ]);
       setTree(result.nodes);
       setLibraries(held);
+      showing.current = path;
     } finally {
       setLoading(false);
     }
   }, [path]);
 
-  useEffect(() => {
-    // An async data load: the state is genuinely unavailable on the first
-    // render, so the extra pass is the point rather than a mistake.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
+  // The tree is what the pipeline is writing into, so it goes stale exactly
+  // when files move and documents are filed. `key` is the folder: the topics
+  // say when to refetch, and the path says what to refetch.
+  useLiveQuery(["files", "documents"], load, { key: path });
 
   function go(next: string) {
     const search = new URLSearchParams();

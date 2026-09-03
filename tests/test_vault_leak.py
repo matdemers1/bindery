@@ -290,13 +290,27 @@ async def test_the_audit_log_does_not_replay_its_title(client, a_vaulted_documen
     assert SECRET_PHRASE not in response.text
 
 
-async def test_an_api_token_can_never_see_it(client, a_vaulted_document):
+async def test_an_api_token_can_never_see_it(session, a_vaulted_document):
     """Unlocking is something a person did with a PIN. A long-lived bearer
-    token is the opposite of that, so it is locked by construction."""
-    from api.auth.dependencies import Scope
+    token is the opposite of that, so it is locked by construction.
 
-    assert "vault_unlocked" in Scope.__dataclass_fields__
-    assert Scope.__dataclass_fields__["vault_unlocked"].default is False
+    Asserted on what the boundary returns, not on the existence of a
+    `Scope.vault_unlocked` field (CR-084). That field was resolved on every
+    request and read by nothing, so the assertion protected a value that
+    influenced no answer — and would have gone on passing while an unlock put
+    the document back into every view.
+    """
+    import sqlalchemy as sa
+
+    from api.db.scope import for_libraries
+
+    _, library, document, _ = a_vaulted_document
+    # The boundary an API token gets: library ids and no session behind them.
+    scope = for_libraries([library.id])
+    visible = (
+        await session.execute(sa.select(Document.id).where(scope.only(Document)))
+    ).scalars().all()
+    assert document.id not in visible
 
 
 # --------------------------------------------------------------------------
@@ -364,7 +378,7 @@ VIA_SCOPE = {
     "upload.py": "writes; it selects nothing it did not just create",
     "trust.py": "asks `Scope` for the rows the export and the vital list read",
     "library.py": "the archive browser, built entirely on `scope.only(Document)`",
-    "logs.py": "the photo wall since REQ-187; it names the boundary and asks for it",
+    "photos.py": "the photo wall; every query is `bound.only(Document)` (REQ-187)",
 }
 # Vault routes are the one place vaulted rows are *supposed* to be visible.
 EXEMPT_FROM_VAULT_BOUNDARY = {

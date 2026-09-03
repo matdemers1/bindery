@@ -1,5 +1,23 @@
 // Thin fetch wrapper. Auth rides on HTTP-only cookies, so nothing here ever
 // touches a token — there is no token for JavaScript to leak.
+//
+// Sectioned by domain, in the order below. It used to be sectioned by the
+// build phase that added each part, which only helped someone who had lived
+// through the phases: "which phase added photographs?" is not a question a
+// stranger can answer, and it was the question this file made them answer
+// before they could find anything. The scheme had also stopped being
+// maintained — the vault sat between phase 6 and phase 7, and accounts, added
+// long before either, sat last — and an index nobody maintains is worse than
+// none, because readers still trust it.
+//
+//   session · libraries and files · search · documents · segments · pages
+//   provenance · review · rules · archive · settings · imports · bulk edits
+//   entities · pipeline · trust · the private vault · household · ask
+//   health · api tokens · diagnostics · photographs · unify · upload
+//   corrections · media metadata · direct file urls · accounts · version
+//
+// Each `api` method sits under its domain's banner, and each domain's types
+// under a banner of the same name further down.
 
 export class ApiError extends Error {
   constructor(
@@ -28,6 +46,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+// --- Session and libraries -------------------------------------------------
+
 export interface User {
   id: string;
   email: string;
@@ -40,6 +60,8 @@ export interface Library {
   name: string;
   kind: string;
 }
+
+// --- Files and uploads -----------------------------------------------------
 
 export interface SourceFile {
   id: string;
@@ -58,6 +80,8 @@ export interface UploadResult {
   source_file: SourceFile;
   duplicate: boolean;
 }
+
+// --- Search ----------------------------------------------------------------
 
 export interface PageHit {
   /** Absolute position in the source file. */
@@ -85,6 +109,30 @@ export interface SearchResult {
   best_page: PageHit;
   matching_pages: number;
 }
+
+export interface Facet {
+  value: string;
+  label: string;
+  count: number;
+}
+
+export interface SearchResponse {
+  query: string;
+  total: number;
+  results: SearchResult[];
+  facets: Record<string, Facet[]>;
+  suggestions: string[];
+}
+
+export interface SearchParams {
+  q: string;
+  libraryIds?: string[];
+  knownFormCodes?: string[];
+  sourceFileId?: string;
+  limit?: number;
+}
+
+// --- Documents -------------------------------------------------------------
 
 export interface Document {
   id: string;
@@ -125,6 +173,8 @@ export interface DocumentDetail {
   media: MediaMetadata | null;
 }
 
+// --- Segments: dividing a bundle into the documents inside it --------------
+
 export interface SegmentList {
   source_file_id: string;
   page_count: number;
@@ -137,19 +187,7 @@ export interface SegmentInput {
   title: string | null;
 }
 
-export interface Facet {
-  value: string;
-  label: string;
-  count: number;
-}
-
-export interface SearchResponse {
-  query: string;
-  total: number;
-  results: SearchResult[];
-  facets: Record<string, Facet[]>;
-  suggestions: string[];
-}
+// --- Pages, and the geometry of the words on them --------------------------
 
 export interface PageSummary {
   page_number: number;
@@ -176,6 +214,8 @@ export interface PageBoxes {
   height: number;
   lines: { words: Word[] }[];
 }
+
+// --- Provenance: what was decided about a document, and by what ------------
 
 export interface TagRef {
   id: string;
@@ -237,10 +277,14 @@ export interface WhyPanel {
   field_sources: FieldSourceRef[];
 }
 
+// --- The review queue ------------------------------------------------------
+
 export interface ReviewQueue {
   total: number;
   documents: Document[];
 }
+
+// --- Filing rules ----------------------------------------------------------
 
 export interface RuleRecord {
   id: string;
@@ -260,6 +304,8 @@ export interface RuleDryRun {
   truncated: boolean;
   matches: { document_id: string; title: string | null; changes: Record<string, unknown> }[];
 }
+
+// --- The archive browser ---------------------------------------------------
 
 export interface ArchiveEntry {
   document_id: string;
@@ -302,6 +348,8 @@ export interface Tree {
   group_by: string;
   groups: { label: string; count: number }[];
 }
+
+// --- Settings, and the offsite copy they configure -------------------------
 
 export interface ModelChoice {
   id: string;
@@ -378,6 +426,8 @@ export interface SettingsTest {
   output_tokens: number | null;
 }
 
+// --- Backlog imports -------------------------------------------------------
+
 export interface ImportSession {
   id: string;
   library_id: string;
@@ -424,11 +474,15 @@ export interface ImportItem {
   error: string | null;
 }
 
+// --- Bulk edits ------------------------------------------------------------
+
 export interface BulkResult {
   matched: number;
   operation_id: string | null;
   changes: { document_id: string; title: string | null; changes: Record<string, unknown> }[];
 }
+
+// --- Entities: correspondents, types, tags and assets ----------------------
 
 export interface CorrespondentRef {
   id: string;
@@ -485,6 +539,8 @@ export interface DuplicatePair {
   similarity: number;
 }
 
+// --- The pipeline ----------------------------------------------------------
+
 export interface PendingReason {
   code: "never_attempted" | "provider_unavailable" | "failed";
   label: string;
@@ -520,14 +576,6 @@ export interface PipelineStatus {
   in_flight: Job[];
 }
 
-export interface SearchParams {
-  q: string;
-  libraryIds?: string[];
-  knownFormCodes?: string[];
-  sourceFileId?: string;
-  limit?: number;
-}
-
 function searchQueryString({
   q,
   libraryIds,
@@ -544,6 +592,8 @@ function searchQueryString({
 }
 
 export const api = {
+  // --- Session -------------------------------------------------------------
+
   me: () => request<User>("/auth/me"),
   login: (email: string, password: string, code?: string) =>
     request<User>("/auth/login", {
@@ -553,11 +603,17 @@ export const api = {
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 
+  // --- Libraries and the files in them -------------------------------------
+
   libraries: () => request<Library[]>("/libraries"),
   sourceFiles: () => request<SourceFile[]>("/source-files"),
 
+  // --- Search --------------------------------------------------------------
+
   search: (params: SearchParams, signal?: AbortSignal) =>
     request<SearchResponse>(`/search?${searchQueryString(params)}`, { signal }),
+
+  // --- Documents, pages and segments ---------------------------------------
 
   file: (id: string) => request<SourceFileDetail>(`/files/${id}`),
   document: (id: string) => request<DocumentDetail>(`/documents/${id}`),
@@ -574,7 +630,11 @@ export const api = {
   pageBoxes: (id: string, page: number, signal?: AbortSignal) =>
     request<PageBoxes>(`/files/${id}/pages/${page}/boxes`, { signal }),
 
+  // --- The pipeline --------------------------------------------------------
+
   pipeline: () => request<PipelineStatus>("/pipeline"),
+
+  // --- The archive browser -------------------------------------------------
 
   archive: (params: Record<string, string | string[]> = {}) => {
     const search = new URLSearchParams();
@@ -585,6 +645,8 @@ export const api = {
     return request<Archive>(`/archive?${search}`);
   },
   tree: (groupBy: string) => request<Tree>(`/archive/tree?group_by=${groupBy}`),
+
+  // --- Settings ------------------------------------------------------------
 
   settings: () => request<Settings>("/settings"),
   updateSettings: (
@@ -610,6 +672,8 @@ export const api = {
     }),
   testAi: () => request<SettingsTest>("/settings/test-ai", { method: "POST" }),
   testOffsite: () => request<OffsiteTest>("/settings/test-offsite", { method: "POST" }),
+
+  // --- Backlog imports -----------------------------------------------------
 
   imports: () => request<ImportSession[]>("/imports"),
   importPresets: () => request<ImportPresets>("/imports/presets"),
@@ -638,6 +702,8 @@ export const api = {
   curateImport: (id: string) =>
     request<ImportSession>(`/imports/${id}/curate`, { method: "POST" }),
 
+  // --- Bulk edits ----------------------------------------------------------
+
   bulkPreview: (documentIds: string[], actions: Record<string, unknown>) =>
     request<BulkResult>("/bulk/preview", {
       method: "POST",
@@ -652,6 +718,8 @@ export const api = {
     }),
   bulkUndo: (operationId: string) =>
     request<BulkResult>(`/bulk/${operationId}/undo`, { method: "POST" }),
+
+  // --- Entities: correspondents, types, tags and assets --------------------
 
   correspondents: () => request<CorrespondentRef[]>("/correspondents"),
   tagOptions: () => request<TaxonomyOption[]>("/tags"),
@@ -712,6 +780,8 @@ export const api = {
 
   shelves: () => request<{ id: string; name: string; query: Record<string, unknown>; is_packet: boolean }[]>("/shelves"),
 
+  // --- The review queue ----------------------------------------------------
+
   review: () => request<ReviewQueue>("/review"),
   why: (documentId: string) => request<WhyPanel>(`/documents/${documentId}/why`),
 
@@ -727,6 +797,8 @@ export const api = {
     request<Document>(`/documents/${documentId}/undo`, { method: "POST" }),
   accept: (documentId: string) =>
     request<Document>(`/documents/${documentId}/accept`, { method: "POST" }),
+
+  // --- Filing rules --------------------------------------------------------
 
   rules: () => request<RuleRecord[]>("/rules"),
   createRule: (body: {
@@ -746,6 +818,8 @@ export const api = {
     request<RuleRecord>(`/rules/${ruleId}/${enabled ? "enable" : "disable"}`, {
       method: "POST",
     }),
+  // --- Jobs ----------------------------------------------------------------
+
   acknowledgeJob: (jobId: string, undo = false) =>
     request<Job>(`/pipeline/jobs/${jobId}/acknowledge${undo ? "?undo=true" : ""}`, {
       method: "POST",
@@ -762,7 +836,7 @@ export const api = {
     }),
 
 
-  // --- Phase 6 -----------------------------------------------------------
+  // --- Trust: the folder tree, export, integrity, mirror and backup --------
 
   /** One level of the same tree the mirror and the export write to disk. */
   fileTree: (path = "") =>
@@ -793,7 +867,15 @@ export const api = {
   runBackup: (force = false) =>
     request<BackupResult>(`/backup/run${force ? "?force=true" : ""}`, { method: "POST" }),
 
-  // --- The private vault (Phase 16) --------------------------------------
+  audit: (filters: AuditFilters = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    }
+    return request<AuditPage>(`/audit${query.size ? `?${query}` : ""}`);
+  },
+
+  // --- The private vault ---------------------------------------------------
 
   vault: () => request<VaultState>("/vault"),
   vaultSetup: (passphrase: string, pin: string) =>
@@ -823,16 +905,7 @@ export const api = {
   vaultSearch: (q: string, signal?: AbortSignal) =>
     request<VaultSearchResults>(`/vault/search?q=${encodeURIComponent(q)}`, { signal }),
 
-  audit: (filters: AuditFilters = {}) => {
-    const query = new URLSearchParams();
-    for (const [key, value] of Object.entries(filters)) {
-      if (value !== undefined && value !== "") query.set(key, String(value));
-    }
-    return request<AuditPage>(`/audit${query.size ? `?${query}` : ""}`);
-  },
-
-
-  // --- Phase 7 -----------------------------------------------------------
+  // --- Household: members, libraries and moving files between them ---------
 
   householdLibraries: () => request<LibraryDetail[]>("/household/libraries"),
   createLibrary: (name: string, kind: string) =>
@@ -863,7 +936,7 @@ export const api = {
     }),
 
 
-  // --- Phase 8 -----------------------------------------------------------
+  // --- Ask -----------------------------------------------------------------
 
   ask: (question: string) =>
     request<AskAnswer>("/ask", {
@@ -871,6 +944,8 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question }),
     }),
+
+  // --- Health --------------------------------------------------------------
 
   healthPanel: () => request<HealthPanel>("/health/panel"),
 
@@ -884,6 +959,8 @@ export const api = {
    * kept. The panel is still what the Trust screen asks for.
    */
   healthBadge: () => request<HealthBadge>("/health/badge"),
+
+  // --- API tokens ----------------------------------------------------------
 
   apiTokens: () => request<ApiTokenRecord[]>("/tokens"),
   createApiToken: (body: {
@@ -900,6 +977,8 @@ export const api = {
   revokeApiToken: (id: string) =>
     request<ApiTokenRecord>(`/tokens/${id}/revoke`, { method: "POST" }),
 
+
+  // --- Diagnostics: the log and per-file progress --------------------------
 
   logs: (params: {
     source_file_id?: string;
@@ -922,6 +1001,8 @@ export const api = {
   },
 
 
+  // --- Photographs and videos ----------------------------------------------
+
   photos: (
     params: { q?: string; undescribed?: boolean; limit?: number; offset?: number; kind?: "image" | "video" } = {},
   ) => {
@@ -933,6 +1014,8 @@ export const api = {
   },
 
   /** Ask which entries of a kind are the same thing. Changes nothing. */
+  // --- Unify: proposing that two entries are the same thing ----------------
+
   unifyPreview: (kind: UnifyKind = "correspondent") =>
     request<UnifyProposal>(`/taxonomy/unify/preview?kind=${kind}`, { method: "POST" }),
   unifyApply: (kind: UnifyKind, canonicalId: string, memberIds: string[]) =>
@@ -941,6 +1024,8 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ canonical_id: canonicalId, member_ids: memberIds }),
     }),
+
+  // --- Upload --------------------------------------------------------------
 
   upload: (libraryId: string, file: File) => {
     const form = new FormData();
@@ -951,7 +1036,7 @@ export const api = {
 };
 
 
-// --- Phase 6: trust, export and resilience -------------------------------
+// --- Trust: the folder tree, export, integrity, backup and the audit log ---
 
 export interface FileTreeNode {
   path: string;
@@ -1054,7 +1139,7 @@ export interface AuditFilters {
 }
 
 
-// --- Phase 7: household and libraries ------------------------------------
+// --- Household: members, libraries and moving files between them -----------
 
 export interface Member {
   user_id: string;
@@ -1084,7 +1169,7 @@ export interface MovePlan {
 }
 
 
-// --- Phase 8: ask, health, tokens ----------------------------------------
+// --- Ask, health and API tokens --------------------------------------------
 
 export interface AskCitation {
   document_id: string;
@@ -1149,7 +1234,7 @@ export interface IssuedApiToken extends ApiTokenRecord {
 }
 
 
-// --- Diagnostics and per-file progress -----------------------------------
+// --- Diagnostics: the log and per-file progress ----------------------------
 
 export interface LogEntry {
   id: string;
@@ -1194,6 +1279,8 @@ export interface PipelineFiles {
 }
 
 
+// --- Photographs and videos ------------------------------------------------
+
 export interface Photo {
   document_id: string;
   source_file_id: string;
@@ -1213,6 +1300,8 @@ export interface PhotoWall {
   total: number;
   photos: Photo[];
 }
+
+// --- Unify: proposing that two entries are the same thing ------------------
 
 export interface UnifyGroup {
   canonical: string;
@@ -1234,7 +1323,7 @@ export interface UnifyProposal {
 
 /** Blob URLs. Authenticated and library-scoped server-side; no token in the URL. */
 // --------------------------------------------------------------------------
-// The private vault (Phase 16)
+// The private vault
 // --------------------------------------------------------------------------
 
 /**
@@ -1280,7 +1369,7 @@ export interface VaultSearchResults {
 }
 
 // --------------------------------------------------------------------------
-// Corrections (Phase 17)
+// Corrections: editing what was filed, and who decided each field
 // --------------------------------------------------------------------------
 
 /** Who set one field. What makes an AI value look different from yours. */
@@ -1325,7 +1414,9 @@ export interface DocumentEditResult {
   event_id: string | null;
 }
 
-/** What the file said about itself (Phase 18). */
+// --- Media metadata --------------------------------------------------------
+
+/** What the file said about itself: EXIF, and what ffprobe read off a video. */
 export interface MediaMetadata {
   kind: "image" | "video";
   width: number | null;
@@ -1341,6 +1432,8 @@ export interface MediaMetadata {
   browser_playable: boolean;
 }
 
+// --- Backlog imports: presets and the run log ------------------------------
+
 export interface ImportPresets {
   inbox: string;
 }
@@ -1352,6 +1445,8 @@ export interface ImportLogLine {
   source_file_id: string | null;
   stage: string | null;
 }
+
+// --- URLs the browser fetches directly — images, PDFs, downloads -----------
 
 export const fileUrl = {
   render: (id: string, page: number) => `/api/files/${id}/pages/${page}/render`,
@@ -1373,7 +1468,7 @@ export const fileUrl = {
 
 
 // --------------------------------------------------------------------------
-// Accounts (Phase 10)
+// Accounts, invitations and administration
 // --------------------------------------------------------------------------
 
 export interface Quota {

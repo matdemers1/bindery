@@ -269,7 +269,18 @@ async def search(
     filters: SearchFilters | None = None,
     limit: int = 25,
     offset: int = 0,
+    facets: bool = True,
 ) -> SearchResponse:
+    """Page-anchored search, rolled up to documents.
+
+    `facets=False` is for the callers that throw the breakdown away. The ⌘K
+    palette renders seven titles and has a 100 ms budget; `ask.gather_sources`
+    wants pages to read and runs the whole thing twice when the precise query
+    finds nothing. Both were paying for three aggregations over the matched set
+    that nothing ever looked at. The total is still exact either way — it is
+    what decides whether a spelling suggestion is offered, and a caller opting
+    out of facets is not opting out of a correct count.
+    """
     filters = filters or SearchFilters()
     query = query.strip()
     if not query or not visible_library_ids:
@@ -301,7 +312,17 @@ async def search(
     # 650-800 ms of it five times rather than once. The three facets and the
     # total are one question about the same set, so they are now one statement
     # over one pass, and only the result page reads it a second time.
-    total, facets = await _totals_and_facets(session, rolled)
+    #
+    # And a caller that renders no facets asks the cheaper question: one
+    # aggregate over that pass instead of four grouping sets, which is three
+    # aggregations the palette and Ask were computing and discarding.
+    if facets:
+        total, facet_values = await _totals_and_facets(session, rolled)
+    else:
+        total = (
+            await session.execute(sa.select(sa.func.count()).select_from(rolled))
+        ).scalar_one()
+        facet_values = {}
 
     # Cut to the result page *first*, then render snippets for those rows only.
     # This is the difference between one ts_headline call per returned result and
@@ -361,7 +382,11 @@ async def search(
     suggestions = await suggest(session, query, allowed, viewer) if total == 0 else []
 
     return SearchResponse(
-        query=query, total=total, results=results, facets=facets, suggestions=suggestions
+        query=query,
+        total=total,
+        results=results,
+        facets=facet_values,
+        suggestions=suggestions,
     )
 
 

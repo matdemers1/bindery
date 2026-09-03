@@ -33,7 +33,16 @@ REPO = Path(__file__).resolve().parent.parent
 GUIDES = REPO / "web" / "public" / "help" / "guides.json"
 OUT = REPO / "web" / "public" / "help" / "screens"
 
-BASE_URL = os.environ.get("BINDERY_URL", "http://localhost:8080")
+# `http://localhost`, and never a port. No compose service publishes one
+# (REQ-104), so a host-side default like `http://localhost:8080` could only ever
+# reach nothing — it was the default here and in the Makefile target, which made
+# the one command CLAUDE.md gives for a CI-gating workflow fail with a
+# connection refused (CR-081). Capture runs inside the compose network sharing
+# the web container's namespace, where the app is on port 80, and `localhost` is
+# also the one origin Chrome trusts without TLS — the session cookie is
+# `Secure`, so any other host name drops it silently and every request after the
+# login 401s.
+BASE_URL = os.environ.get("BINDERY_URL", "http://localhost")
 EMAIL = os.environ.get("BINDERY_EMAIL", "")
 PASSWORD = os.environ.get("BINDERY_PASSWORD", "")
 

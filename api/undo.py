@@ -13,6 +13,7 @@ failure than the one it is fixing.
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import date
 
 import sqlalchemy as sa
@@ -23,16 +24,185 @@ from api.audit import record
 from api.db.enums import ActorType, ReviewState, Sensitivity
 from api.db.models import AuditEvent, Document, DocumentTag
 
-# Actions that can be walked back, and the document fields each may have set.
-# `route_to_review` is deliberately absent: "this needs your attention" is not a
-# decision, so there is nothing in it to walk back.
+# The four endpoints that walk something back. Named here rather than spelled
+# out at each entry so the registry can be checked against the app's own route
+# table — a route that is renamed and not updated here is a promise the Why
+# panel keeps making after the endpoint stopped existing.
+DOCUMENT_UNDO = "/api/documents/{document_id}/undo"
+BULK_UNDO = "/api/bulk/{operation_id}/undo"
+MERGE_UNDO = "/api/merges/{operation_id}/undo"
+SEGMENT_UNDO = "/api/files/{source_file_id}/segments/undo"
+
+
+@dataclass(frozen=True)
+class Undoable:
+    """How one audited action is walked back.
+
+    `fields` is meaningful only for the generic document path, which restores
+    named columns from the event's `before`. The other three reversals are
+    whole-operation and read their own manifests.
+    """
+
+    entity_type: str
+    route: str
+    fields: tuple[str, ...] = ()
+
+
+# **Every audited action appears here or in `NOT_UNDOABLE`, and
+# `tests/test_undo_registry.py` fails when a new one appears in neither.**
+#
+# Undo is the trust surface — the kill criterion is loss of trust in the
+# automated filing — so an action that is recorded but quietly not reversible
+# is a promise the UI makes and this module does not keep. Before the registry
+# the answer lived in four places: a literal here, a count in `api/bulk.py`, a
+# second count in `api/entities.py`, and a sequence chain in `api/segments.py`,
+# with nothing that noticed a fifth action arriving. It still lives in four
+# implementations; what the registry adds is one list of what they cover, and a
+# guard that fails when something joins none of them.
+REGISTRY: dict[str, Undoable] = {
+    # -- the generic document path (`undo_event`, below) -------------------
+    #
+    # `route_to_review` is deliberately absent: "this needs your attention" is
+    # not a decision, so there is nothing in it to walk back.
+    "classify": Undoable(
+        "document", DOCUMENT_UNDO,
+        ("title", "summary", "document_date", "correspondent_id",
+         "document_type_id", "review_state"),
+    ),
+    "rule_applied": Undoable(
+        "document", DOCUMENT_UNDO, ("document_type_id", "sensitivity"),
+    ),
+    "file": Undoable("document", DOCUMENT_UNDO, ("review_state",)),
+    "edit": Undoable(
+        "document", DOCUMENT_UNDO,
+        ("title", "summary", "document_date", "correspondent_id",
+         "document_type_id", "sensitivity", "review_state"),
+    ),
+    # -- whole-operation reversals, each with its own endpoint -------------
+    "bulk_edit": Undoable("bulk_operation", BULK_UNDO),
+    "merge_correspondent": Undoable("correspondent", MERGE_UNDO),
+    "merge_tag": Undoable("tag", MERGE_UNDO),
+    "merge_document_type": Undoable("document_type", MERGE_UNDO),
+    "segment": Undoable("source_file", SEGMENT_UNDO),
+}
+
+# Actions that are recorded and cannot be walked back, each with the reason.
+#
+# A reason, not a bare list: "not undoable" is a product decision, and the next
+# person to read it needs to know whether they are looking at something nobody
+# got to or something that genuinely has no reverse. Making one of these
+# undoable is a feature, not a fix.
+NOT_UNDOABLE: dict[str, str] = {
+    # Records of something that happened, with no state to put back.
+    "login": "a sign-in is an event, not a change; there is nothing to restore.",
+    "ingest": "originals are immutable and never deleted (invariant 1 and 3), "
+              "so an arrival cannot be taken back.",
+    "scan": "a backlog scan reads a folder and writes only its own inventory; "
+            "nothing about the archive changed.",
+    "route_to_review": "\"this needs your attention\" is not a decision, so "
+                       "there is nothing in it to walk back — and the gate's "
+                       "other verdict, `file`, is undoable.",
+    "integrity_check": "a read-only pass over the pool; it changes nothing.",
+    "export_full": "an export writes a derived tree beside the archive and "
+                   "changes nothing in it; delete the folder instead.",
+    "export_go_bag": "as with a full export, the archive itself is untouched.",
+    "backup_run": "a backup only reads; the artefact it wrote is the "
+                  "operator's to remove.",
+    "offsite_replicate_requested": "the objects are already offsite by the time "
+                                   "anyone could press undo, and the offsite "
+                                   "ledger is append-only.",
+    "retry": "re-running a stage is a request for work, not a decision; what "
+             "the work then decides is undoable where it lands.",
+    "rescan_requested": "as with retry — the rescan's own results are what "
+                        "carry an undo.",
+    "reclassify_requested": "the classification it produces is undoable; the "
+                            "request to produce one is not a change to reverse.",
+    # Each other's reverse, deliberately as a second deliberate act rather than
+    # a one-click undo.
+    "enable": "a rule is switched off again on the rule screen; both "
+              "directions are ordinary, audited actions.",
+    "disable": "a rule is switched back on on the rule screen.",
+    "account_suspended": "an account is brought back by restoring it, which is "
+                         "its own decision and its own audit row.",
+    "account_restored": "an account is suspended again by suspending it.",
+    "acknowledge_job": "the same button un-acknowledges it, which is the "
+                       "reverse and is itself audited.",
+    "unacknowledge_job": "the same button acknowledges it again.",
+    "import_to_vault": "the destination of an import is changed by choosing "
+                       "the other one; nothing has been sealed yet.",
+    "import_not_to_vault": "the destination of an import is changed by "
+                           "choosing the other one.",
+    # Secrets and credentials: what an undo would need is not kept.
+    "change_password": "the previous password is not stored, by design.",
+    "password_reset": "the previous password is not stored, by design.",
+    "reset_code_issued": "a code is spent or expires; it cannot be un-issued.",
+    "token_issued": "the secret was shown once and cannot be un-shown. Revoke "
+                    "it instead.",
+    "token_revoked": "a revoked secret stays revoked; issue a new token.",
+    "totp_enrolled": "a second factor is set up with the device in hand, and "
+                     "removing it needs the same deliberate step.",
+    "totp_disabled": "re-enrolling needs the device; that is the step, not an "
+                     "undo.",
+    "invite_created": "an invite is withdrawn by revoking it, which is its own "
+                      "audited action.",
+    "invite_revoked": "a revoked invite is never re-armed; issue a new one.",
+    "account_unlocked": "clearing a login lockout releases a throttle counter "
+                        "and nothing else — `api/auth/throttle.py` faces the "
+                        "open internet and re-locking on demand is not a "
+                        "capability worth having.",
+    # Administrative settings. The previous value is in the event's `before`,
+    # so the reversal is to set it again — visibly, as an administrator.
+    "quota_changed": "the old limit is in the audit row; an administrator "
+                     "sets it back, so the change is never silent.",
+    "update_settings": "the old value is in the audit row and settings are "
+                       "re-set rather than rewound.",
+    "membership_changed": "who may read a library is a household decision, "
+                          "and the previous role is in the audit row.",
+    "admin_granted": "administration is granted and withdrawn by a person, "
+                     "never by a one-click reversal.",
+    # Creation. Nothing is ever automatically deleted (invariant 3), so an
+    # undo here would be the one destructive path this project forbids.
+    "create": "nothing is ever automatically deleted (invariant 3), so "
+              "creating a rule, an asset or a library has no reverse here.",
+    "account_created": "an account is suspended, never deleted (invariant 3).",
+    "library_created": "a library is not deleted (invariant 3).",
+    "vault_created": "a vault is not deleted (invariant 3).",
+    "attach_asset": "attaching a document to an asset is a person's own "
+                    "filing, and the link is additive — nothing was "
+                    "overwritten for an undo to put back.",
+    # The vault. Every one of these needs the passphrase, which is the point.
+    "vault_unlocked": "the reverse is locking the vault, which is one click "
+                      "on the vault screen and does not belong behind an "
+                      "undo affordance.",
+    "vault_move_in": "moving a document back out is its own decision on the "
+                     "vault screen: it needs the vault open and it rewrites "
+                     "the plaintext. Not something to offer as one click "
+                     "beside an automated action.",
+    "vault_move_out": "moving it back in destroys the plaintext again, which "
+                      "is not a thing to do by pressing undo.",
+    "vault_in": "the sweep seals what a vault-bound import asked for; "
+                "reversing it is a move-out, with the passphrase.",
+    # A move is file-scoped and taxonomy does not travel with it.
+    "moved_library": "moving a file back is the same operation in reverse, "
+                     "and it is a person's decision about where a file "
+                     "belongs — the revoked cross-library tags are named in "
+                     "the audit `before` so nothing is lost either way.",
+    # Undos themselves. Reversing an undo is making the decision again.
+    "undo": "an undo is walked back by making the decision again; undoing the "
+            "undo would give the chain two heads.",
+    "bulk_undo": "as with `undo` — re-run the bulk edit.",
+    "undo_merge": "as with `undo` — merge them again.",
+    "segment_undo": "the segment chain already reverses in both directions: "
+                    "undoing again walks one step further back, which is what "
+                    "`api/segments.undo` does.",
+}
+
+# The document-field map the generic path restores from, derived from the
+# registry so there is one list rather than two that can disagree.
 UNDOABLE = {
-    "classify": ("title", "summary", "document_date", "correspondent_id",
-                 "document_type_id", "review_state"),
-    "rule_applied": ("document_type_id", "sensitivity"),
-    "file": ("review_state",),
-    "edit": ("title", "summary", "document_date", "correspondent_id",
-             "document_type_id", "sensitivity", "review_state"),
+    action: entry.fields
+    for action, entry in REGISTRY.items()
+    if entry.route == DOCUMENT_UNDO
 }
 
 _COERCE = {

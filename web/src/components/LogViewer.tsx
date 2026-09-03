@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   AlertTriangle,
   Info,
@@ -82,14 +82,10 @@ export default function LogViewer({
   // `live` is now about whether to accept pushes rather than how fast to ask.
   useLiveQuery(live ? ["logs", "jobs"] : [], load, { fallbackMs: 10_000 });
 
-  useEffect(() => {
-    if (live) return;
-    // Paused: load once so the pane is not blank, then leave it alone.
-    // An async data load: the state is genuinely unavailable on the first
-    // render, so the extra pass is the point rather than a mistake.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [live, load]);
+  // Paused used to load again here, which was a second request for the same
+  // page: toggling `live` changes the topic list above, and `useLiveQuery`
+  // loads whenever that changes — so the pane is already filled on mount and
+  // on every pause, once.
 
   return (
     <section className="flex min-h-0 flex-col rounded-xl border border-edge bg-surface">

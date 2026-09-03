@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { ApiError, api, type PendingReview } from "../api";
+import { useLiveQuery } from "../live/LiveProvider";
 
 /**
  * "Run AI review over the documents that missed it."
@@ -37,12 +38,12 @@ export default function PendingReviewPanel({ compact = false }: { compact?: bool
     }
   }, []);
 
-  useEffect(() => {
-    // An async data load: the state is genuinely unavailable on the first
-    // render, so the extra pass is the point rather than a mistake.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
+  // This panel is half of the pair CLAUDE.md names as the reason live updates
+  // exist: it counts documents nothing has reviewed, and everything that
+  // changes that count — the worker finishing a classification, a reclassify
+  // this panel itself queued, a job giving up — publishes `review` or `jobs`.
+  // Loading once on mount left it stating a number that had stopped being true.
+  useLiveQuery(["review", "jobs"], load);
 
   async function run(reason: string | null) {
     setBusy(reason ?? "all");

@@ -86,11 +86,10 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
     );
   }, []);
 
-  useEffect(() => {
-    // Three loads the first render genuinely cannot have.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
+  // No topics: the live half of this screen is `refreshActive` below, which
+  // subscribes only while a move is running. The session list itself changes
+  // when you change it.
+  useLiveQuery([], load);
 
   const activeId = active?.id;
   const moving = Boolean(

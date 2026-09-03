@@ -26,6 +26,7 @@ from api.routers import (
     library,
     live,
     logs,
+    photos,
     pipeline,
     review,
     rules,
@@ -109,6 +110,7 @@ app.include_router(files.router, prefix="/api")
 app.include_router(segments.router, prefix="/api")
 app.include_router(pipeline.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
+app.include_router(photos.router, prefix="/api")
 app.include_router(live.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
 app.include_router(rules.router, prefix="/api")
