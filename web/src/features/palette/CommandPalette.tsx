@@ -34,7 +34,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       api
-        .search({ q: query, limit: MAX_RESULTS }, controller.signal)
+        .search({ q: query, limit: MAX_RESULTS, facets: false }, controller.signal)
         .then((response) => {
           setFetched(response.results);
           setSelected(0);

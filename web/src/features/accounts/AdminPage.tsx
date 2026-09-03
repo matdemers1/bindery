@@ -1,6 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { Link } from "react-router";
-import { Users, UserPlus, Copy, Check, Lock, Ban, RotateCcw } from "lucide-react";
+import { Users, UserPlus, Copy, Check, Lock, Ban, RotateCcw, ShieldCheck } from "lucide-react";
 
 import { ApiError, type AdminAccount, type AdminInvitation, accountsApi } from "../../api";
 import PageHeader from "../../components/PageHeader";
@@ -147,6 +147,9 @@ function Row({
 }) {
   const [code, setCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editingQuota, setEditingQuota] = useState(false);
+  const [quotaGb, setQuotaGb] = useState("");
+  const quotaFieldId = useId();
   const locked = account.locked_until && new Date(account.locked_until) > new Date();
   const share = account.storage_quota_bytes
     ? Math.min(1, account.used_bytes / account.storage_quota_bytes)
@@ -203,6 +206,63 @@ function Row({
             />
           </div>
         )}
+        {/* The quota was settable at invitation and nowhere else, so changing
+            one afterwards meant a psql write against the account table — on a
+            number this screen already displays and enforces. Blank means no
+            limit, which is what the endpoint reads a null as. */}
+        {editingQuota ? (
+          <form
+            className="mt-2 flex items-center gap-1"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const trimmed = quotaGb.trim();
+              const bytes = trimmed === "" ? null : Math.round(Number(trimmed) * GB);
+              if (bytes !== null && !Number.isFinite(bytes)) return;
+              void act(async () => {
+                await accountsApi.setQuota(account.id, bytes);
+                setEditingQuota(false);
+              });
+            }}
+          >
+            <label htmlFor={quotaFieldId} className="sr-only">
+              Storage quota in GB for {account.email}
+            </label>
+            <input
+              id={quotaFieldId}
+              value={quotaGb}
+              onChange={(event) => setQuotaGb(event.target.value)}
+              inputMode="decimal"
+              placeholder="no limit"
+              className="w-20 rounded border border-field bg-ink px-1.5 py-0.5 text-xs outline-none focus:border-accent"
+            />
+            <span className="text-xs text-muted">GB</span>
+            <button type="submit" className="rounded border border-edge px-1.5 py-0.5 text-xs">
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditingQuota(false)}
+              className="px-1 text-xs text-muted"
+            >
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setQuotaGb(
+                account.storage_quota_bytes
+                  ? String(Math.round((account.storage_quota_bytes / GB) * 10) / 10)
+                  : "",
+              );
+              setEditingQuota(true);
+            }}
+            className="mt-1.5 rounded border border-edge px-1.5 py-0.5 text-[11px] text-muted hover:text-neutral-100"
+          >
+            Change quota
+          </button>
+        )}
       </td>
       <td className="px-4 py-3 text-xs">
         {account.totp_enabled ? (
@@ -241,6 +301,15 @@ function Row({
               className="flex items-center gap-1 rounded border border-edge px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
             >
               <Lock size={11} /> Unlock
+            </button>
+          )}
+          {!account.is_admin && (
+            <button
+              type="button"
+              onClick={() => void act(() => accountsApi.grantAdmin(account.id))}
+              className="flex items-center gap-1 rounded border border-edge px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
+            >
+              <ShieldCheck size={11} /> Make admin
             </button>
           )}
           {account.is_active ? (

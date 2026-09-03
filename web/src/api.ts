@@ -130,6 +130,9 @@ export interface SearchParams {
   knownFormCodes?: string[];
   sourceFileId?: string;
   limit?: number;
+  /** The type/correspondent/year breakdown. Omit it when you discard it —
+   *  it is a second aggregation over the same matched pages. */
+  facets?: boolean;
 }
 
 // --- Documents -------------------------------------------------------------
@@ -582,12 +585,14 @@ function searchQueryString({
   knownFormCodes,
   sourceFileId,
   limit,
+  facets,
 }: SearchParams) {
   const params = new URLSearchParams({ q });
   libraryIds?.forEach((id) => params.append("library_id", id));
   knownFormCodes?.forEach((code) => params.append("known_form", code));
   if (sourceFileId) params.set("source_file_id", sourceFileId);
   if (limit) params.set("limit", String(limit));
+  if (facets === false) params.set("facets", "false");
   return params.toString();
 }
 

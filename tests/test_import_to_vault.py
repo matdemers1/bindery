@@ -197,6 +197,36 @@ async def test_the_import_screen_polling_is_not_activity(client, session, bound_
     )
 
 
+async def test_reading_the_vault_status_is_not_activity(client, session, bound_import):
+    """`GET /api/vault` says whether the vault is open, never what is in it.
+
+    The Import screen fetches it inside a `useLiveQuery` loader, which re-runs
+    on a fallback timer whenever the live socket is degraded — so a touching
+    read here kept the vault open for as long as that tab existed. Reading
+    contents still counts: `vaultItems` goes through `service.require_key`.
+    """
+    user, _vault, _import_session, _docs = bound_import
+
+    held = sessions._by_user[user.id]
+    held.touched_at = datetime.now(UTC) - timedelta(minutes=14)
+    idle_since = held.touched_at
+
+    response = await client.get("/api/vault")
+    assert response.status_code == 200, response.text
+    assert response.json()["unlocked"] is True
+
+    assert sessions._by_user[user.id].touched_at == idle_since, (
+        "reading the vault's status counted as using it, so it never closes"
+    )
+
+    # But reading what it holds does count.
+    listed = await client.get("/api/vault/items")
+    assert listed.status_code == 200, listed.text
+    assert sessions._by_user[user.id].touched_at > idle_since, (
+        "reading the vault's contents must count as use"
+    )
+
+
 async def test_a_sweep_tick_is_not_activity(session, bound_import):
     """ADR-012's idle timeout has to survive the sweep that reads it.
 

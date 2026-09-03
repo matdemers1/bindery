@@ -32,3 +32,37 @@ export function isInteractiveTarget(target: EventTarget | null): boolean {
     target.closest("button, a[href], [role='button'], [role='tab'], [role='option']") !== null
   );
 }
+
+/**
+ * Whether single-key shortcuts are active. WCAG 2.1.4 needs one of: an off
+ * switch, a remap, or activation only while the component has focus.
+ *
+ * This app cannot take the third — the shortcuts exist precisely so you can
+ * triage without tabbing to anything, so they are live when *nothing* is
+ * focused, which is the inverse of the criterion. Scoping them away from
+ * controls and from an open correction panel removed the harm; it did not
+ * satisfy the criterion. This is the off switch, and it is what does.
+ *
+ * Per browser, not per account: it is an input preference, and the person who
+ * needs it needs it on the machine they are using. Read defensively, because
+ * `localStorage` throws outright in some privacy modes and a shortcut
+ * preference must never be the reason a screen fails to render.
+ */
+const SHORTCUTS_KEY = "bindery.shortcuts";
+
+export function shortcutsEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(SHORTCUTS_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function setShortcutsEnabled(on: boolean): void {
+  try {
+    window.localStorage.setItem(SHORTCUTS_KEY, on ? "on" : "off");
+  } catch {
+    // A preference that cannot be stored is not worth an error to the person
+    // who set it; the default is the safe one either way.
+  }
+}

@@ -26,6 +26,11 @@ async def search(
     source_file_id: uuid.UUID | None = Query(None, description="Search inside one file"),
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    facets: bool = Query(
+        True,
+        description="Compute the type/correspondent/year breakdown. The command "
+        "palette discards it, so it asks for false.",
+    ),
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> SearchResponseOut:
@@ -39,6 +44,7 @@ async def search(
         session,
         q,
         visible,
+        facets=facets,
         # Who is asking, so the vault filter applies. Without it search reads
         # page text straight past the boundary — the one leak that surfaces as
         # the actual words rather than a title.

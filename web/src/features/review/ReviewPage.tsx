@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 import { ApiError, api, type Document, type DocumentDetail } from "../../api";
-import { isInteractiveTarget, isTypingTarget } from "../../lib/keyboard";
+import { isInteractiveTarget, isTypingTarget, shortcutsEnabled } from "../../lib/keyboard";
 import { useLiveQuery } from "../../live/LiveProvider";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
@@ -73,6 +73,7 @@ export default function ReviewPage() {
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
+      if (!shortcutsEnabled()) return;
       if (isTypingTarget(event.target)) return;
       if (isInteractiveTarget(event.target)) return;
       // While a correction is open the person is working on this document,

@@ -11,7 +11,7 @@ import {
   fileUrl,
 } from "../../api";
 import { matchesTerm, queryTerms } from "../../lib/highlight";
-import { isInteractiveTarget, isTypingTarget } from "../../lib/keyboard";
+import { isInteractiveTarget, isTypingTarget, shortcutsEnabled } from "../../lib/keyboard";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 import MoveToVault from "../vault/MoveToVault";
@@ -125,6 +125,7 @@ function Viewer({
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
+      if (!shortcutsEnabled()) return;
       if (isTypingTarget(event.target)) return;
       // The arrows still work on a focused control; only the bare letters are
       // withheld, because those are the ones a control may want for itself.

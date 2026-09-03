@@ -104,6 +104,28 @@ async def a_searchable_document(session, signed_in):
     return library
 
 
+async def test_the_search_route_lets_a_caller_opt_out(client, signed_in) -> None:
+    """The parameter has to reach the wire, or the flag helps nobody.
+
+    `search(facets=False)` existed for a round with no way to ask for it: the
+    route hard-coded the default, so the command palette — the whole reason
+    the flag was added — still paid for an aggregation it discards on every
+    keystroke.
+    """
+    await signed_in()
+
+    full = await client.get("/api/search", params={"q": "discharge"})
+    assert full.status_code == 200, full.text
+    assert "facets" in full.json()
+
+    lean = await client.get("/api/search", params={"q": "discharge", "facets": "false"})
+    assert lean.status_code == 200, lean.text
+    assert lean.json()["facets"] == {}
+    assert lean.json()["total"] == full.json()["total"], (
+        "opting out of the breakdown must not change the count"
+    )
+
+
 async def test_facets_false_skips_the_aggregation_and_still_counts(
     session, a_searchable_document
 ) -> None:

@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { isInteractiveTarget, isTypingTarget } from "./keyboard";
+import {
+  isInteractiveTarget,
+  isTypingTarget,
+  setShortcutsEnabled,
+  shortcutsEnabled,
+} from "./keyboard";
 
 function el(html: string): HTMLElement {
   const host = document.createElement("div");
@@ -50,5 +55,48 @@ describe("isInteractiveTarget", () => {
   it("is false for a null target rather than throwing", () => {
     expect(isInteractiveTarget(null)).toBe(false);
     expect(isTypingTarget(null)).toBe(false);
+  });
+});
+
+describe("the shortcuts off switch (WCAG 2.1.4)", () => {
+  afterEach(() => window.localStorage.clear());
+
+  it("is on by default, because the shortcuts are the feature", () => {
+    expect(shortcutsEnabled()).toBe(true);
+  });
+
+  it("stays off once turned off", () => {
+    setShortcutsEnabled(false);
+    expect(shortcutsEnabled()).toBe(false);
+  });
+
+  it("comes back on", () => {
+    setShortcutsEnabled(false);
+    setShortcutsEnabled(true);
+    expect(shortcutsEnabled()).toBe(true);
+  });
+
+  it("defaults to on when localStorage throws, rather than failing the screen", () => {
+    const original = window.localStorage.getItem;
+    window.localStorage.getItem = () => {
+      throw new Error("denied in this privacy mode");
+    };
+    try {
+      expect(shortcutsEnabled()).toBe(true);
+    } finally {
+      window.localStorage.getItem = original;
+    }
+  });
+
+  it("does not throw when it cannot store the preference", () => {
+    const original = window.localStorage.setItem;
+    window.localStorage.setItem = () => {
+      throw new Error("denied in this privacy mode");
+    };
+    try {
+      expect(() => setShortcutsEnabled(false)).not.toThrow();
+    } finally {
+      window.localStorage.setItem = original;
+    }
   });
 });

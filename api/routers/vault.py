@@ -74,7 +74,15 @@ async def state(
     vault = await service.get(session, user.id)
     return VaultStateOut(
         exists=vault is not None,
-        unlocked=sessions.is_unlocked(user.id),
+        # `peek`, not `is_unlocked`. This route reports *status* — whether a
+        # vault exists and whether it is open — and says nothing about what it
+        # holds, so reading it is not using the vault. It matters because the
+        # Import screen fetches it inside a `useLiveQuery` whose loader re-runs
+        # on a fallback timer whenever the live socket is degraded, so a
+        # touching read here kept the vault open for as long as that tab
+        # existed. Every route that reads actual contents goes through
+        # `sessions.key` / `service.require_key`, which do touch.
+        unlocked=sessions.peek(user.id) is not None,
         pin_enabled=bool(vault and vault.pin_wrapped),
         pin_failures=vault.pin_failures if vault else 0,
     )

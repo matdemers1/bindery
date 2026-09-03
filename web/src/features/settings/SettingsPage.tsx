@@ -1,9 +1,10 @@
 import { Settings as SettingsIcon } from "lucide-react";
 
 import PageHeader from "../../components/PageHeader";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 
 import LogViewer from "../../components/LogViewer";
+import { setShortcutsEnabled, shortcutsEnabled } from "../../lib/keyboard";
 import PendingReviewPanel from "../../components/PendingReview";
 import { ApiError, api, type ApiTokenRecord, type IssuedApiToken, type OffsiteTest, type Settings, type SettingsTest } from "../../api";
 
@@ -169,6 +170,7 @@ export default function SettingsPage() {
       <NotificationSettings settings={settings} onSaved={load} />
       <OffsiteReplication settings={settings} onSaved={load} />
       <ApiTokens />
+      <Keyboard />
 
       <section className="mt-6">
         <h2 className="text-base font-medium">Diagnostics</h2>
@@ -403,6 +405,39 @@ const SCOPE_LABELS: Record<string, string> = {
  * none is a credential, and the KMS key id in particular has to be readable
  * *outside* the archive, because a restore needs to know which key to ask for.
  */
+function Keyboard() {
+  const [on, setOn] = useState(shortcutsEnabled);
+  const id = useId();
+
+  return (
+    <section className="mt-6 rounded-lg border border-edge bg-surface p-5">
+      <h2 className="text-base font-medium">Keyboard</h2>
+      <p className="mb-3 mt-1 max-w-2xl text-sm text-muted">
+        Review and the viewer answer single keys — <kbd>j</kbd> and <kbd>k</kbd> to
+        move, <kbd>a</kbd> to accept, <kbd>u</kbd> to undo — without any modifier.
+        They already stand aside while you are typing and while a correction is
+        open. Turn them off if a stray keystroke, or dictation, can reach the page.
+      </p>
+      <label htmlFor={id} className="flex items-center gap-2 text-sm">
+        <input
+          id={id}
+          type="checkbox"
+          checked={on}
+          className="size-4 rounded border-field"
+          onChange={(event) => {
+            setOn(event.target.checked);
+            setShortcutsEnabled(event.target.checked);
+          }}
+        />
+        Single-key shortcuts
+      </label>
+      <p className="mt-2 text-xs text-muted">
+        Stored in this browser, not on your account.
+      </p>
+    </section>
+  );
+}
+
 function OffsiteReplication({
   settings,
   onSaved,

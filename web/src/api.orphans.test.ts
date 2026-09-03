@@ -76,13 +76,6 @@ const UNWIRED: Record<string, string> = {
   vaultSetPin:
     "POST /api/vault/pin. The vault ships with a passphrase; the PIN is a second, " +
     "unfinished unlock path (ADR-012).",
-  setQuota:
-    "POST /admin/accounts/{id}/quota. The quota is shown on the People screen and " +
-    "enforced in api/quota.py, so the only way to change one after invitation is a " +
-    "database write. This wants a control on the existing row in AdminPage.tsx.",
-  grantAdmin:
-    "POST /admin/accounts/{id}/admin. Same as setQuota — surfaced, enforced, and " +
-    "changeable only from psql.",
   totpStatus:
     "GET /account/totp. AccountPage reads TOTP state from the account payload instead; " +
     "this is the standalone endpoint and is a deletion candidate.",
