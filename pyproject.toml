@@ -23,7 +23,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg",
     "alembic",
-    "pydantic>=2",
+    "pydantic>=2.13.5",
     "pydantic-settings",
     "argon2-cffi",
     "pyjwt",
