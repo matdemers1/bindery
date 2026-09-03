@@ -364,6 +364,33 @@ Push to `main`, wait for the build, then on the Zima. The commands are numbered
 because the order is the whole procedure, and because the two that are easiest
 to skip — the dump and `alembic current` — are the two you will want back.
 
+> [!warning] The Zima's `docker-compose.yml` is its own file, and pulling images
+> does not update it.
+> `/DATA/AppData/bindery/docker-compose.yml` is a hand-maintained copy. It is
+> *derived* from `infra/zimaos/bindery.zimaos.yaml`, not synchronised with it,
+> so **a change to the compose in the repository does not reach this host at
+> all** — `docker compose pull` fetches images, and nothing fetches the file
+> that says how to run them.
+>
+> This is not hypothetical: the 2026-09-02 review added a worker healthcheck
+> (CR-029), graceful-shutdown windows (CR-094) and log size caps (CR-095), all
+> of them green in CI and none of them running in production until the host's
+> own file was edited by hand three weeks later. The failure is silent in the
+> worst way — the repository, the tests and the manifest all agree, and the box
+> is the only thing that disagrees.
+>
+> So, before step 1: `git diff <last deployed sha>..HEAD -- infra/` and port
+> anything that touched the compose or the manifest. Restart is required for it
+> to take — `stop_grace_period`, `logging` and `healthcheck` only apply when a
+> container is recreated. The `user:` change (CR-091) is the exception, because
+> the uid is baked into the image by the Dockerfile and arrives with the pull.
+>
+> Checking what is actually running beats reading either file:
+> ```bash
+> docker inspect --format '{{.Config.User}} {{.Config.StopTimeout}} {{.HostConfig.LogConfig.Config}}' bindery-worker
+> docker ps --filter name=bindery --format '{{.Names}}\t{{.Status}}'   # health, or its absence
+> ```
+
 ```bash
 cd /DATA/AppData/bindery
 export DOCKER_CONFIG=/DATA/.docker            # or the pull is anonymous, and 401s
