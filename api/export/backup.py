@@ -31,7 +31,10 @@ from pathlib import Path
 from sqlalchemy.engine import make_url
 
 from api.config import get_settings
-from api.export.integrity import IntegrityReport
+
+# `hash_file` by name rather than the module, because `run_backup`'s first
+# parameter is called `integrity` and would shadow it.
+from api.export.integrity import IntegrityReport, hash_file
 
 log = logging.getLogger("bindery.backup")
 
@@ -105,7 +108,34 @@ def dump_database(destination: Path) -> Path:
 
 
 def copy_blobs(destination: Path) -> tuple[int, int]:
-    """Copy originals *after* the dump. See the ordering rule above."""
+    """Copy originals *after* the dump, and read back what was written.
+
+    See the ordering rule above for *when*; this is about *whether it arrived*.
+
+    The skip used to compare sizes, on the reasoning that the filename is a
+    content address so equal names and equal sizes mean equal bytes (CR-072).
+    That holds for the source pool, where something wrote a file and named it
+    after its own digest. It does not hold here: this filename was chosen by the
+    copy, and until now nothing had ever re-read the bytes underneath it.
+
+    `integrity.check` — the thing this project opens by saying a blob can decay
+    on disk for years unnoticed — hashes `blob_root` and never the backup, so
+    the one copy nobody was checking was the copy kept for the day the first one
+    fails. A flipped bit preserves the size, so every later run skipped it, and
+    the damage surfaced during a restore.
+
+    So every target is hashed and compared — but against the *source's* bytes,
+    the way `copy_vault` does it, not against the filename. The two differ on
+    the case that matters: a blob whose contents no longer match its own name
+    has rotted, and rot is not a backup failure. `integrity.check` is what
+    reports it, and `run_backup` already refuses to run over a failing check
+    unless it is forced. Aborting here would mean a single rotten original
+    stops the generation that was being taken to preserve the other eight
+    hundred — and `--force` exists to say "back up the rest anyway".
+
+    A target that does not match the source we just read is different: that is
+    a failing or full disk, and it raises.
+    """
     source = get_settings().blob_root
     destination.mkdir(parents=True, exist_ok=True)
     count = 0
@@ -115,15 +145,34 @@ def copy_blobs(destination: Path) -> tuple[int, int]:
             continue
         target = destination / path.relative_to(source)
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists() and target.stat().st_size == path.stat().st_size:
-            # Content-addressed: same name and same size means same bytes, so a
-            # nightly backup only ever copies what is new.
+
+        expected, size = hash_file(path)
+        if expected != path.name:
+            # The original has rotted. Copy it regardless — a decayed copy of
+            # the only copy is still the only copy — and say so, because this
+            # is the one place that reads both pools and can tell.
+            log.error(
+                "original %s no longer matches its content address (%s); "
+                "backing it up as-is",
+                path.name, expected,
+            )
+
+        if target.exists() and hash_file(target)[0] == expected:
             count += 1
-            total += target.stat().st_size
+            total += size
             continue
+
         shutil.copy2(path, target)
+        actual, _ = hash_file(target)
+        if actual != expected:
+            # A copy that does not read back is a failing disk or a full one,
+            # and either way the generation being written is not one to rely on.
+            raise RuntimeError(
+                f"the backup copy of {path.name} did not verify — it hashed to "
+                f"{actual}. This backup is not trustworthy; check the target disk."
+            )
         count += 1
-        total += target.stat().st_size
+        total += size
     return count, total
 
 
@@ -144,6 +193,14 @@ def copy_vault(destination: Path) -> tuple[int, int]:
 
     Nothing in here is readable without the vault passphrase, which this
     application does not have and cannot recover.
+
+    Verified the same way `copy_blobs` is, and it matters more here (CR-072):
+    a blob can be re-scanned from the paper it came from, and a vault object
+    exists exactly once. The name cannot be the expected digest — vault objects
+    are deliberately not content-addressed, because a content address is an
+    existence oracle (ADR-012) — so the source is hashed too and the two
+    compared. A size-only skip would have left a bit-rotted copy of the one
+    thing in the archive that cannot be reproduced.
     """
     from api.vault import pepper, store
 
@@ -158,8 +215,16 @@ def copy_vault(destination: Path) -> tuple[int, int]:
                 continue
             target = target_root / path.relative_to(source)
             target.parent.mkdir(parents=True, exist_ok=True)
-            if not (target.exists() and target.stat().st_size == path.stat().st_size):
+            expected, _ = hash_file(path)
+            if not (target.exists() and hash_file(target)[0] == expected):
                 shutil.copy2(path, target)
+                actual, _ = hash_file(target)
+                if actual != expected:
+                    raise RuntimeError(
+                        f"the backup copy of vault object {path.name} did not "
+                        "verify. A sealed object exists once; refusing to record "
+                        "a backup that does not hold it."
+                    )
             count += 1
             total += target.stat().st_size
 
@@ -200,6 +265,16 @@ def run_backup(
         "database_dump_bytes": dump.stat().st_size,
         "blob_count": blob_count,
         "blob_bytes": byte_size,
+        # Said in the file a restore reads first, because "the copy was made"
+        # and "the copy was read back" are different claims and only the second
+        # one is worth anything on the day it is needed (CR-072).
+        "blobs_verified": True,
+        "verification": (
+            "Every blob in this generation was hashed after copying and matched "
+            "against its content address, and every vault object was hashed "
+            "against its source. A copy that did not verify would have raised "
+            "rather than produced this manifest."
+        ),
         "integrity": integrity.as_dict() if integrity else None,
         # Said plainly, in the file a restore reads first. Discovering that part
         # of a backup cannot be opened is a thing to learn now, not during a

@@ -34,6 +34,11 @@ from api.storage.blobs import CHUNK_SIZE, store_stream
 
 log = logging.getLogger("bindery.import")
 
+# Rows per INSERT during a scan. Large enough that 20,000 files cost twenty
+# round trips rather than twenty thousand; small enough that one statement's
+# parameters stay well inside what the driver will bind.
+INSERT_BATCH = 1000
+
 
 async def _file_chunks(path: Path):
     with path.open("rb") as handle:
@@ -53,13 +58,25 @@ async def scan(session: AsyncSession, import_session: ImportSession) -> ImportSe
     result = walk(root)
     report, cost = await analyse(session, root, result)
 
-    # One row per file, keyed on path, so re-scanning converges.
-    for path in result.files:
+    # One row per file, keyed on path, so re-scanning converges — in batches,
+    # because this is the entry point for absorbing tens of thousands of files
+    # and a statement per file is that many sequential round trips inside one
+    # open transaction, with every other request queued behind it. The size
+    # comes from the walk, which already stat()'d every one of these paths.
+    for chunk in range(0, len(result.files), INSERT_BATCH):
+        rows = [
+            {
+                "id": uuid.uuid4(),
+                "session_id": import_session.id,
+                "path": str(path),
+                "byte_size": result.sizes.get(path),
+                "state": ImportItemState.PENDING.value,
+            }
+            for path in result.files[chunk : chunk + INSERT_BATCH]
+        ]
         await session.execute(
             insert(ImportItem)
-            .values(id=uuid.uuid4(), session_id=import_session.id, path=str(path),
-                    byte_size=path.stat().st_size if path.exists() else None,
-                    state=ImportItemState.PENDING.value)
+            .values(rows)
             .on_conflict_do_nothing(index_elements=[ImportItem.session_id, ImportItem.path])
         )
 
@@ -159,18 +176,37 @@ async def ingest_batch(
             blob = await store_stream(_file_chunks(path))
             item.sha256 = blob.sha256
 
-            result = await ingest.register(
-                session, blob,
-                library_id=import_session.library_id,
-                ingest_source=IngestSource.BULK_IMPORT,
-                original_filename=path.name,
-                mime_type=None,
-                actor_type=ActorType.SYSTEM,
-                metadata={"import_session": str(import_session.id), "source_path": str(path)},
-            )
-            item.source_file_id = result.source_file.id
+            # Everything decided so far goes in before the savepoint opens —
+            # this item's hash, and every earlier item's outcome. Left pending,
+            # the next statement's autoflush would write them *inside* the
+            # savepoint, and rolling it back would take them with it.
+            await session.flush()
+
+            # A savepoint, so that one file's database error is one file's.
+            # `register` inserts and flushes; a unique violation racing another
+            # importer, or any connection-level error, leaves the session in a
+            # failed transaction, and without this every later statement in the
+            # loop raised `PendingRollbackError` and the closing flush took the
+            # route down with a 500 — losing the whole batch's work *and* every
+            # FAILED marker explaining why. The marker below is written after
+            # the savepoint has been rolled back, so it survives.
+            async with session.begin_nested():
+                result = await ingest.register(
+                    session, blob,
+                    library_id=import_session.library_id,
+                    ingest_source=IngestSource.BULK_IMPORT,
+                    original_filename=path.name,
+                    mime_type=None,
+                    actor_type=ActorType.SYSTEM,
+                    metadata={
+                        "import_session": str(import_session.id), "source_path": str(path)
+                    },
+                )
+                source_file_id = result.source_file.id
+                duplicate = result.duplicate
+            item.source_file_id = source_file_id
             item.state = (
-                ImportItemState.DUPLICATE if result.duplicate else ImportItemState.INGESTED
+                ImportItemState.DUPLICATE if duplicate else ImportItemState.INGESTED
             )
             done += 1
         except Exception as exc:  # one bad file must not end the import

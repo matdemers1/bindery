@@ -14,6 +14,7 @@ import uuid
 from dataclasses import dataclass
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.db.models import Correspondent, Document, DocumentTag, DuplicatePair, Tag
@@ -147,51 +148,83 @@ async def detect_duplicates(
     Two scans of one deed at different qualities are both worth keeping until a
     human decides otherwise, and nothing here deletes on its own.
     """
-    documents = (
-        await session.execute(
-            sa.select(Document.id, Document.embedding).where(
-                Document.library_id == library_id, Document.embedding.is_not(None), live()
-            )
+    # One statement for the whole library, not one KNN probe per document plus
+    # an existence check per neighbour. This used to load every embedding in the
+    # library into the api process first — 512 floats each (ADR-007), so ~200 MB
+    # resident at 100K documents before a single comparison — and then issue
+    # 1 + N + 5N round trips, each of the middle ones walking the HNSW index
+    # again for a document the previous statement had already been standing next
+    # to.
+    #
+    # `JOIN LATERAL` asks the same question of the index, once per row, inside
+    # Postgres: the same top-5 neighbours, in the same order, over the same
+    # partial HNSW index (`ix_document_embedding_hnsw`, `WHERE superseded_at IS
+    # NULL`) — so the answer is unchanged and only the round trips are gone.
+    #
+    # The neighbour search is deliberately *not* narrowed to `id > a.id`. That
+    # would halve the probes and also change what is found: A's five nearest and
+    # A's five nearest-with-a-larger-id are different sets. The symmetry is
+    # collapsed afterwards instead, on the ordered pair.
+    outer = sa.orm.aliased(Document, name="a")
+    distance = Document.embedding.cosine_distance(outer.embedding)
+    neighbours = (
+        sa.select(Document.id.label("other_id"), distance.label("distance"))
+        .where(
+            Document.id != outer.id,
+            Document.library_id == library_id,
+            Document.embedding.is_not(None),
+            live(),
         )
-    ).all()
+        .order_by(distance)
+        .limit(5)
+        .lateral("neighbour")
+    )
+    similarity = 1.0 - neighbours.c.distance
+    # The check constraint requires an ordered pair, and A→B and B→A both reach
+    # the top-5 of one another, so the same pair arrives twice. `least`/`greatest`
+    # order it and the grouping keeps one — the same job `sorted(..., key=str)`
+    # and the existence query did between them, in the same order, because
+    # Postgres compares uuids the way their hex renders.
+    a_id = sa.func.least(outer.id, neighbours.c.other_id).label("a_id")
+    b_id = sa.func.greatest(outer.id, neighbours.c.other_id).label("b_id")
+    candidates = (
+        sa.select(a_id, b_id, sa.func.max(similarity).label("similarity"))
+        .select_from(outer)
+        .join(neighbours, sa.true())
+        .where(
+            outer.library_id == library_id,
+            outer.embedding.is_not(None),
+            outer.superseded_at.is_(None),
+            similarity >= threshold,
+        )
+        .group_by(a_id, b_id)
+        .subquery("candidates")
+    )
 
-    found = 0
-    for document_id, embedding in documents:
-        distance = Document.embedding.cosine_distance(embedding)
-        neighbours = (
-            await session.execute(
-                sa.select(Document.id, distance.label("distance"))
-                .where(
-                    Document.id != document_id,
-                    Document.library_id == library_id,
-                    Document.embedding.is_not(None),
-                    live(),
-                )
-                .order_by(distance)
-                .limit(5)
-            )
-        ).all()
-
-        for other_id, other_distance in neighbours:
-            similarity = 1.0 - float(other_distance)
-            if similarity < threshold:
-                continue
-            # The check constraint requires an ordered pair.
-            a, b = sorted([document_id, other_id], key=str)
-            exists = (
-                await session.execute(
-                    sa.select(DuplicatePair.id).where(
-                        DuplicatePair.document_a_id == a, DuplicatePair.document_b_id == b
-                    )
-                )
-            ).scalar_one_or_none()
-            if exists is None:
-                session.add(
-                    DuplicatePair(
-                        library_id=library_id, document_a_id=a, document_b_id=b,
-                        similarity=round(similarity, 4),
-                    )
-                )
-                found += 1
+    # `ON CONFLICT DO NOTHING` against the ordered-pair unique constraint, so the
+    # existence check is the constraint rather than a query per neighbour. The
+    # returned rows are the pairs that did not already exist, which is what
+    # `found` has always meant.
+    inserted = await session.execute(
+        insert(DuplicatePair)
+        .from_select(
+            ["id", "library_id", "document_a_id", "document_b_id", "similarity"],
+            sa.select(
+                # `uuid_pk()`'s default is a Python callable, and an
+                # INSERT … SELECT never passes through it.
+                sa.func.gen_random_uuid(),
+                sa.literal(library_id),
+                candidates.c.a_id,
+                candidates.c.b_id,
+                sa.cast(
+                    sa.func.round(sa.cast(candidates.c.similarity, sa.Numeric), 4),
+                    sa.Float,
+                ),
+            ),
+        )
+        .on_conflict_do_nothing(index_elements=["document_a_id", "document_b_id"])
+        .returning(DuplicatePair.id)
+    )
+    found = len(inserted.all())
     await session.flush()
     return found

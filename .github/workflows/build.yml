@@ -100,6 +100,14 @@ jobs:
         # failed the image build as an opaque Docker error rather than here.
         run: npm run typecheck
 
+      - name: vitest
+        working-directory: web
+        # The frontend unit suite (CR-123). It belongs in the lint gate rather
+        # than beside pytest: it needs no database and no browser, so running it
+        # here keeps the cheapest gate first and stops a broken component
+        # reaching the e2e job's three image builds.
+        run: npm test
+
   unit:
     name: unit (pytest)
     needs: lint
@@ -260,18 +268,55 @@ jobs:
         # upload and found documents that were not yet searchable. Two specs
         # failed on that and one passed, because it matched on text rather than
         # on a link.
+        #
+        # CR-126. It is a gate, not a pause. Two ways it used to pass on a
+        # pipeline that had not run: the loop fell out on exhaustion and the job
+        # carried on, and the count read only `queued`/`running`, so a worker
+        # dead-lettering every job satisfied `pending = 0` on the first poll.
+        # Either way the next tier went red with a retrieval-shaped Playwright
+        # failure pointing at the wrong subsystem — or passed, on an archive
+        # whose pipeline never ran. The summary below used to be printed and
+        # never read; now it is asserted on.
         run: |
+          drained=
           for i in $(seq 1 60); do
             pending=$(docker compose --env-file .env -f infra/docker-compose.yml \
               exec -T postgres psql -U bindery -d bindery -tAc \
               "select count(*) from job where state in ('queued','running')" | tr -d '[:space:]')
             echo "  in flight: $pending"
-            [ "$pending" = "0" ] && break
+            if [ "$pending" = "0" ]; then drained=yes; break; fi
             sleep 5
           done
           docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
             psql -U bindery -d bindery -c \
             "select state, count(*) from job group by state order by 1;"
+          if [ -z "$drained" ]; then
+            echo "::error::the pipeline did not drain in 5 minutes"
+            exit 1
+          fi
+          # The only jobs allowed to be unhealthy are the two
+          # scripts/seed-e2e-states.py deliberately plants — one declined and
+          # one dead-lettered, on invented filenames the pipeline specs exist to
+          # check. Excluded by name rather than by count, so a real failure that
+          # happens to arrive alongside them still fails this step.
+          unexpected=$(docker compose --env-file .env -f infra/docker-compose.yml \
+            exec -T postgres psql -U bindery -d bindery -tAc \
+            "select count(*) from job j
+               left join source_file f on f.id = j.source_file_id
+              where j.state in ('failed', 'dead_letter', 'declined')
+                and coalesce(f.original_filename, '') not in
+                    ('scan-that-timed-out.pdf', 'laser-cutting-asset.png')" | tr -d '[:space:]')
+          echo "  unexpected failures: $unexpected"
+          if [ "$unexpected" != "0" ]; then
+            docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
+              psql -U bindery -d bindery -c \
+              "select j.state, j.stage, f.original_filename, j.last_error
+                 from job j left join source_file f on f.id = j.source_file_id
+                where j.state in ('failed', 'dead_letter', 'declined')
+                order by 1, 3;"
+            echo "::error::the pipeline failed jobs the seed did not plant"
+            exit 1
+          fi
 
       - name: Playwright
         run: |

@@ -1,10 +1,25 @@
-"""Request and response shapes."""
+"""Request and response shapes.
+
+Grouped by **domain**, in the same seams the rest of the codebase already uses —
+the 21 routers, `web/src/features/<domain>/`, `api/vault/`, `api/export/`,
+`api/search/`. The banners used to name build phases instead (CR-090), which is
+an index only somebody who lived through the phases can read, and it had already
+stopped being maintained: the vault, editing and photo models had all landed
+outside the region their phase number implied.
+
+Adding a model: put it under the domain banner it belongs to. If it belongs to
+none of them, add a banner — a new phase number is not a place.
+"""
 
 import uuid
 from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# --------------------------------------------------------------------------
+# Authentication and the caller's own identity
+# --------------------------------------------------------------------------
 
 
 class LoginRequest(BaseModel):
@@ -27,6 +42,11 @@ class UserOut(BaseModel):
     # So the shell knows whether to draw the People link. Hiding it is
     # presentation only — `require_admin` answers 404 to everyone else.
     is_admin: bool = False
+
+
+# --------------------------------------------------------------------------
+# Libraries, source files, documents and segments
+# --------------------------------------------------------------------------
 
 
 class LibraryOut(BaseModel):
@@ -133,6 +153,11 @@ class SourceFileDetailOut(BaseModel):
     pages: list[PageOut]
 
 
+# --------------------------------------------------------------------------
+# Corrections — editing a document by hand, and who owns each field
+# --------------------------------------------------------------------------
+
+
 class DocumentEditIn(BaseModel):
     """A correction (REQ-188).
 
@@ -184,6 +209,11 @@ class FieldSourceOut(BaseModel):
     event_id: uuid.UUID | None = None
 
 
+# --------------------------------------------------------------------------
+# Media metadata, and the full document view
+# --------------------------------------------------------------------------
+
+
 class MediaMetadataOut(BaseModel):
     """What the file said about itself (REQ-193, REQ-194)."""
 
@@ -220,6 +250,11 @@ class DocumentDetailOut(BaseModel):
     tags: list["TagOut"] = []
     # Present for photographs and videos; None for a scan of a form.
     media: MediaMetadataOut | None = None
+
+
+# --------------------------------------------------------------------------
+# Search — page hits, facets and results
+# --------------------------------------------------------------------------
 
 
 class PageHitOut(BaseModel):
@@ -271,6 +306,11 @@ class SearchResponseOut(BaseModel):
     results: list[SearchResultOut]
     facets: dict[str, list[FacetOut]]
     suggestions: list[str]
+
+
+# --------------------------------------------------------------------------
+# Taxonomy, classification, provenance and the review queue
+# --------------------------------------------------------------------------
 
 
 class TagOut(BaseModel):
@@ -358,6 +398,11 @@ class ReviewQueueOut(BaseModel):
     documents: list[DocumentOut]
 
 
+# --------------------------------------------------------------------------
+# Rules — the deterministic override
+# --------------------------------------------------------------------------
+
+
 class RuleIn(BaseModel):
     library_id: uuid.UUID
     name: str = Field(min_length=1)
@@ -391,6 +436,11 @@ class RuleDryRunOut(BaseModel):
     matched: int
     truncated: bool
     matches: list[RuleMatchOut]
+
+
+# --------------------------------------------------------------------------
+# Jobs and pipeline status
+# --------------------------------------------------------------------------
 
 
 class JobOut(BaseModel):
@@ -428,6 +478,11 @@ class PipelineStatusOut(BaseModel):
     in_flight: list[JobOut]
     # Correctly refused inputs. Listed, never alarmed on.
     declined: list[JobOut] = []
+
+
+# --------------------------------------------------------------------------
+# Browsing the archive
+# --------------------------------------------------------------------------
 
 
 class ArchiveEntryOut(BaseModel):
@@ -480,6 +535,11 @@ class TreeGroupOut(BaseModel):
 class TreeOut(BaseModel):
     group_by: str
     groups: list[TreeGroupOut]
+
+
+# --------------------------------------------------------------------------
+# Backlog import
+# --------------------------------------------------------------------------
 
 
 class ImportStartIn(BaseModel):
@@ -538,6 +598,11 @@ class ImportItemOut(BaseModel):
     error: str | None
 
 
+# --------------------------------------------------------------------------
+# Bulk edit
+# --------------------------------------------------------------------------
+
+
 class BulkEditIn(BaseModel):
     document_ids: list[uuid.UUID] = Field(min_length=1)
     actions: dict[str, Any]
@@ -548,6 +613,11 @@ class BulkResultOut(BaseModel):
     # Present only after an apply; this is what undo takes.
     operation_id: uuid.UUID | None
     changes: list[dict[str, Any]]
+
+
+# --------------------------------------------------------------------------
+# Entities — correspondents, assets, shelves, taxonomy health, duplicates
+# --------------------------------------------------------------------------
 
 
 class CorrespondentOut(BaseModel):
@@ -640,6 +710,11 @@ class DuplicatePairOut(BaseModel):
     similarity: float
 
 
+# --------------------------------------------------------------------------
+# Settings, and the closed set of models
+# --------------------------------------------------------------------------
+
+
 class ModelChoiceOut(BaseModel):
     id: str
     name: str
@@ -698,6 +773,11 @@ class SettingsTestOut(BaseModel):
     output_tokens: int | None = None
 
 
+# --------------------------------------------------------------------------
+# The private vault
+# --------------------------------------------------------------------------
+
+
 class VaultStateOut(BaseModel):
     """What a locked vault is willing to say about itself.
 
@@ -747,6 +827,11 @@ class VaultSearchOut(BaseModel):
     pages_scanned: int = 0
     elapsed_ms: int = 0
     slow: bool = False
+
+
+# --------------------------------------------------------------------------
+# Offsite replication
+# --------------------------------------------------------------------------
 
 
 class OffsiteRunOut(BaseModel):
@@ -808,90 +893,9 @@ class HealthOut(BaseModel):
     version: str
 
 
-__all__ = [
-    "ArchiveEntryOut",
-    "ArchiveOut",
-    "ArchiveStatsOut",
-    "AssetIn",
-    "AssetOut",
-    "AssetTimelineOut",
-    "AuditEventOut",
-    "AuditPageOut",
-    "BackupOut",
-    "BulkEditIn",
-    "BulkResultOut",
-    "ClassificationOut",
-    "CorrespondentOut",
-    "DocumentDetailOut",
-    "DocumentEditIn",
-    "DocumentEditOut",
-    "DocumentOut",
-    "DuplicatePairOut",
-    "ExportOut",
-    "ExportRequestIn",
-    "FacetOut",
-    "FieldProvenanceOut",
-    "FieldSourceOut",
-    "FileTreeNodeOut",
-    "FileTreeOut",
-    "GoBagIn",
-    "HealthOut",
-    "ImportItemOut",
-    "ImportLogLineOut",
-    "ImportPresetsOut",
-    "ImportSessionOut",
-    "ImportStartIn",
-    "IntegrityOut",
-    "JobOut",
-    "KnownFormOut",
-    "LibraryOut",
-    "LoginRequest",
-    "MediaMetadataOut",
-    "MergeIn",
-    "MergePreviewOut",
-    "MirrorOut",
-    "OffsiteRunOut",
-    "OffsiteStatusOut",
-    "OffsiteTestOut",
-    "PageHitOut",
-    "PageOut",
-    "PipelineStatusOut",
-    "ReviewQueueOut",
-    "RuleDryRunOut",
-    "RuleIn",
-    "RuleMatchOut",
-    "RuleOut",
-    "SavedSearchIn",
-    "SavedSearchOut",
-    "SearchResponseOut",
-    "SearchResultOut",
-    "SegmentIn",
-    "SegmentListOut",
-    "SegmentReplaceIn",
-    "SettingsOut",
-    "SettingsTestOut",
-    "SettingsUpdateIn",
-    "SimilarOut",
-    "SourceFileDetailOut",
-    "SourceFileOut",
-    "StageCount",
-    "TagOut",
-    "TaxonomyHealthOut",
-    "TaxonomyOptionOut",
-    "TreeGroupOut",
-    "TreeOut",
-    "UploadResult",
-    "UserOut",
-    "VaultItemOut",
-    "VaultSearchHitOut",
-    "VaultSearchOut",
-    "VaultStateOut",
-    "WhyPanelOut",
-]
-
 
 # --------------------------------------------------------------------------
-# Phase 6 — trust, export and resilience
+# Trust — export, integrity, mirror, backup, the audit log and the file tree
 # --------------------------------------------------------------------------
 
 
@@ -1002,7 +1006,7 @@ class FileTreeOut(BaseModel):
 
 
 # --------------------------------------------------------------------------
-# Phase 7 — household and libraries
+# Household — members, library detail, and moving a file between libraries
 # --------------------------------------------------------------------------
 
 
@@ -1048,7 +1052,7 @@ class MovePlanOut(BaseModel):
 
 
 # --------------------------------------------------------------------------
-# Phase 8 — health and Q&A
+# Health, Ask, API tokens, re-classification and raw OCR text
 # --------------------------------------------------------------------------
 
 
@@ -1231,6 +1235,11 @@ class PipelineFilesOut(BaseModel):
     stages: list[str]
 
 
+# --------------------------------------------------------------------------
+# Photographs, and the unify proposal
+# --------------------------------------------------------------------------
+
+
 class PhotoOut(BaseModel):
     document_id: uuid.UUID
     source_file_id: uuid.UUID
@@ -1287,7 +1296,7 @@ class UnifyApplyIn(BaseModel):
 
 
 # --------------------------------------------------------------------------
-# Accounts (Phase 10)
+# Accounts — quota, password, two-factor, invitations and administration
 # --------------------------------------------------------------------------
 
 
@@ -1380,3 +1389,136 @@ class AdminAccountOut(BaseModel):
     storage_quota_bytes: int | None
     used_bytes: int
     created_at: datetime
+
+# Every model in this module, in one place, asserted by
+# tests/test_schemas_index.py so it cannot fall behind again.
+# It used to sit two-thirds of the way up the file and list 78 of 124 —
+# every model defined after it was silently absent, which is the same
+# unmaintained-index failure the domain banners above were written to fix
+# (CR-090). At the bottom, it cannot be outgrown by the next class.
+__all__ = [
+    "AcceptInviteIn",
+    "AccountOut",
+    "AdminAccountOut",
+    "AlertOut",
+    "ApiTokenIn",
+    "ApiTokenIssuedOut",
+    "ApiTokenOut",
+    "ArchiveEntryOut",
+    "ArchiveOut",
+    "ArchiveStatsOut",
+    "AskIn",
+    "AskOut",
+    "AssetIn",
+    "AssetOut",
+    "AssetTimelineOut",
+    "AuditEventOut",
+    "AuditPageOut",
+    "BackupOut",
+    "BulkEditIn",
+    "BulkResultOut",
+    "ChangePasswordIn",
+    "CitationOut",
+    "ClassificationOut",
+    "ConsultedOut",
+    "CorrespondentOut",
+    "DocumentDetailOut",
+    "DocumentEditIn",
+    "DocumentEditOut",
+    "DocumentOut",
+    "DuplicatePairOut",
+    "ExportOut",
+    "ExportRequestIn",
+    "ExtractionOut",
+    "FacetOut",
+    "FieldProvenanceOut",
+    "FieldSourceOut",
+    "FileProgressOut",
+    "FileTreeNodeOut",
+    "FileTreeOut",
+    "GoBagIn",
+    "HealthOut",
+    "HealthPanelOut",
+    "ImportItemOut",
+    "ImportLogLineOut",
+    "ImportPresetsOut",
+    "ImportSessionOut",
+    "ImportStartIn",
+    "IntegrityOut",
+    "InviteIn",
+    "InviteOut",
+    "JobOut",
+    "KnownFormOut",
+    "LibraryCreateIn",
+    "LibraryDetailOut",
+    "LibraryOut",
+    "LogEntryOut",
+    "LogPageOut",
+    "LoginRequest",
+    "MediaMetadataOut",
+    "MemberOut",
+    "MembershipIn",
+    "MergeIn",
+    "MergePreviewOut",
+    "MirrorOut",
+    "ModelChoiceOut",
+    "MovePlanOut",
+    "MoveRequestIn",
+    "OcrPageTextOut",
+    "OcrTextOut",
+    "OffsiteRunOut",
+    "OffsiteStatusOut",
+    "OffsiteTestOut",
+    "PageHitOut",
+    "PageOut",
+    "PendingReasonOut",
+    "PendingReviewOut",
+    "PhotoOut",
+    "PhotoWallOut",
+    "PipelineFilesOut",
+    "PipelineStatusOut",
+    "QuotaOut",
+    "ReclassifyIn",
+    "ReclassifyResultOut",
+    "RedeemResetIn",
+    "RescanResultOut",
+    "ResetCodeOut",
+    "ReviewQueueOut",
+    "RuleDryRunOut",
+    "RuleIn",
+    "RuleMatchOut",
+    "RuleOut",
+    "SavedSearchIn",
+    "SavedSearchOut",
+    "SearchResponseOut",
+    "SearchResultOut",
+    "SegmentIn",
+    "SegmentListOut",
+    "SegmentReplaceIn",
+    "SettingsOut",
+    "SettingsTestOut",
+    "SettingsUpdateIn",
+    "SimilarOut",
+    "SourceFileDetailOut",
+    "SourceFileOut",
+    "StageCount",
+    "TagOut",
+    "TaxonomyHealthOut",
+    "TaxonomyOptionOut",
+    "TotpConfirmIn",
+    "TotpEnrolOut",
+    "TotpStatusOut",
+    "TreeGroupOut",
+    "TreeOut",
+    "UnifyApplyIn",
+    "UnifyGroupOut",
+    "UnifyMemberOut",
+    "UnifyProposalOut",
+    "UploadResult",
+    "UserOut",
+    "VaultItemOut",
+    "VaultSearchHitOut",
+    "VaultSearchOut",
+    "VaultStateOut",
+    "WhyPanelOut",
+]

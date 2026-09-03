@@ -82,9 +82,18 @@ docker compose --env-file .env -f infra/docker-compose.yml --profile test \
 host, because ZimaOS's read-only root and split `HOME` break SSH keys and
 private registry pulls in ways that look like unrelated problems.
 
-**Phase 1** (retrieval) and **Phase 2** (bundles, known forms) are built and
-verified. **Phase 3** (classification, provenance, the gate, rules, undo) is
-built — deliberately, with its own entry gate unmet.
+**Built: phases 0–11 and 13–18** — retrieval, bundles and known forms,
+classification with provenance and the gate, backlog import, entities,
+trust/export/resilience, household and libraries, ask/health/hardening, the
+first-real-corpus consolidation, accounts and administration, documentation and
+versioning, offsite replication, signal and navigation, the build gate, the
+private vault, corrections, and media/metadata/inbox. **Planned next: Phase 12**
+(later features). The per-phase truth is
+`D3 Cloud Vault/Bindery/Scope of Work.md` — this line is a pointer, not a second
+copy, because the copy is what went eleven phases stale.
+
+Phase 3 was built **deliberately, with its own entry gate unmet**, and that debt
+is still carried:
 
 > **The R-01 OCR accuracy figure has never been measured**, because the golden
 > corpus has no real fixtures. Phase 3's plan says not to start without it. It
@@ -103,8 +112,6 @@ Still open:
   document and cache hit rate are unmeasured. With `ANTHROPIC_API_KEY` unset the
   archive works and classification defers, which is the designed behaviour
   (REQ-055), not a broken state.
-
-Not started: Phase 4 (backlog import).
 
 ## Layering rule
 
@@ -596,6 +603,6 @@ OCR, the known-form matcher and search all have something true to do.
 
 ## Planning Corpus
 
-`D3 Cloud Vault/Bindery/` — Discovery Roadmap · Discovery & Requirements · Research Notes · Feature Ideas · Architecture · Data Model · Glossary · UX Flows & Screen Inventory · Risk Register · Test Strategy · Requirements Register (131 REQs) · Scope of Work (10 phases) · Phase Plans ×10 · ADR-001 … ADR-006
+`D3 Cloud Vault/Bindery/` — Discovery Roadmap · Discovery & Requirements · Research Notes · Feature Ideas · Architecture · Data Model · Glossary · UX Flows & Screen Inventory · Risk Register · Test Strategy · Requirements Register (157 REQs) · Scope of Work (phases 0–18, plus 3.5 and 8.5) · Phase Plans ×14 · ADR-001 … ADR-013
 
 Start a coding session with `/start-development bindery`.

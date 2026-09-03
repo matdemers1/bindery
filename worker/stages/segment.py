@@ -180,6 +180,13 @@ async def run_segment(session: AsyncSession, job: ClaimedJob) -> None:
             "%s was segmented by hand; leaving it alone", source_file.original_filename
         )
         source_file.state = SourceFileState.PROCESSED
+        # Leaving the boundaries alone is not a reason to leave the documents
+        # unindexed. A rescan re-OCRs a bundle a person cut by hand — which is
+        # exactly the kind of file people cut by hand — and returning here
+        # without the cascade stopped the replay dead: `page.text` carried the
+        # new OCR, `document.embedding` still described the old, and no
+        # classify or rules job was ever created for it.
+        await queue.requeue_stage(session, JobStage.EMBED, source_file_id=source_file.id)
         await session.flush()
         return
 

@@ -5,11 +5,14 @@ served through a handler that resolves the caller's visible libraries first, so
 a leaked URL is worth nothing without a session.
 """
 
+import asyncio
 import json
 import uuid
+from collections import OrderedDict
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.artifacts import derived_for, resolve_in_data
@@ -33,6 +36,55 @@ router = APIRouter(prefix="/files", tags=["files"])
 IMMUTABLE = "private, max-age=31536000, immutable"
 
 _NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+
+# One parse of a bundle's word boxes, not one per page turn.
+#
+# `ocr.json` holds every word rectangle of every page of a source file, and the
+# overlay is fetched one page at a time — so paging through a 300-page scan read
+# and `json.loads`'d the whole artifact 300 times, on the API's only event loop.
+# Tens of megabytes of blocking read and parse per page turn is slow for the
+# reader and a stall for everyone else on the box.
+#
+# Split per-page files would be better still, but they are the page stage's to
+# write. This is the half that lives on the read path: parse once, keep the
+# pages as the bytes they will be sent as, and serve the rest from memory.
+#
+# Keyed on the artifact's identity *and* its mtime and size, so a re-run of
+# normalize that rewrites the file invalidates the entry rather than serving
+# yesterday's boxes. Bounded in bytes rather than entries, because the entries
+# differ in size by three orders of magnitude.
+_BOXES_CACHE_BYTES = 32 * 1024 * 1024
+_boxes_cache: OrderedDict[tuple[str, int, int], dict[int, bytes]] = OrderedDict()
+_boxes_cache_bytes = 0
+
+
+def _load_page_boxes(path: Path) -> dict[int, bytes]:
+    """Every page of one word-box artifact, pre-encoded. Blocking; call in a thread."""
+    document = json.loads(path.read_text())
+    pages: dict[int, bytes] = {}
+    for page in document.get("pages", []):
+        number = page.get("number")
+        if isinstance(number, int):
+            pages[number] = json.dumps(page, separators=(",", ":")).encode()
+    return pages
+
+
+def _remember_page_boxes(key: tuple[str, int, int], pages: dict[int, bytes]) -> None:
+    global _boxes_cache_bytes
+
+    size = sum(len(payload) for payload in pages.values())
+    if size > _BOXES_CACHE_BYTES:
+        # One artifact larger than the whole budget would evict everything and
+        # then itself. Serve it and keep nothing.
+        return
+    previous = _boxes_cache.pop(key, None)
+    if previous is not None:
+        _boxes_cache_bytes -= sum(len(payload) for payload in previous.values())
+    _boxes_cache[key] = pages
+    _boxes_cache_bytes += size
+    while _boxes_cache_bytes > _BOXES_CACHE_BYTES:
+        _, evicted = _boxes_cache.popitem(last=False)
+        _boxes_cache_bytes -= sum(len(payload) for payload in evicted.values())
 
 
 @router.get("/{source_file_id}", response_model=SourceFileDetailOut)
@@ -91,7 +143,7 @@ async def page_boxes(
     page_number: int,
     user: AppUser = Depends(current_user),
     session: AsyncSession = Depends(get_session),
-) -> JSONResponse:
+) -> Response:
     """Word rectangles for one page — the highlight overlay's raw material.
 
     Only the requested page is returned: ocr.json for a 300-page bundle is large,
@@ -105,11 +157,25 @@ async def page_boxes(
     if not boxes_file.is_file():
         raise HTTPException(status.HTTP_410_GONE, "word boxes are missing")
 
-    document = json.loads(boxes_file.read_text())
-    for page in document.get("pages", []):
-        if page.get("number") == page_number:
-            return JSONResponse(page, headers={"Cache-Control": IMMUTABLE})
-    raise _NOT_FOUND
+    stat = boxes_file.stat()
+    key = (source_file.sha256, stat.st_mtime_ns, stat.st_size)
+    pages = _boxes_cache.get(key)
+    if pages is None:
+        # Off the event loop: the read and the parse are both blocking, and this
+        # is the process serving every other request in the archive.
+        pages = await asyncio.to_thread(_load_page_boxes, boxes_file)
+        _remember_page_boxes(key, pages)
+    else:
+        _boxes_cache.move_to_end(key)
+
+    payload = pages.get(page_number)
+    if payload is None:
+        raise _NOT_FOUND
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Cache-Control": IMMUTABLE},
+    )
 
 
 @router.get("/{source_file_id}/poster")

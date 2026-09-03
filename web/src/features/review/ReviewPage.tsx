@@ -5,6 +5,7 @@ import { Link } from "react-router";
 
 import { ApiError, api, type Document, type DocumentDetail } from "../../api";
 import { isTypingTarget } from "../../lib/keyboard";
+import { useLiveQuery } from "../../live/LiveProvider";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 
@@ -34,12 +35,12 @@ export default function ReviewPage() {
     setLoaded(true);
   }, []);
 
-  useEffect(() => {
-    // An async data load: the state is genuinely unavailable on the first
-    // render, so the extra pass is the point rather than a mistake.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
+  // Every route that changes what is waiting — the worker finishing a
+  // classification, an accept, an undo, a document edited from anywhere else —
+  // publishes `review`, so this is exactly the set that makes the queue stale.
+  // A mount-only load is what made the badge and this screen disagree about
+  // work that had already been accepted.
+  useLiveQuery(["review"], load);
 
   const current = documents[index];
 

@@ -76,6 +76,11 @@ MAX_BYTES = 2 * 1024 * 1024 * 1024
 @dataclass
 class WalkResult:
     files: list[Path] = field(default_factory=list)
+    # Size per file, kept because the walk already asked. The importer records
+    # one row per file and used to `stat()` each one again to fill it in — two
+    # more blocking syscalls per file, on the api's only event loop, for an
+    # answer this loop had in its hand.
+    sizes: dict[Path, int] = field(default_factory=dict)
     # (path, why) — surfaced to the user rather than swallowed.
     errors: list[tuple[str, str]] = field(default_factory=list)
     skipped_unsupported: int = 0
@@ -142,6 +147,7 @@ def walk(root: Path, *, follow_symlinks: bool = False) -> WalkResult:
                 continue
 
             result.files.append(path)
+            result.sizes[path] = size
             result.total_bytes += size
 
     result.files.sort()

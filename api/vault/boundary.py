@@ -15,7 +15,6 @@ import uuid
 import sqlalchemy as sa
 
 from api.db.models import Document
-from api.segments import live
 from api.vault.session import sessions
 
 
@@ -54,8 +53,16 @@ def hidden_source_file_ids(user_id: uuid.UUID, *, unlocked: bool | None = None):
     which is most of what was being hidden.
 
     Hidden whether or not the vault is open, for the reason `document_clause`
-    gives.
+    gives — and whether or not the vaulted row is still the live one.
+
+    That second half was a hole (CR-073). This filtered `live()`, on the
+    reasonable-looking premise that history hides nothing; but what a seal
+    destroys is the *file*, and superseding the vaulted row does not bring the
+    plaintext back. A re-segmentation over a vaulted document therefore
+    un-hid its file while the ciphertext, the `vaulted_by` mark and the missing
+    original all stayed exactly as they were — the file returned to search,
+    photos and the file list as a row with nothing behind it. `vaulted_by` is
+    the only thing that says a file has been sealed, so it is the only thing
+    asked here.
     """
-    return sa.select(Document.source_file_id).where(
-        Document.vaulted_by.is_not(None), live()
-    )
+    return sa.select(Document.source_file_id).where(Document.vaulted_by.is_not(None))

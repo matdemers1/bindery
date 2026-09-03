@@ -84,6 +84,28 @@ class Probed:
 # --------------------------------------------------------------------------
 
 
+def _number(value: object) -> float | None:
+    """A number ffprobe may or may not have. `"N/A"` is the one that matters.
+
+    ffprobe prints the literal string `N/A` for a duration or a dimension it
+    cannot determine — a stream copy with no container duration, a truncated
+    recording — and that string is truthy, so a bare `float(...)` raised out of
+    the parse and dead-lettered the whole video. A video is stored, postered and
+    filed on the strength of the bytes, not of a metadata field nobody needs.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _pixels(value: object) -> int | None:
+    number = _number(value)
+    return int(number) if number is not None else None
+
+
 def _ratio(text: str | None) -> float | None:
     if not text or "/" not in text:
         return None
@@ -128,22 +150,28 @@ def parse_probe(raw: dict, filename: str | None) -> Probed:
     )
     stream_tags = {k.lower(): v for k, v in (video.get("tags") or {}).items()}
 
-    duration = fmt.get("duration") or video.get("duration")
+    # Either place may carry the duration, and either may carry "N/A"; an
+    # unreadable container duration must not hide a readable stream one.
+    duration = _number(fmt.get("duration"))
+    if duration is None:
+        duration = _number(video.get("duration"))
     location = _iso6709(
         tags.get("com.apple.quicktime.location.iso6709") or tags.get("location")
     )
-    width, height = video.get("width"), video.get("height")
+    width, height = _pixels(video.get("width")), _pixels(video.get("height"))
     # A phone held upright records landscape frames with a rotation tag, and
     # the picture people see is the rotated one.
-    rotation = (video.get("side_data_list") or [{}])[0].get("rotation") or stream_tags.get("rotate")
-    if rotation and int(float(rotation)) % 180 != 0:
+    rotation = _number(
+        (video.get("side_data_list") or [{}])[0].get("rotation") or stream_tags.get("rotate")
+    )
+    if rotation and int(rotation) % 180 != 0:
         width, height = height, width
 
     return Probed(
         kind=MediaKind.VIDEO,
         width=width,
         height=height,
-        duration_seconds=float(duration) if duration else None,
+        duration_seconds=duration,
         captured_at=_quicktime_date(
             tags.get("com.apple.quicktime.creationdate") or tags.get("creation_time")
         ),

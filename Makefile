@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: up down build lock logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite e2e lint-web lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel
+.PHONY: up down build lock logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite e2e lint-web lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel screenshots typecheck
 
 build:            ## build all images
 	$(COMPOSE) build
@@ -100,5 +100,19 @@ reprocess:        ## re-classify documents left on an older prompt: make reproce
 create-user:      ## make create-user email=you@example.com library=Household
 	$(COMPOSE) exec api python -m api.cli create-user --email "$(email)" --library "$(library)"
 
-screenshots:      ## capture documentation screenshots from a running stack
-	@BINDERY_URL=$${BINDERY_URL:-http://localhost:8080} python3 scripts/capture-screens.py
+# Capture runs *inside* the compose network, sharing the web container's network
+# namespace, and there is no host-side alternative: no service publishes a port
+# (REQ-104), so `http://localhost:8080` on the host reaches nothing, and the
+# session cookie is `Secure`, so a browser reaching the app over plain
+# `http://web` discards it silently — the login succeeds, everything after it
+# 401s, and the screen sits on the login form looking like a wrong password.
+#
+# This target used to run the script on the host against that unreachable port
+# (CR-081), which meant the one command CLAUDE.md gives for a workflow that
+# gates CI could not work, and the invocation that does work existed only as a
+# comment in infra/docker-compose.yml.
+#
+# BINDERY_PASSWORD must be in .env or the environment; the compose service
+# passes it through.
+screenshots:      ## capture documentation screenshots (needs `make up`)
+	$(COMPOSE) --profile screenshots run --rm screenshots

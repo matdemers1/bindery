@@ -28,6 +28,7 @@ from api.db.enums import FieldSource as FieldSourceKind
 from api.db.models import Classification, Document, FieldProvenance, KnownForm, Page, SourceFile
 from api.queue import ClaimedJob
 from api.storage.blobs import blob_path
+from api.undo import as_json
 from worker.ai import ClassificationRequest, get_provider
 from worker.ai.provider import PageImage
 from worker.classify import candidates as candidate_builder
@@ -280,10 +281,18 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
             # nobody will check is worse than no date (REQ-052).
             log.warning("document %s: unusable date %r", document.id, result.document_date)
 
+    # What each field was before the model wrote over it, in the wire form the
+    # undo reads back. Without this the audit row carried only `after`, so
+    # undoing a classification restored nothing: the model's title, summary,
+    # date, correspondent and type stayed on the document and the only visible
+    # effect was the tags being withdrawn — half an undo, on the one surface
+    # whose whole purpose is that an automated decision is one click to reverse.
     written: list[str] = []
+    previously: dict[str, object] = {}
     for name, value in proposed.items():
         if name in held:
             continue
+        previously[name] = as_json(getattr(document, name))
         setattr(document, name, value)
         written.append(name)
 
@@ -367,6 +376,7 @@ async def run_classify(session: AsyncSession, job: ClaimedJob) -> None:
         entity_id=document.id,
         action="classify",
         actor_type=ActorType.AI,
+        before=previously,
         after={
             "title": document.title,
             "prompt_version": response.prompt_version,

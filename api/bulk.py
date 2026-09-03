@@ -105,23 +105,41 @@ async def apply(
         before: dict[str, Any] = {}
 
         if names := actions.get("add_tags"):
-            existing = set(
-                (
+            links = {
+                row.tag_id: row
+                for row in (
                     await session.execute(
-                        sa.select(DocumentTag.tag_id).where(
-                            DocumentTag.document_id == document.id, live_tag_links()
-                        )
+                        sa.select(DocumentTag).where(DocumentTag.document_id == document.id)
                     )
                 ).scalars().all()
-            )
+            }
             if not dry_run:
+                # The links this operation actually creates, recorded so the
+                # undo revokes those and nothing else. Deriving the set from the
+                # tag *names* instead took the tag off documents that already
+                # carried it — the ones this loop deliberately skips — so
+                # undoing a mistaken selection also erased a filing decision
+                # somebody made years earlier, with nothing to say it had.
+                added: list[str] = []
                 for tag_id in await _resolve_tags(session, names, document.library_id):
-                    if tag_id not in existing:
+                    link = links.get(tag_id)
+                    if link is not None and link.removed_at is None:
+                        continue
+                    if link is not None:
+                        # A revoked link is revived in place. `(document_id,
+                        # tag_id)` is the primary key, so inserting over one is
+                        # a constraint violation, not a second row.
+                        link.removed_at = None
+                        link.removed_by_event_id = None
+                        link.source = TagSource.HUMAN
+                    else:
                         session.add(
                             DocumentTag(
                                 document_id=document.id, tag_id=tag_id, source=TagSource.HUMAN
                             )
                         )
+                    added.append(str(tag_id))
+                before["added_tag_ids"] = added
             entry.changes["add_tags"] = names
 
         if names := actions.get("remove_tags"):
@@ -183,6 +201,28 @@ async def apply(
     return BulkResult(matched=len(changes), changes=changes, operation_id=event.id)
 
 
+async def _added_tag_ids(
+    session: AsyncSession, before: dict[str, Any], event: AuditEvent
+) -> list[uuid.UUID]:
+    """The links this operation created for one document.
+
+    `added_tag_ids` is what the manifest records now. An operation recorded
+    before it did so has only the names it was asked for, and those are all
+    there is to work from — the fallback is the old behaviour, kept for those
+    events alone rather than left in the path new ones take.
+    """
+    if "added_tag_ids" in before:
+        return [uuid.UUID(t) for t in before["added_tag_ids"]]
+    names = (event.after or {}).get("actions", {}).get("add_tags")
+    if not names:
+        return []
+    return list(
+        (
+            await session.execute(sa.select(Tag.id).where(Tag.name.in_(names)))
+        ).scalars().all()
+    )
+
+
 async def undo(
     session: AsyncSession, event_id: uuid.UUID, *, actor_id: uuid.UUID | None
 ) -> int:
@@ -223,16 +263,18 @@ async def undo(
                 )
                 .values(removed_at=None)
             )
-        # Tags the operation added are withdrawn, not deleted.
-        if added := (event.after or {}).get("actions", {}).get("add_tags"):
+        # Tags the operation added are withdrawn, not deleted — and only the
+        # links it actually created, read from the manifest rather than
+        # re-derived from the names it was asked for.
+        added_ids = await _added_tag_ids(session, before, event)
+        if added_ids:
             await session.execute(
                 sa.update(DocumentTag)
                 .where(
                     DocumentTag.document_id == document.id,
-                    DocumentTag.tag_id.in_(
-                        sa.select(Tag.id).where(Tag.name.in_(added))
-                    ),
+                    DocumentTag.tag_id.in_(added_ids),
                     DocumentTag.source == TagSource.HUMAN.value,
+                    DocumentTag.removed_at.is_(None),
                 )
                 .values(removed_at=datetime.now(UTC))
             )

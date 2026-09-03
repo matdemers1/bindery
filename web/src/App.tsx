@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 
 import { ApiError, api, type Library, type User } from "./api";
@@ -10,25 +10,32 @@ import AskPage from "./features/ask/AskPage";
 import FilesPage from "./features/files/FilesPage";
 import PhotosPage from "./features/photos/PhotosPage";
 import LibrariesPage from "./features/household/LibrariesPage";
-import ImportPage from "./features/import/ImportPage";
-import OrganisePage from "./features/organise/OrganisePage";
 import ReviewPage from "./features/review/ReviewPage";
-import RulesPage from "./features/rules/RulesPage";
 import SearchPage from "./features/search/SearchPage";
-import SettingsPage from "./features/settings/SettingsPage";
-import TrustPage from "./features/trust/TrustPage";
-import SegmentationPage from "./features/segmentation/SegmentationPage";
 import ViewerPage from "./features/viewer/ViewerPage";
 import RouteFocus from "./components/RouteFocus";
 import Shell from "./components/Shell";
 import { LiveProvider } from "./live/LiveProvider";
 import Login from "./pages/Login";
 import AccountPage from "./features/accounts/AccountPage";
-import AdminPage from "./features/accounts/AdminPage";
 import JoinPage from "./features/accounts/JoinPage";
 import ResetPage from "./features/accounts/ResetPage";
-import HelpPage from "./features/help/HelpPage";
 import VaultPage from "./features/vault/VaultPage";
+
+// Split out of the entry chunk. Everything above is on a path somebody walks
+// on an ordinary day — find a document, look at it, deal with what is waiting.
+// These are the ones you go to on purpose and rarely: setup, administration,
+// the one-off import, the audit screens. Statically imported, they were part
+// of the 436 KB that someone who only ever opens Search still had to download
+// before the first screen could paint.
+const AdminPage = lazy(() => import("./features/accounts/AdminPage"));
+const HelpPage = lazy(() => import("./features/help/HelpPage"));
+const ImportPage = lazy(() => import("./features/import/ImportPage"));
+const OrganisePage = lazy(() => import("./features/organise/OrganisePage"));
+const RulesPage = lazy(() => import("./features/rules/RulesPage"));
+const SegmentationPage = lazy(() => import("./features/segmentation/SegmentationPage"));
+const SettingsPage = lazy(() => import("./features/settings/SettingsPage"));
+const TrustPage = lazy(() => import("./features/trust/TrustPage"));
 
 type State = { status: "loading" } | { status: "out" } | { status: "in"; user: User };
 
@@ -52,8 +59,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // An async data load: the state is genuinely unavailable on the first
-    // render, so the extra pass is the point rather than a mistake.
+    // Not `useLiveQuery`, and it cannot be: this component renders the
+    // `LiveProvider` that the hook reads, so the context does not exist yet at
+    // this point in the tree. It is also not a live query — it establishes the
+    // session the socket is opened for, and a signed-out answer here is what
+    // decides whether there is a provider at all.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
   }, [refresh]);
@@ -111,6 +121,10 @@ export default function App() {
           setState({ status: "out" });
         }}
       >
+        {/* Inside `Shell`, so the chrome stays put while a split screen
+            arrives and only the panel it lives in changes. Same wording as the
+            session's own loading state — the app already says this. */}
+        <Suspense fallback={<Centered>Loading…</Centered>}>
         <Routes>
           {/* Ask is the front door: it is the only screen that answers the
               question people actually arrive with. Search keeps its own URL
@@ -164,6 +178,7 @@ export default function App() {
           <Route path="/pipeline" element={<PipelinePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
         </Shell>
         {/* Mounted only while open, so each invocation starts empty without
             an effect to clear it. */}

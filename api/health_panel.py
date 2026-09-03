@@ -25,17 +25,34 @@ from datetime import UTC, datetime, timedelta
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import models
+from api import models, queue
 from api.db import repository
 from api.db.enums import JobState, SourceFileState
 from api.db.models import Classification, Document, Job, SourceFile
 
 log = logging.getLogger("bindery.health")
 
-# A job holding a lock longer than this is not slow, it is gone: the worker that
-# claimed it died without releasing. OCR on a 400-page scan is the slowest real
-# stage and finishes well inside this.
-STALE_LOCK = timedelta(minutes=30)
+# How far past its own lease a job may run before it is called gone rather than
+# slow. The threshold used to be a flat thirty minutes, decided here — while
+# `queue.STAGE_LEASES` allowed a normalize job forty-five, on the grounds that
+# OCR on a large bundled scan legitimately takes that long. The two numbers
+# disagreed, and the panel's side of the disagreement raises a *critical* alert,
+# which `Notifier.dispatch` turns into a push. A 35-minute OCR pass on exactly
+# the workload this archive was built for paged the operator for working
+# correctly, and an alert channel that cries wolf during ordinary large ingests
+# is one nobody reads.
+#
+# So the queue's lease table is the single definition, and this is the margin on
+# top of it: past its lease the job is late, past its lease *plus this* the
+# worker holding it is presumed dead. `reclaim_stale` is what would have put a
+# merely-late job back on the queue, so anything still holding a lock this long
+# after its lease is not being reclaimed either.
+STALE_LOCK_MARGIN = timedelta(minutes=15)
+
+# The worst case across every stage — what "held a lock too long" means for the
+# slowest thing the pipeline does. Per-stage thresholds are derived below; this
+# is the one number worth quoting in a message or a test.
+STALE_LOCK = max(queue.STAGE_LEASES.values()) + STALE_LOCK_MARGIN
 
 # Work queued this long with nothing running means the pipeline has stopped,
 # even though nothing has failed.
@@ -120,6 +137,41 @@ def estimate_cost(usage: dict, model: str | None = None) -> float:
     }
     return sum(count / 1_000_000 * prices.price(kind) for kind, count in tokens.items())
 
+
+def _held_past_its_lease(now: datetime) -> sa.ColumnElement[bool]:
+    """A running job whose lock has outlived the lease that governs its stage.
+
+    Written once and used by both `collect` and `badge_healthy`, because they
+    have to reach the same verdict — `tests/test_health_badge.py` fails the
+    build if they drift.
+    """
+    cutoff = sa.case(
+        {
+            stage: now - (lease + STALE_LOCK_MARGIN)
+            for stage, lease in queue.STAGE_LEASES.items()
+        },
+        value=Job.stage,
+        else_=now - (queue.DEFAULT_LEASE + STALE_LOCK_MARGIN),
+    )
+    return sa.and_(
+        Job.state == JobState.RUNNING,
+        Job.locked_at.is_not(None),
+        Job.locked_at < cutoff,
+    )
+
+
+# A job that failed and will try again. `queue.fail` puts it back to `QUEUED`
+# with its error attached and only *returns* `FAILED`, so almost nothing ever
+# carries that state — which is why counting `state == FAILED` alone reported
+# "nothing failed" while two documents retried OCR on a loop all day.
+# `api/routers/pipeline.py` had already learned this; the panel had not, so the
+# Trust screen's "failed today" was structurally zero and the `recent_failures`
+# alert could never fire (invariant 8).
+_RETRYING = sa.and_(
+    Job.state == JobState.QUEUED,
+    Job.attempts > 0,
+    Job.last_error.is_not(None),
+)
 
 
 async def _offsite_alerts(session: AsyncSession, now: datetime) -> list[Alert]:
@@ -258,7 +310,7 @@ async def collect(
             sa.select(sa.func.count())
             .select_from(Job)
             .where(
-                Job.state == JobState.FAILED,
+                sa.or_(Job.state == JobState.FAILED, _RETRYING),
                 Job.updated_at >= now - timedelta(days=1),
                 in_scope,
             )
@@ -295,12 +347,7 @@ async def collect(
         (
             await session.execute(
                 sa.select(Job)
-                .where(
-                    Job.state == JobState.RUNNING,
-                    Job.locked_at.is_not(None),
-                    Job.locked_at < now - STALE_LOCK,
-                    in_scope,
-                )
+                .where(_held_past_its_lease(now), in_scope)
                 .order_by(Job.locked_at)
                 .limit(20)
             )
@@ -343,29 +390,59 @@ async def collect(
     ).all()
     files_by_state = {str(state): count for state, count in file_rows}
 
+    # Summed in Postgres, by day and by model, rather than row by row in
+    # Python. This used to transfer every classification of the last thirty
+    # days — the `usage` JSONB included — and add them up here, which coupled
+    # the cost of the health read to how much classification had just happened.
+    # A backlog import is precisely when there are twenty thousand of those rows
+    # *and* when the panel is refreshed most often. What comes back now is at
+    # most thirty days x the handful of models in `api/models.py`, because the
+    # token counts are what aggregate and the per-model rates are what cannot.
+    # `AT TIME ZONE 'UTC'` before the cast, so the grouping is the same day
+    # boundary `created_at.date()` gave in Python and not whatever the server's
+    # TimeZone setting happens to be.
+    day = sa.cast(sa.func.timezone("UTC", Classification.created_at), sa.Date)
+    tokens = {
+        "input": "input_tokens",
+        "output": "output_tokens",
+        "cache_write": "cache_creation_input_tokens",
+        "cache_read": "cache_read_input_tokens",
+    }
     spend_rows = (
         await session.execute(
             # Spend follows the documents it was spent on. A household should
             # not be shown, or billed against, another household's API usage.
             sa.select(
-                Classification.created_at, Classification.usage, Classification.model
+                day.label("day"),
+                Classification.model,
+                *[
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.cast(Classification.usage[key].astext, sa.BigInteger)
+                        ),
+                        0,
+                    ).label(kind)
+                    for kind, key in tokens.items()
+                ],
             )
             .join(Document, Document.id == Classification.document_id)
             .where(
                 Classification.created_at >= now - timedelta(days=30),
                 Document.library_id.in_(library_ids) if scoped else sa.true(),
             )
+            .group_by(day, Classification.model)
         )
     ).all()
     by_day: dict[str, float] = {}
     total_spend = 0.0
-    for created_at, usage, model in spend_rows:
+    for row in spend_rows:
         # Costed at the rate of whatever model actually ran, not whatever is
         # configured now — switching to Haiku does not make last month cheaper.
-        cost = estimate_cost(usage or {}, model)
+        usage = {key: int(getattr(row, kind) or 0) for kind, key in tokens.items()}
+        cost = estimate_cost(usage, row.model)
         total_spend += cost
-        day = created_at.date().isoformat()
-        by_day[day] = by_day.get(day, 0.0) + cost
+        stamp = row.day.isoformat()
+        by_day[stamp] = by_day.get(stamp, 0.0) + cost
 
     if dead_letter:
         alerts.append(
@@ -388,8 +465,8 @@ async def collect(
         alerts.append(
             Alert(
                 "critical", "stuck",
-                f"{len(stuck_jobs)} jobs have held a lock for over 30 minutes. "
-                "A worker probably died without releasing them.",
+                f"{len(stuck_jobs)} jobs have held a lock past the lease their "
+                "stage allows. A worker probably died without releasing them.",
                 {"count": len(stuck_jobs)},
             )
         )
@@ -469,11 +546,7 @@ async def badge_healthy(
                     Job.acknowledged_at.is_(None),
                 ),
                 sa.func.count().filter(Job.state == JobState.RUNNING),
-                sa.func.count().filter(
-                    Job.state == JobState.RUNNING,
-                    Job.locked_at.is_not(None),
-                    Job.locked_at < now - STALE_LOCK,
-                ),
+                sa.func.count().filter(_held_past_its_lease(now)),
                 sa.func.min(Job.scheduled_for).filter(Job.state == JobState.QUEUED),
             )
             .select_from(Job)

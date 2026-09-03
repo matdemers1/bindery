@@ -121,7 +121,7 @@ async def undo_event(
             continue
         value = before[name]
         coerce = _COERCE.get(name)
-        current[name] = _as_json(getattr(document, name))
+        current[name] = as_json(getattr(document, name))
         setattr(document, name, coerce(value) if coerce and value is not None else value)
         restored[name] = value
 
@@ -200,7 +200,13 @@ async def undo_event(
     return document
 
 
-def _as_json(value: object) -> object:
+def as_json(value: object) -> object:
+    """A document field in the wire form `_COERCE` reads back.
+
+    Public because the actions that record a `before` have to write it in this
+    shape or the undo restores something the column cannot hold — an undo that
+    raises is no better than the undo that restored nothing.
+    """
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, uuid.UUID | date):

@@ -10,8 +10,10 @@ the whole archive" is exactly the kind of thing you want a record of.
 """
 
 import asyncio
+import contextlib
 import logging
 import uuid
+from collections.abc import Iterator
 from datetime import date, datetime
 
 import sqlalchemy as sa
@@ -59,6 +61,55 @@ async def _visible(session: AsyncSession, user: AppUser) -> list[uuid.UUID]:
     if not ids:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "no visible libraries")
     return ids
+
+
+def _host_operation(user: AppUser, what: str) -> None:
+    """Refuse a whole-host operation to anyone but the administrator (CR-121).
+
+    `_visible` asks only whether the caller has a library at all, and every
+    invited account owns its own (`api/accounts.py`) — so it is a statement
+    about membership and never about the host. These are statements about the
+    host: a backup is a `pg_dump` of every household plus a copy of every blob,
+    an integrity check re-hashes the entire pool, and the mirror and the full
+    export write plaintext trees under the `/data` root every container mounts,
+    where the backlog importer can read them back.
+
+    `admin_only` stays the single definition of who that is — the sentence is
+    the only thing replaced, because "Offsite replication is the
+    administrator's" is not a true thing to say about a backup. ADR-009 puts
+    storage and the pipeline with the administrator; this is that.
+    """
+    try:
+        admin_only(user)
+    except HTTPException as refused:
+        raise HTTPException(
+            refused.status_code,
+            f"{what} runs over the whole host, so it is the archive "
+            "administrator's to start.",
+        ) from refused
+
+
+# What is running right now, if anything. One slot rather than one per
+# operation: they all read or write the same single disk pool, and two of them
+# at once is the resource exhaustion this guards against as surely as two of
+# the same one. Process-local, which is what it can be — there is one uvicorn
+# process, and a lock in Postgres would outlive a crash that this must not.
+_IN_FLIGHT: set[str] = set()
+
+
+@contextlib.contextmanager
+def _one_at_a_time(what: str) -> Iterator[None]:
+    """409 rather than a second `pg_dump`. The request is valid; the state is not."""
+    if _IN_FLIGHT:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{next(iter(_IN_FLIGHT))} is already running. Wait for it to finish.",
+        )
+    _IN_FLIGHT.add(what)
+    try:
+        yield
+    finally:
+        _IN_FLIGHT.discard(what)
 
 
 def _as_out(result: archive_export.ExportResult) -> ExportOut:
@@ -123,8 +174,19 @@ async def export_full(
     session: AsyncSession = Depends(get_session),
     user: AppUser = Depends(current_user),
 ) -> ExportOut:
+    """A semantic folder tree of every original, on disk, in the clear.
+
+    Administrator-only (CR-121). What it *collects* is correctly scoped to the
+    caller's libraries, but where it lands is not: `export_root()` sits inside
+    the `/data` volume every container mounts, and the backlog importer reads
+    absolute paths, so one member's export is readable material for another.
+    The encrypted go-bag below stays open to everyone, because it is the one
+    that leaves the building sealed.
+    """
     library_ids = await _visible(session, user)
-    result = await archive_export.full_export(session, library_ids, name=body.name)
+    _host_operation(user, "A full export")
+    with _one_at_a_time("A full export"):
+        result = await archive_export.full_export(session, library_ids, name=body.name)
     await record(
         session,
         entity_type="export",
@@ -186,9 +248,15 @@ async def integrity_check(
     session: AsyncSession = Depends(get_session),
     user: AppUser = Depends(current_user),
 ) -> IntegrityOut:
-    """Re-hash every original. Run this before a backup, not after (REQ-095)."""
+    """Re-hash every original. Run this before a backup, not after (REQ-095).
+
+    Unscoped by design — it reads every row in the archive — which is exactly
+    why it is the administrator's (CR-121).
+    """
     await _visible(session, user)
-    report = await integrity.check(session)
+    _host_operation(user, "An integrity check")
+    with _one_at_a_time("An integrity check"):
+        report = await integrity.check(session)
     await record(
         session,
         entity_type="integrity",
@@ -212,9 +280,16 @@ async def mirror_rebuild(
     session: AsyncSession = Depends(get_session),
     user: AppUser = Depends(current_user),
 ) -> MirrorOut:
-    """Regenerate the browsable folder tree. Safe to run any time (REQ-094)."""
+    """Regenerate the browsable folder tree (REQ-094).
+
+    Administrator-only (CR-121): the mirror is one tree under the shared data
+    root, and rebuilding it is hundreds of thousands of filesystem calls over
+    the whole pool.
+    """
     library_ids = await _visible(session, user)
-    result = await mirror.rebuild(session, library_ids)
+    _host_operation(user, "A mirror rebuild")
+    with _one_at_a_time("A mirror rebuild"):
+        result = await mirror.rebuild(session, library_ids)
     return MirrorOut(
         root=str(result.root),
         linked=result.linked,
@@ -231,18 +306,28 @@ async def backup_run(
     user: AppUser = Depends(current_user),
     force: bool = Query(False, description="back up even if integrity is failing"),
 ) -> BackupOut:
-    """Integrity check, then dump, then blobs — in that order (REQ-096)."""
+    """Integrity check, then dump, then blobs — in that order (REQ-096).
+
+    Administrator-only (CR-121). This is the least library-scoped thing the
+    application does: a `pg_dump` of every household's rows and a copy of every
+    blob and every sealed vault object, onto the one disk pool the archive
+    lives on. `_visible` is satisfied by owning a library, which every invited
+    account does, and that is not a statement about the host.
+    """
     await _visible(session, user)
-    report = await integrity.check(session)
-    try:
-        # pg_dump and a large file copy are both blocking; keep the event loop free.
-        result = await asyncio.to_thread(
-            backup.run_backup, report, destination=None, allow_unhealthy=force
-        )
-    except RuntimeError as error:
-        # The integrity refusal. A 409 rather than a 500: the request is valid,
-        # the archive's state is not.
-        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    _host_operation(user, "A backup")
+    with _one_at_a_time("A backup"):
+        report = await integrity.check(session)
+        try:
+            # pg_dump and a large file copy are both blocking; keep the event
+            # loop free.
+            result = await asyncio.to_thread(
+                backup.run_backup, report, destination=None, allow_unhealthy=force
+            )
+        except RuntimeError as error:
+            # The integrity refusal. A 409 rather than a 500: the request is
+            # valid, the archive's state is not.
+            raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
 
     await record(
         session,

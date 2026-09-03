@@ -293,9 +293,15 @@ async def search(
     ).subquery("best")
     rolled = sa.select(best).where(best.c.row_number == 1).subquery("rolled")
 
-    total = (
-        await session.execute(sa.select(sa.func.count()).select_from(rolled))
-    ).scalar_one()
+    # `rolled` is not free: every statement that names it re-runs the page union
+    # and both window functions over it. There used to be five such statements —
+    # the total, the result page, and one per facet — so the hottest path in the
+    # product did its work five times over, and the recorded pathological query
+    # ("continuation sheet", one term matching a fifth of the archive) paid
+    # 650-800 ms of it five times rather than once. The three facets and the
+    # total are one question about the same set, so they are now one statement
+    # over one pass, and only the result page reads it a second time.
+    total, facets = await _totals_and_facets(session, rolled)
 
     # Cut to the result page *first*, then render snippets for those rows only.
     # This is the difference between one ts_headline call per returned result and
@@ -350,7 +356,6 @@ async def search(
         for row in rows
     ]
 
-    facets = await _facets(session, rolled)
     # Only offer a correction when the query found nothing — otherwise it is a
     # distraction from results the user already has.
     suggestions = await suggest(session, query, allowed, viewer) if total == 0 else []
@@ -360,39 +365,79 @@ async def search(
     )
 
 
-async def _facets(session: AsyncSession, rolled) -> dict[str, list[Facet]]:
-    """Counts computed over the *matched* set, so each facet narrows honestly."""
+async def _totals_and_facets(
+    session: AsyncSession, rolled
+) -> tuple[int, dict[str, list[Facet]]]:
+    """How many documents matched, and how they break down — in one pass.
 
-    async def counts(column, label_column=None):
-        selected = [column, sa.func.count()] if label_column is None else [
-            column, label_column, sa.func.count()
-        ]
-        group = [column] if label_column is None else [column, label_column]
-        return (
-            await session.execute(
-                sa.select(*selected)
-                .where(column.is_not(None))
-                .group_by(*group)
-                .order_by(sa.func.count().desc())
+    `GROUPING SETS` asks all four questions of one scan: the grand total, and a
+    count per library, per state and per known form. `GROUPING()` says which set
+    a row came from, which is the only way to tell "the state facet, value NULL"
+    from "the library facet's row, where state is not in the grouping" — they
+    are both NULL on the wire.
+
+    Counts are computed over the *matched* set, so each facet narrows honestly.
+    """
+    library_id, state = rolled.c.library_id, rolled.c.state
+    code, name = rolled.c.known_form_code, rolled.c.known_form_name
+    rows = (
+        await session.execute(
+            sa.select(
+                sa.func.grouping(library_id).label("g_library"),
+                sa.func.grouping(state).label("g_state"),
+                sa.func.grouping(code).label("g_form"),
+                library_id,
+                state,
+                code,
+                name,
+                sa.func.count().label("count"),
+            ).group_by(
+                sa.func.grouping_sets(
+                    sa.tuple_(library_id),
+                    sa.tuple_(state),
+                    sa.tuple_(code, name),
+                    # The empty set: one row for the whole match, which is the
+                    # result total the caller used to pay a second scan for.
+                    sa.tuple_(),
+                )
             )
-        ).all()
+        )
+    ).all()
 
-    library_rows = await counts(rolled.c.library_id)
-    state_rows = await counts(rolled.c.state)
-    form_rows = await counts(rolled.c.known_form_code, rolled.c.known_form_name)
+    def facet(picked, key) -> list:
+        # The grand total's row has every grouping bit set, so it never lands in
+        # a facet; a facet's own NULL value is dropped, as it always was.
+        chosen = [row for row in rows if picked(row) and key(row)[0] is not None]
+        chosen.sort(key=lambda row: row.count, reverse=True)
+        return chosen
 
-    return {
+    total = next(
+        (row.count for row in rows if row.g_library and row.g_state and row.g_form), 0
+    )
+    library_rows = facet(lambda row: not row.g_library, lambda row: (row.library_id,))
+    state_rows = facet(lambda row: not row.g_state, lambda row: (row.state,))
+    form_rows = facet(lambda row: not row.g_form, lambda row: (row.known_form_code,))
+
+    return total, {
         "library": [
-            Facet(value=str(value), label=str(value), count=count)
-            for value, count in library_rows
+            Facet(value=str(row.library_id), label=str(row.library_id), count=row.count)
+            for row in library_rows
         ],
         "state": [
-            Facet(value=str(value), label=str(value).replace("_", " "), count=count)
-            for value, count in state_rows
+            Facet(
+                value=str(row.state),
+                label=str(row.state).replace("_", " "),
+                count=row.count,
+            )
+            for row in state_rows
         ],
         "known_form": [
-            Facet(value=code, label=name or code, count=count)
-            for code, name, count in form_rows
+            Facet(
+                value=row.known_form_code,
+                label=row.known_form_name or row.known_form_code,
+                count=row.count,
+            )
+            for row in form_rows
         ],
     }
 

@@ -314,14 +314,44 @@ async def move_out(
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not in your vault")
 
+    # The `VaultItem` above is a real check — it ties this document to *this*
+    # caller's vault — but it was the only one, and `unseal` writes a decrypted
+    # original back onto disk (CR-074). Three things were unasked:
+    #
+    #   - whether the row exists at all. `document.source_file_id` was read on
+    #     the next line, so a stale id was an `AttributeError` and a 500 where
+    #     the rest of the application answers 404;
+    #   - whether the caller can still see the library it would be restored
+    #     into. `api/moves.py` rewrites `library_id` on the file and its
+    #     documents together, so a vaulted document can end up somewhere the
+    #     person who sealed it is no longer a member of;
+    #   - whether the row is still live. A superseded document is history, and
+    #     restoring a plaintext under one puts bytes back beneath a row nothing
+    #     reads.
+    #
+    # Asked through `Scope`'s own guards rather than by hand: they are the same
+    # ones every other route uses, and `require_visible` answers 404 so a probe
+    # cannot tell "not yours" from "not there" (ADR-005).
     document = (
         await session.execute(sa.select(Document).where(Document.id == document_id))
     ).scalar_one_or_none()
     source = (
-        await session.execute(
-            sa.select(SourceFile).where(SourceFile.id == document.source_file_id)
-        )
-    ).scalar_one_or_none()
+        None
+        if document is None
+        else (
+            await session.execute(
+                sa.select(SourceFile).where(SourceFile.id == document.source_file_id)
+            )
+        ).scalar_one_or_none()
+    )
+    if document is None or source is None or document.superseded_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not in your vault")
+    bound = await repository.scope_for(session, user.id)
+    bound.require_visible(document.library_id)
+    bound.require_visible(source.library_id)
+    if document.vaulted_by != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not in your vault")
+
     meta = store.open_meta(item, key)
 
     try:

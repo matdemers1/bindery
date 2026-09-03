@@ -137,22 +137,32 @@ async def list_correspondents(
         )
     ).all()
 
-    out = []
-    for correspondent, count in rows:
-        aliases = (
-            await session.execute(
-                sa.select(CorrespondentAlias.alias).where(
-                    CorrespondentAlias.correspondent_id == correspondent.id
+    # One query for every correspondent's aliases rather than one per
+    # correspondent. A household that has been through a backlog import
+    # accumulates several hundred distinct correspondents — every insurer,
+    # utility, clinic and bank — so this was several hundred round trips to
+    # render one screen. Same shape as `library._tags_for`.
+    if not rows:
+        return []
+    aliases: dict[uuid.UUID, list[str]] = {}
+    for correspondent_id, alias in (
+        await session.execute(
+            sa.select(CorrespondentAlias.correspondent_id, CorrespondentAlias.alias).where(
+                CorrespondentAlias.correspondent_id.in_(
+                    [correspondent.id for correspondent, _ in rows]
                 )
             )
-        ).scalars().all()
-        out.append(
-            CorrespondentOut(
-                id=correspondent.id, name=correspondent.name, kind=correspondent.kind,
-                aliases=list(aliases), document_count=count,
-            )
         )
-    return out
+    ).all():
+        aliases.setdefault(correspondent_id, []).append(alias)
+
+    return [
+        CorrespondentOut(
+            id=correspondent.id, name=correspondent.name, kind=correspondent.kind,
+            aliases=aliases.get(correspondent.id, []), document_count=count,
+        )
+        for correspondent, count in rows
+    ]
 
 
 @router.get("/tags", response_model=list[TaxonomyOptionOut])
