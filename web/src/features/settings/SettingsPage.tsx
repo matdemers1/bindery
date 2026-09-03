@@ -471,7 +471,12 @@ function OffsiteReplication({
     }
   }
 
-  const field = "w-full rounded-md border border-edge bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent";
+  // `border-field`, not `border-edge`: these five credential boxes sit on a
+  // `bg-surface` card, where `edge` measures 1.23:1 and the fill itself only
+  // 1.32:1 — no channel reaches 3:1, so the inputs had no perceivable
+  // boundary (WCAG 1.4.11). `field` is the token the rest of the app's
+  // controls moved to; this local string was the one place that missed it.
+  const field = "w-full rounded-md border border-field bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent";
 
   return (
     <section className="mt-6 rounded-lg border border-edge bg-surface p-5">

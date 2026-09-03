@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 import { ApiError, api, type Document, type DocumentDetail } from "../../api";
-import { isTypingTarget } from "../../lib/keyboard";
+import { isInteractiveTarget, isTypingTarget } from "../../lib/keyboard";
 import { useLiveQuery } from "../../live/LiveProvider";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
@@ -74,6 +74,10 @@ export default function ReviewPage() {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (isTypingTarget(event.target)) return;
+      if (isInteractiveTarget(event.target)) return;
+      // While a correction is open the person is working on this document,
+      // not triaging it; "a" there accepted the thing being corrected.
+      if (correcting) return;
       if (event.metaKey || event.ctrlKey) return;
       const key = event.key.toLowerCase();
       if (key === "j") setIndex((n) => Math.min(n + 1, documents.length - 1));
@@ -83,7 +87,7 @@ export default function ReviewPage() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [documents.length, act]);
+  }, [documents.length, act, correcting]);
 
   const pages = useMemo(
     () =>

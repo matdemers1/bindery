@@ -15,3 +15,20 @@ export function isTypingTarget(target: EventTarget | null): boolean {
       null
   );
 }
+
+/**
+ * Whether a keystroke is aimed at a control that already handles it.
+ *
+ * A single-key shortcut bound to `window` fires even when the focused element
+ * *is* the button the shortcut duplicates, so tabbing to "Accept" and pressing
+ * "a" ran the action twice — and pressing it on a chip inside the open
+ * correction panel accepted the document the person was in the middle of
+ * correcting. A shortcut is for reaching a control you are not on; when focus
+ * is already on one, the control owns the key (WCAG 2.1.4).
+ */
+export function isInteractiveTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    target.closest("button, a[href], [role='button'], [role='tab'], [role='option']") !== null
+  );
+}

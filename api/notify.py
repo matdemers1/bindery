@@ -20,12 +20,15 @@ is logged and the archive carries on. A missed notification is bad; an ingest
 that stopped because a notification failed is worse.
 """
 
+import ipaddress
 import json
 import logging
+import socket
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
 from api.health_panel import Alert
 
@@ -43,6 +46,56 @@ class Delivery:
     code: str
     sent: bool
     reason: str | None = None
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """A redirect is a second URL nobody validated.
+
+    Settings refuses a webhook pointing at loopback or link-local, but an
+    ordinary https host answering 302 to `http://169.254.169.254/...` reaches
+    it anyway — and this POST carries no secret but does prove what the
+    archive can see. Following is not worth that; a real notifier does not
+    need it.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code, f"refusing redirect to {newurl}", headers, fp
+        )
+
+
+_OPENER = urllib.request.build_opener(_NoRedirects)
+
+
+def _refuse_unroutable(url: str) -> None:
+    """Resolve the host and refuse what settings could only refuse literally.
+
+    Settings deliberately does not resolve — a name proves nothing at save
+    time — so the name is checked here, where the connection is about to be
+    made. RFC1918 stays allowed on purpose: a self-hosted notifier on the LAN
+    is the whole use case.
+    """
+    host = (urlparse(url).hostname or "").strip("[]")
+    if not host:
+        raise ValueError(f"{url!r} names no host")
+    try:
+        resolved = socket.getaddrinfo(host, None)
+    except OSError as error:
+        raise ValueError(f"{host} did not resolve: {error}") from error
+
+    for _family, _type, _proto, _canon, sockaddr in resolved:
+        address = ipaddress.ip_address(sockaddr[0])
+        if (
+            address.is_loopback
+            or address.is_link_local
+            or address.is_unspecified
+            or address.is_multicast
+            or address.is_reserved
+        ):
+            raise ValueError(
+                f"{host} resolves to {address}, which is the host talking to "
+                "itself or its metadata service, never a webhook"
+            )
 
 
 class Notifier:
@@ -83,7 +136,8 @@ class Notifier:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
+            _refuse_unroutable(self.webhook_url)
+            with _OPENER.open(request, timeout=10) as response:
                 ok = 200 <= response.status < 300
         except (urllib.error.URLError, OSError, ValueError) as error:
             # Never raise. A notifier that can take the pipeline down with it

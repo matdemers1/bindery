@@ -26,7 +26,6 @@ from api.auth.dependencies import current_user
 from api.db import repository
 from api.db.enums import ActorType, Sensitivity
 from api.db.models import AppUser, AuditEvent, Document, Library, Rule
-from api.db.scope import resolve
 from api.db.session import get_session
 from api.export import archive_export, backup, integrity, mirror
 from api.routers.settings import admin_only
@@ -457,7 +456,13 @@ async def audit_log(
     Ordered by `sequence` rather than `created_at` because `now()` is
     transaction-scoped — events written together share a timestamp.
     """
-    scope = await resolve(session, user.id)
+    # `repository.scope_for`, not `scope.resolve`: this was the one call site
+    # in `api/` that reached past the repository, so a token scoped to one
+    # library read the audit trail of every library its holder belongs to —
+    # including the `before`/`after` blobs, which are document content by
+    # another name. Narrowing lives in `scope_for`; going round it is going
+    # round the token.
+    scope = await repository.scope_for(session, user.id)
     scope.require_any()
 
     conditions: list[sa.ColumnElement[bool]] = []

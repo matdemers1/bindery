@@ -31,7 +31,6 @@ Piped into the api container rather than run from it: the runtime image ships
 
 import asyncio
 import os
-import uuid
 
 import sqlalchemy as sa
 
@@ -112,10 +111,11 @@ async def main() -> None:
                 print(f"{filename} reset to {state.value}")
                 continue
 
+            blob = await _real_blob(_tiny_pdf(filename))
             source = SourceFile(
                 library_id=library_id,
-                sha256=uuid.uuid4().hex * 2,
-                byte_size=64,
+                sha256=blob.sha256,
+                byte_size=blob.byte_size,
                 original_filename=filename,
                 ingest_source=IngestSource.WEB_UPLOAD,
             )
@@ -187,10 +187,11 @@ async def _document_awaiting_review(session, library_id) -> None:
         )
     ).scalar_one_or_none()
     if existing is None:
+        blob = await _real_blob(_tiny_pdf(filename))
         existing = SourceFile(
             library_id=library_id,
-            sha256=uuid.uuid4().hex * 2,
-            byte_size=2048,
+            sha256=blob.sha256,
+            byte_size=blob.byte_size,
             original_filename=filename,
             ingest_source=IngestSource.WEB_UPLOAD,
             page_count=1,
@@ -258,6 +259,26 @@ VAULTED = [
     ("a-sealed-record.pdf", "application/pdf", "pdf", "Sealed — discharge papers"),
     ("a-sealed-photograph.png", "image/png", "png", "Sealed — a photograph"),
 ]
+
+
+async def _real_blob(payload: bytes):
+    """Store bytes and hand back the blob record.
+
+    The two fixtures below used to invent a digest with `uuid4().hex * 2`,
+    which reads as harmless — the rows only exist so the pipeline screen has a
+    refusal and a dead letter to show. But `integrity.check` walks every
+    SourceFile looking for its original, so those three rows made the archive
+    permanently "missing 3", `run_backup` refused over a failing check, and the
+    restore drill CI step could never once have passed. A fixture that lies
+    about a content address is a fixture that breaks the thing that verifies
+    content addresses.
+    """
+    from api.storage.blobs import store_stream
+
+    async def one_chunk(data: bytes):
+        yield data
+
+    return await store_stream(one_chunk(payload))
 
 
 def _stamped_png(stamp: str) -> bytes:

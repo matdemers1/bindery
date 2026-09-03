@@ -209,10 +209,25 @@ class Scope:
             ]
         ).subquery()
 
+        # Every library-scoped entity, visible or not. The `actor_id` fallback
+        # below has to exclude these, or it stops being the narrow exception
+        # this docstring describes and becomes "anything you did, anywhere":
+        # an API token scoped to one library read the audit trail of every
+        # library its holder belonged to, because its holder was the actor.
+        # The token exists to be narrower than the person, so an event about a
+        # library-scoped entity is governed by library visibility and by
+        # nothing else.
+        any_scoped = sa.union_all(
+            *[sa.select(model.id.label("id")) for model in LIBRARY_SCOPED]
+        ).subquery()
+
         return sa.select(AuditEvent).where(
             sa.or_(
                 AuditEvent.entity_id.in_(sa.select(reachable.c.id)),
-                AuditEvent.actor_id == self.user_id,
+                sa.and_(
+                    AuditEvent.actor_id == self.user_id,
+                    AuditEvent.entity_id.not_in(sa.select(any_scoped.c.id)),
+                ),
             )
         )
 

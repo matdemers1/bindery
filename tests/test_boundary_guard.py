@@ -26,6 +26,7 @@ usually the same person six months later.
 
 import ast
 import contextlib
+import copy
 import hashlib
 import textwrap
 import uuid
@@ -139,8 +140,28 @@ def offences(source: str, where: str) -> dict[str, str]:
     text_of: dict[ast.AST | None, str] = {None: source}
 
     def body_text(function: ast.AST | None) -> str:
+        """The function's *code*, with its docstring removed.
+
+        `ast.unparse` keeps the docstring, and the vault half of this guard
+        decides a function is fine when its text names the boundary. So a
+        docstring reading "nothing vaulted is shown here" exempted a function
+        that applied no boundary at all — prose satisfying a guard about code.
+        Comments never could, because the parser drops them; this closes the
+        one channel that survived.
+        """
         if function not in text_of:
-            text_of[function] = ast.unparse(function)
+            node = function
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                stripped = copy.deepcopy(node)
+                if (
+                    stripped.body
+                    and isinstance(stripped.body[0], ast.Expr)
+                    and isinstance(stripped.body[0].value, ast.Constant)
+                    and isinstance(stripped.body[0].value.value, str)
+                ):
+                    stripped.body = stripped.body[1:] or [ast.Pass()]
+                node = stripped
+            text_of[function] = ast.unparse(node)
         return text_of[function]
 
     found: dict[str, str] = {}

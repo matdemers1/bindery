@@ -11,7 +11,7 @@ import {
   fileUrl,
 } from "../../api";
 import { matchesTerm, queryTerms } from "../../lib/highlight";
-import { isTypingTarget } from "../../lib/keyboard";
+import { isInteractiveTarget, isTypingTarget } from "../../lib/keyboard";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 import MoveToVault from "../vault/MoveToVault";
@@ -126,6 +126,9 @@ function Viewer({
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (isTypingTarget(event.target)) return;
+      // The arrows still work on a focused control; only the bare letters are
+      // withheld, because those are the ones a control may want for itself.
+      if (isInteractiveTarget(event.target) && event.key.length === 1) return;
       if (event.key === "ArrowRight" || event.key === "j") go(localPage + 1);
       if (event.key === "ArrowLeft" || event.key === "k") go(localPage - 1);
     }

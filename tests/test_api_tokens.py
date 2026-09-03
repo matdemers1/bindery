@@ -221,6 +221,7 @@ async def test_a_token_is_scoped_to_its_libraries_in_practice(
 # ---------------------------------------------------------------------------
 
 ELSEWHERE = "pyrenean ibex conservatorship"
+AUDITED_TITLE = "Kessington deed amendment"
 
 
 async def _a_document_in(session, library, *, phrase: str) -> Document:
@@ -275,6 +276,16 @@ async def test_a_narrow_token_stays_narrow_where_nobody_asked(session, client, o
     mine = await client.get("/api/search", params={"q": ELSEWHERE})
     assert mine.json()["total"] == 1, mine.text
 
+    # An audited mutation in the library the token is *not* given. Without one
+    # the audit assertion below passes against an empty trail and proves
+    # nothing — the shape of vacuous test this review has been finding.
+    edited = await client.patch(
+        f"/api/documents/{document.id}", json={"title": AUDITED_TITLE}
+    )
+    assert edited.status_code == 200, edited.text
+    mine_audit = await client.get("/api/audit")
+    assert AUDITED_TITLE in mine_audit.text, "the fixture never recorded an audit event"
+
     secret = (
         await client.post(
             "/api/tokens",
@@ -295,6 +306,18 @@ async def test_a_narrow_token_stays_narrow_where_nobody_asked(session, client, o
 
     found = await client.get("/api/search", params={"q": ELSEWHERE}, headers=headers)
     assert found.json()["total"] == 0, "the token searched a library it was not given"
+
+    # `/api/audit` was the twentieth router: the one call site that reached
+    # `scope.resolve` directly instead of going through the repository, so it
+    # answered for every library the *person* belongs to. Its `before`/`after`
+    # blobs are document content by another name, which makes it the worst
+    # possible one to have missed.
+    audit = await client.get("/api/audit", headers=headers)
+    assert audit.status_code == 200, audit.text
+    assert AUDITED_TITLE not in audit.text, (
+        "the token read the audit trail of a library it was not given"
+    )
+    assert str(document.id) not in audit.text
 
 
 async def test_a_read_only_token_cannot_change_anything(client, owner) -> None:
