@@ -79,7 +79,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "5a6dad27936cadb6c1aa1d8f76d014d2eec4f5dc"
+      "source_commit": "0c704ad37609e03dac0ea3df62d7b5f1b866faba"
     },
     {
       "route": "/photos",
@@ -109,7 +109,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "7b97f515d7d262b10c178446115422435aaa842f"
+      "source_commit": "0c704ad37609e03dac0ea3df62d7b5f1b866faba"
     },
     {
       "route": "/rules",
@@ -139,7 +139,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "7b97f515d7d262b10c178446115422435aaa842f"
+      "source_commit": "0c704ad37609e03dac0ea3df62d7b5f1b866faba"
     },
     {
       "route": "/trust",
