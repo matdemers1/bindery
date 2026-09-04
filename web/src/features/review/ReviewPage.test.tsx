@@ -21,11 +21,16 @@ import ReviewPage from "./ReviewPage";
 // on its own loading state instead of failing the test with its own error.
 vi.mock("../../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../api")>()),
-  api: { review: vi.fn(), why: vi.fn(() => new Promise(() => {})) },
+  api: {
+    review: vi.fn(),
+    why: vi.fn(() => new Promise(() => {})),
+    pendingReview: vi.fn(),
+  },
 }));
 
 const { api } = await import("../../api");
 const reviewMock = vi.mocked(api.review);
+const pendingMock = vi.mocked(api.pendingReview);
 
 function queueOf(...titles: string[]) {
   return {
@@ -78,6 +83,10 @@ function renderQueue() {
 }
 
 beforeEach(() => {
+  // The screen fetches the unreviewed count beside the queue (D-05). Default it
+  // to "nothing unreviewed" so the tests that are about live refetching are not
+  // also asserting on the empty-state copy.
+  pendingMock.mockResolvedValue({ total: 0, reasons: [] });
   // jsdom would attempt a real connection to ws://localhost/api/live and then
   // retry on a timer. The socket is not what is under test here; the hint is.
   vi.stubGlobal(
@@ -103,7 +112,7 @@ describe("ReviewPage", () => {
   it("says nothing is waiting rather than sitting on the loading state", async () => {
     reviewMock.mockResolvedValue(queueOf());
     renderQueue();
-    expect(await screen.findByText("Nothing waiting.")).toBeTruthy();
+    expect(await screen.findByText("Nothing waiting for you.")).toBeTruthy();
   });
 
   it("refetches when the server says the review queue changed", async () => {
@@ -151,5 +160,52 @@ describe("ReviewPage", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(reviewMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the empty queue tells the truth (D-05)", () => {
+  beforeEach(() => {
+    reviewMock.mockResolvedValue({ total: 0, documents: [] });
+  });
+
+  it("does not claim everything filed itself when documents were never reviewed", async () => {
+    // The queue only holds what the gate declined to file. Documents the
+    // classifier never reached never enter it — so an empty queue said nothing
+    // about them, and the screen used to assert it did.
+    pendingMock.mockResolvedValue({
+      total: 33,
+      reasons: [
+        {
+          code: "never_attempted",
+          label: "Waiting for AI review",
+          detail: "These arrived before an API key was configured.",
+          count: 33,
+          document_ids: [],
+        },
+      ],
+    });
+    renderQueue();
+
+    expect(await screen.findByText(/33 documents have not been through AI review/)).toBeTruthy();
+    expect(screen.queryByText(/Everything filed itself/)).toBeNull();
+    expect(screen.getByRole("link", { name: /See why on Pipeline/ })).toBeTruthy();
+  });
+
+  it("says so plainly when the archive really has been reviewed", async () => {
+    pendingMock.mockResolvedValue({ total: 0, reasons: [] });
+    renderQueue();
+
+    expect(
+      await screen.findByText(/Everything in the archive has been through AI review/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/have not been through AI review/)).toBeNull();
+  });
+
+  it("still renders the queue when the count cannot be fetched", async () => {
+    // Informational only: a failed count must not take the screen down.
+    pendingMock.mockRejectedValue(new Error("offline"));
+    renderQueue();
+
+    expect(await screen.findByText("Nothing waiting for you.")).toBeTruthy();
   });
 });

@@ -45,6 +45,33 @@ const EXAMPLES = [
   "When does my passport expire?",
 ];
 
+/**
+ * Whether a model is configured, for the suggestion chips only.
+ *
+ * The chips are four promises. With no key they promise answers this archive
+ * cannot give — and running an archive without a key is the ordinary state,
+ * not a broken one, because retrieval never depended on the model (D-02).
+ * Asking is still allowed with no key: `api/ask.py` degrades to handing back
+ * the matching pages, which is the honest answer. What changes here is only
+ * what the screen *offers* before you have typed anything.
+ */
+function useProviderConfigured(): boolean | null {
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    api
+      .settings()
+      .then((s) => live && setConfigured(s.anthropic_key_configured))
+      // Unknown is not the same as absent: on a failed read, leave the screen
+      // exactly as it was rather than telling somebody their key is missing.
+      .catch(() => live && setConfigured(null));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return configured;
+}
+
 export default function AskPage({
   libraries,
   onUploaded,
@@ -70,6 +97,7 @@ export default function AskPage({
   }, []);
 
   const [question, setQuestion] = useState("");
+  const providerConfigured = useProviderConfigured();
   const [asked, setAsked] = useState<string | null>(null);
   const [result, setResult] = useState<AskAnswer | null>(null);
   const [loading, setLoading] = useState(false);
@@ -170,7 +198,7 @@ export default function AskPage({
 
         {!asked && <VitalRecords />}
 
-        {!asked && (
+        {!asked && providerConfigured !== false && (
           <ul className="mt-4 flex flex-wrap gap-2">
             {EXAMPLES.map((example) => (
               <li key={example}>
@@ -187,6 +215,35 @@ export default function AskPage({
               </li>
             ))}
           </ul>
+        )}
+
+        {/* Not an apology, and not an error — the archive is doing the thing it
+            was built to do. Finding the page never needed a model, so with no
+            key the honest offer is the search that does work, not four
+            questions that cannot be answered (D-02). */}
+        {!asked && providerConfigured === false && (
+          <div className="mt-4 rounded-lg border border-edge bg-surface p-4 text-sm">
+            <p className="text-neutral-200">Finding the page never needed a key.</p>
+            <p className="mt-1 text-muted">
+              Answering questions in prose does. Without one, asking still returns
+              the pages that match — every page is OCR&apos;d and indexed either
+              way.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <Link
+                to="/search"
+                className="rounded-md border border-field px-3 py-1.5 text-sm text-neutral-100 transition-colors hover:border-accent/60"
+              >
+                Search the archive
+              </Link>
+              <Link
+                to="/settings"
+                className="text-sm text-accent underline underline-offset-2"
+              >
+                Add a key in Settings
+              </Link>
+            </div>
+          </div>
         )}
 
         {asked && (

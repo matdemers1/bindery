@@ -715,7 +715,17 @@ function HealthPanelView() {
             good outcome and should look like every other calm number; it is
             the non-zero one that has to catch your eye. */}
         <Stat label="Failed today" value={panel.failed_24h} icon={AlertTriangle} tone="warn" />
-        <Stat label="Gave up" value={panel.dead_letter} icon={XCircle} tone="bad" />
+        {/* "Gave up, unhandled" rather than "Gave up": this counter is
+            deliberately the *unacknowledged* dead letters (ADR-011, REQ-169),
+            while Pipeline lists every one of them including the acknowledged.
+            The two numbers disagreeing is correct; the two labels claiming to
+            be the same number was not (D-05). */}
+        <Stat
+          label="Gave up, unhandled"
+          value={panel.dead_letter}
+          icon={XCircle}
+          tone="bad"
+        />
       </div>
 
       <Card

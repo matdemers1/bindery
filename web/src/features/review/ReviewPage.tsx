@@ -3,7 +3,13 @@ import { ClipboardCheck, Pencil } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
-import { ApiError, api, type Document, type DocumentDetail } from "../../api";
+import {
+  ApiError,
+  api,
+  type Document,
+  type DocumentDetail,
+  type PendingReview,
+} from "../../api";
 import { isInteractiveTarget, isTypingTarget, shortcutsEnabled } from "../../lib/keyboard";
 import { useLiveQuery } from "../../live/LiveProvider";
 import EditPanel from "../edit/EditPanel";
@@ -26,11 +32,21 @@ export default function ReviewPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [correcting, setCorrecting] = useState<DocumentDetail | null>(null);
+  // The queue only holds what the gate declined to file. Documents the
+  // classifier never reached are not in it — so an empty queue is not the
+  // same fact as "everything is filed", and this screen used to claim it was.
+  const [unreviewed, setUnreviewed] = useState<PendingReview | null>(null);
 
   const load = useCallback(async () => {
-    const queue = await api.review();
+    const [queue, waiting] = await Promise.all([
+      api.review(),
+      // Informational: this screen is usable whether or not it resolves, so a
+      // failure here must not take the queue down with it.
+      api.pendingReview().catch(() => null),
+    ]);
     setDocuments(queue.documents);
     setTotal(queue.total);
+    setUnreviewed(waiting);
     setIndex((current) => Math.min(current, Math.max(queue.documents.length - 1, 0)));
     setLoaded(true);
   }, []);
@@ -106,10 +122,31 @@ export default function ReviewPage() {
   }
 
   if (!current) {
+    // Two different facts, and the old copy conflated them. An empty queue
+    // means nothing is waiting *for you*; it says nothing about documents the
+    // classifier never reached, which never enter this queue at all. Asserting
+    // "everything filed itself" over thirty-three unclassified documents is
+    // the trust surface reporting its own blind spot as a success, which is
+    // the project's stated kill criterion (D-05).
+    const waiting = unreviewed?.total ?? 0;
     return (
       <div className="mx-auto max-w-2xl py-12 text-center">
-        <p className="text-lg">Nothing waiting.</p>
-        <p className="mt-2 text-sm text-muted">Everything filed itself.</p>
+        <p className="text-lg">Nothing waiting for you.</p>
+        <p className="mt-2 text-sm text-muted">The triage queue is empty.</p>
+        {waiting > 0 ? (
+          <p className="mt-4 text-sm text-muted">
+            {waiting} document{waiting === 1 ? " has" : "s have"} not been through AI
+            review, so {waiting === 1 ? "it is" : "they are"} not in this queue.{" "}
+            <Link to="/pipeline" className="text-accent underline underline-offset-2">
+              See why on Pipeline
+            </Link>
+            .
+          </p>
+        ) : (
+          <p className="mt-4 text-sm text-emerald-400">
+            Everything in the archive has been through AI review.
+          </p>
+        )}
       </div>
     );
   }

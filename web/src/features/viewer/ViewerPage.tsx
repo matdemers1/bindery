@@ -11,6 +11,7 @@ import {
   fileUrl,
 } from "../../api";
 import { matchesTerm, queryTerms } from "../../lib/highlight";
+import { pageParts } from "../../lib/pages";
 import { isInteractiveTarget, isTypingTarget, shortcutsEnabled } from "../../lib/keyboard";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
@@ -178,12 +179,20 @@ function Viewer({
               )}
             </h1>
             <p className="text-sm text-muted">
-              Page {localPage} of {pageCount}
-              {/* Never hide that this is a slice of something larger (REQ-030). */}
+              {/* Never hide that this is a slice of something larger (REQ-030).
+                  Split at the filename so it can stay a link, but worded by the
+                  same helper the palette and search use — this header used to
+                  state the rule in its own grammar (D-04). */}
+              {pageParts({
+                documentPage: localPage,
+                documentPageCount: pageCount,
+                filePage,
+                filePageCount,
+                filename: isSegment ? detail.source_file.original_filename : null,
+              }).lead}
               {isSegment && (
                 <>
-                  {" · page "}
-                  {filePage} of {filePageCount} in{" "}
+                  {" "}
                   <Link
                     to={`/file/${fileId}/page/${filePage}`}
                     className="underline underline-offset-2"

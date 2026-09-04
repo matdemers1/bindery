@@ -3,6 +3,8 @@ import { useNavigate } from "react-router";
 
 import { api, type SearchResult } from "../../api";
 import Modal from "../../components/Modal";
+import Snippet from "../../components/Snippet";
+import { pageLabel } from "../../lib/pages";
 
 // ⌘K → type → Enter → the viewer opens on the page. That path is the product.
 // Everything here is in service of keeping it under a second.
@@ -70,9 +72,14 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
     if (event.key === "Enter") {
       event.preventDefault();
       if (results[selected]) return openResult(results[selected]);
-      // No hit yet — fall through to the full results page rather than nothing.
+      // No hit yet — fall through to the full results page rather than
+      // nothing. `/search`, not `/`: the landing route is Ask, which reads no
+      // `q` parameter at all, so this used to drop the query on the floor and
+      // leave the reader on an empty front door. Enter arriving before the
+      // 120 ms debounce settles is what a fast typist does, so this was the
+      // documented ten-second path failing at step one (D-02).
       onClose();
-      navigate(`/?q=${encodeURIComponent(query)}`);
+      navigate(`/search?q=${encodeURIComponent(query)}`);
     }
   }
 
@@ -124,21 +131,39 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
               aria-selected={index === selected}
               onMouseEnter={() => setSelected(index)}
               onClick={() => openResult(result)}
-              className={`flex cursor-pointer items-baseline gap-3 px-4 py-2.5 text-left ${
+              className={`cursor-pointer px-4 py-2.5 text-left ${
                 index === selected ? "bg-accent/15" : ""
               }`}
             >
-              <span className="min-w-0 flex-1 truncate text-sm">
-                {result.title ?? result.original_filename ?? "(untitled)"}
-              </span>
-              {result.known_form_code && (
-                <span className="shrink-0 rounded-full border border-accent/50 px-1.5 text-xs text-accent">
-                  {result.known_form_code}
+              <div className="flex items-baseline gap-3">
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {result.title ?? result.original_filename ?? "(untitled)"}
                 </span>
-              )}
-              <span className="shrink-0 font-mono text-xs text-muted">
-                p.{result.best_page.document_page_number}
-              </span>
+                {result.known_form_code && (
+                  <span className="shrink-0 rounded-full border border-accent/50 px-1.5 text-xs text-accent">
+                    {result.known_form_code}
+                  </span>
+                )}
+              </div>
+              {/* The row used to end at a bare "p.1", which is the one number
+                  that cannot tell two segments of the same bundle apart — and
+                  this archive really holds two, both titled "Consolidated
+                  Service Record - Continuation". Two identical rows means a
+                  wrong pick lands on a real document and looks like success,
+                  which is the worst failure a retrieval instrument has because
+                  nothing tells the reader to look again (D-04). */}
+              <p className="mt-0.5 truncate font-mono text-xs text-muted">
+                {pageLabel({
+                  documentPage: result.best_page.document_page_number,
+                  documentPageCount: result.page_end - result.page_start + 1,
+                  filePage: result.best_page.page_number,
+                  filePageCount: result.file_page_count,
+                  filename: result.original_filename,
+                })}
+              </p>
+              <p className="mt-1 truncate text-xs text-neutral-300">
+                <Snippet html={result.best_page.snippet} />
+              </p>
             </li>
           ))}
         </ul>

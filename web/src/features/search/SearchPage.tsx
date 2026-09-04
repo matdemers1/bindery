@@ -2,6 +2,8 @@ import { Search as SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
+import { pageLabel } from "../../lib/pages";
+
 import { api, type Library, type SearchResponse, fileUrl } from "../../api";
 import { rememberFoundSomething } from "../firstrun/onboarding";
 import Snippet from "../../components/Snippet";
@@ -336,12 +338,17 @@ function Results({
                     )}
                   </p>
                   <p className="mt-0.5 text-xs text-muted">
-                    {/* Page numbers are always disambiguated (REQ-030). */}
-                    Page {result.best_page.document_page_number} of this document
-                    {" · page "}
-                    {result.best_page.page_number}
-                    {result.file_page_count ? ` of ${result.file_page_count}` : ""} in{" "}
-                    {result.original_filename ?? "the file"}
+                    {/* Page numbers are always disambiguated (REQ-030), and
+                        through one helper so the palette, this row and the
+                        viewer header cannot drift into three grammars again
+                        (D-04). */}
+                    {pageLabel({
+                      documentPage: result.best_page.document_page_number,
+                      documentPageCount: result.page_end - result.page_start + 1,
+                      filePage: result.best_page.page_number,
+                      filePageCount: result.file_page_count,
+                      filename: result.original_filename ?? "the file",
+                    })}
                     {result.matching_pages > 1 &&
                       ` · ${result.matching_pages - 1} more matching ${
                         result.matching_pages === 2 ? "page" : "pages"

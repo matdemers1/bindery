@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import queue
+from api import queue, settings_store
 from api.db.enums import JobStage, JobState, ReviewState
 from api.db.models import Classification, Document, Job
 from api.segments import live
@@ -81,7 +81,15 @@ class PendingReview:
 
 
 async def pending(session: AsyncSession, library_ids: list[uuid.UUID]) -> PendingReview:
-    """Which documents are waiting for AI review, and why."""
+    """Which documents are waiting for AI review, and why.
+
+    Reads whether a provider key is configured, because two of the three
+    reasons below describe what re-running would do, and that answer is
+    different when there is nothing to re-run against.
+    """
+    key_configured = bool(
+        await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
+    )
     # The newest classify job per document, so a document that failed and was
     # later re-run is judged on the latest attempt rather than the first.
     latest = (
@@ -128,11 +136,23 @@ async def pending(session: AsyncSession, library_ids: list[uuid.UUID]) -> Pendin
         "ran. Nothing failed — they are searchable, they just have no title, date "
         "or tags yet.",
     )
+    # The tail of this sentence used to read "Now that a key is set they will
+    # succeed" unconditionally, which is read by a person who is looking at
+    # this screen *because* nothing is succeeding — and on an archive with no
+    # key, which is the ordinary state, it was simply false. The archive's
+    # trust surface asserting a fact it has not checked is the shape of the
+    # project's stated kill criterion (D-05).
     unavailable = Reason(
         "provider_unavailable",
         "Gave up because there was no key",
         "Classification was attempted, could not reach a model, and stopped "
-        "retrying. Now that a key is set they will succeed.",
+        "retrying. "
+        + (
+            "A key is set now, so re-running them should succeed."
+            if key_configured
+            else "There is still no key, so re-running them will not help yet — "
+            "add one in Settings first. They are searchable either way."
+        ),
     )
     failed = Reason(
         "failed",

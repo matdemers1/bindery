@@ -91,7 +91,7 @@ export default function PipelinePage() {
         <JobList
           tone="bad"
           title="Gave up"
-          blurb="These stopped retrying on their own. Nothing was lost — the originals are stored — but they will not move again without you."
+          blurb="These stopped retrying on their own. Nothing was lost — the originals are stored — but they will not move again without you. Acknowledged ones stay listed here and stop counting toward the unhandled total on Trust."
           jobs={gaveUp}
           nameOf={nameOf}
           busy={busy}

@@ -105,6 +105,43 @@ async def test_a_missing_key_is_distinguished_from_a_real_failure(
     assert result.total == 3
 
 
+async def test_the_no_key_reason_does_not_promise_a_key_that_is_not_set(
+    session, unclassified
+) -> None:
+    """The trust surface must not assert a fact it has not checked (D-05).
+
+    This sentence is read by somebody who is on this screen *because* nothing
+    is succeeding. Telling them "now that a key is set they will succeed" on an
+    archive with no key — the ordinary state, since the archive is designed to
+    be useful without one — is the filing reporting a success it cannot know.
+    """
+    library, _docs = unclassified
+    result = await reclassify.pending(session, [library.id])
+
+    detail = _reason(result, "provider_unavailable").detail
+    assert "still no key" in detail
+    assert "Settings" in detail, "it has to say where to fix it"
+    assert "will succeed" not in detail
+
+
+async def test_the_no_key_reason_changes_once_a_key_is_set(
+    session, unclassified
+) -> None:
+    """And it must change when the fact changes, or it is just different copy."""
+    from api import settings_store
+
+    library, _docs = unclassified
+    await settings_store.set_(
+        session, settings_store.ANTHROPIC_API_KEY, "sk-ant-not-a-real-key", actor_id=None
+    )
+
+    detail = _reason(
+        await reclassify.pending(session, [library.id]), "provider_unavailable"
+    ).detail
+    assert "A key is set now" in detail
+    assert "still no key" not in detail
+
+
 async def test_an_already_classified_document_is_not_pending(
     session, unclassified
 ) -> None:
