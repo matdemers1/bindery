@@ -481,7 +481,12 @@ lint error. Cheapest gate first.
 
 - **lint** — `ruff`, the API contract check, `mypy` against its baseline,
   `pip-audit`, `npm audit`, then `eslint --max-warnings 0`, `tsc --noEmit` for
-  the web app and the e2e specs, and the vitest unit suite. Before this the only
+  the web app and the e2e specs, and the vitest unit suite. **`npm audit` fails
+  on an advisory and only warns when it cannot reach the registry** — it is the
+  one check here that makes a live network call, and npmjs.org returning 503
+  blocked a finished, four-gates-green release from deploying until the two
+  cases were told apart. `pip-audit` has no such coupling; it reads the lockfile
+  this repository ships. Before this the only
   typecheck was `tsc -b` inside `Dockerfile.web`, which runs *after* the tests,
   so a type error surfaced as an opaque Docker build failure. Everything cheap
   and database-free belongs here rather than one gate later.

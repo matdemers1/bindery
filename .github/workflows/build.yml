@@ -110,8 +110,39 @@ jobs:
       - name: npm audit
         # `high` and above fails. Moderate advisories in a dev-only build chain
         # are the noise that teaches people to ignore this step.
+        #
+        # Unlike `pip-audit`, which reads a lockfile we ship, this is a live
+        # call to registry.npmjs.org from the *first* gate — so when that
+        # endpoint returned 503, seven minutes of npm's own retries could not
+        # clear it and a finished, four-gates-green release could not deploy.
+        # The check could not tell "found a vulnerability" from "could not ask",
+        # and failed closed on somebody else's uptime.
+        #
+        # An advisory still fails the build. An unreachable registry is a
+        # warning: not knowing is worth saying out loud and is not worth
+        # blocking a deploy of unrelated code. The weekly scheduled run asks
+        # again, which is the thing that actually catches a CVE disclosed
+        # between pushes.
         working-directory: web
-        run: npm audit --audit-level=high
+        run: |
+          set +e
+          report=$(npm audit --audit-level=high --json 2>/dev/null)
+          status=$?
+          set -e
+          # A real report always carries `metadata`; a transport failure carries
+          # `error` and nothing else. That is the whole distinction, and npm's
+          # exit code alone does not make it — it is non-zero for both.
+          if ! printf '%s' "$report" | grep -q '"metadata"'; then
+            echo "::warning::npm audit could not reach the registry — advisories were NOT checked on this run."
+            printf '%s\n' "$report" | head -5
+            exit 0
+          fi
+          if [ "$status" -ne 0 ]; then
+            printf '%s\n' "$report"
+            echo "::error::npm audit found advisories at high or above"
+            exit 1
+          fi
+          echo "npm audit: no advisories at high or above"
       - name: eslint
         working-directory: web
         # --max-warnings 0: a warning nobody has to fix is the same trap as a
