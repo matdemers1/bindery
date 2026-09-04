@@ -11,10 +11,10 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json",
     "test": "vitest run",
     "e2e": "playwright test",
-    "lint:system": "node ../../d3-design-system/design-system/scripts/check-usage.mjs src"
+    "lint:system": "d3-check-usage src"
   },
   "dependencies": {
-    "@d3cloud/ui": "file:../../d3-design-system/d3-ui",
+    "@d3cloud/ui": "https://github.com/matdemers1/d3-design-system/releases/download/v0.1.1/d3cloud-ui-0.1.1.tgz",
     "lucide-react": "^1.35.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -10,10 +10,13 @@ declare const process: { env: Record<string, string | undefined> };
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    // @d3cloud/ui is symlinked during local development, so its Radix
-    // dependencies resolve `react` from *its* node_modules rather than this
-    // app's — two copies of React in one tree, and every hook inside a Radix
-    // component throws "Cannot read properties of null (reading 'useContext')".
+    // @d3cloud/ui installs from a release tarball, so this is not needed for a
+    // normal install. It is kept for the case that does need it: linking the
+    // library locally (`npm link`, or a `file:` path) to work on both at once.
+    // Then its Radix dependencies resolve `react` from *its* node_modules
+    // rather than this app's — two copies of React in one tree, and every hook
+    // inside a Radix component throws "Cannot read properties of null
+    // (reading 'useContext')".
     //
     // It stayed hidden until Tabs, because Tabs is the first Radix-backed
     // component this app uses; Button and Alert are plain React and resolve
@@ -32,14 +35,13 @@ export default defineConfig({
   server: {
     host: true,
     fs: {
-      // @d3cloud/ui is linked from a sibling directory during local development
-      // (`file:../../d3-design-system/d3-ui`), and Vite refuses to serve files outside the
-      // project root. Without this the design system's font files 403 silently
-      // and the whole app drops back to a system fallback — which looks like a
-      // styling bug rather than a filesystem one.
+      // Only needed while the library is linked from a sibling directory: Vite
+      // refuses to serve files outside the project root, so the design system's
+      // fonts 403 silently and the app drops to a system fallback — which looks
+      // like a styling bug rather than a filesystem one.
       //
-      // Not needed once the library is installed from a git tag: npm copies the
-      // package into node_modules and there is no symlink to escape.
+      // Installing from the release tarball puts the package inside
+      // node_modules, where it needs no exception.
       allow: ["..", "../../d3-design-system/d3-ui"],
     },
     // Dev-only. In the stack, nginx proxies /api to the api container.
