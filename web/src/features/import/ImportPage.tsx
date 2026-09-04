@@ -205,7 +205,7 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
             <button
               type="submit"
               disabled={busy || !path.trim()}
-              className="flex items-center gap-1.5 rounded-lg border border-edge px-3 py-2 text-sm disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg border border-field px-3 py-2 text-sm disabled:opacity-40"
             >
               <FolderInput size={14} /> Scan
             </button>
@@ -396,16 +396,16 @@ function ActiveRun({
               Import all {remaining.toLocaleString()}
             </button>
           )}
-          <button onClick={() => act(() => api.runImport(run.id), "Imported a slice.")} disabled={busy || remaining === 0} className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40">
+          <button onClick={() => act(() => api.runImport(run.id), "Imported a slice.")} disabled={busy || remaining === 0} className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40">
             Just the next 50
           </button>
-          <button onClick={() => act(() => api.sampleImport(run.id), "Sample selected.")} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40">
+          <button onClick={() => act(() => api.sampleImport(run.id), "Sample selected.")} disabled={busy} className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40">
             Try a sample of {run.sample_size}
           </button>
-          <button onClick={() => act(() => api.pauseImport(run.id), "Paused.")} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40">
+          <button onClick={() => act(() => api.pauseImport(run.id), "Paused.")} disabled={busy} className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40">
             Pause
           </button>
-          <button onClick={() => act(() => api.curateImport(run.id), "Paused for curation. Tidy the taxonomy, then run pass two.")} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted disabled:opacity-40">
+          <button onClick={() => act(() => api.curateImport(run.id), "Paused for curation. Tidy the taxonomy, then run pass two.")} disabled={busy} className="rounded-md border border-field px-3 py-1.5 text-sm text-muted disabled:opacity-40">
             Stop and curate
           </button>
         </div>

@@ -108,7 +108,7 @@ function MergeControl({
               finally { setBusy(false); }
             }}
             disabled={!ready || busy}
-            className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+            className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
           >
             Preview
           </button>
@@ -150,7 +150,7 @@ function MergeControl({
                 setDone(null);
                 location.reload();
               }}
-              className="rounded border border-edge px-2 py-0.5 text-xs text-muted"
+              className="rounded border border-field px-2 py-0.5 text-xs text-muted"
             >
               Undo
             </button>
@@ -250,7 +250,7 @@ function AliasForm({ correspondentId, onAdded }: { correspondentId: string; onAd
         placeholder="Add another spelling…"
         className="min-w-0 flex-1 rounded border border-field bg-ink px-2 py-1 text-xs outline-none focus:border-accent"
       />
-      <button type="submit" className="rounded border border-edge px-2 py-1 text-xs text-muted">
+      <button type="submit" className="rounded border border-field px-2 py-1 text-xs text-muted">
         Add
       </button>
     </form>
@@ -300,7 +300,7 @@ function Assets({ libraryId }: { libraryId?: string }) {
         />
         <button
           type="submit"
-          className="rounded-md border border-edge px-3 py-1.5 text-sm hover:border-accent/60"
+          className="rounded-md border border-field px-3 py-1.5 text-sm hover:border-accent/60"
         >
           Add
         </button>
@@ -422,7 +422,7 @@ function Taxonomy() {
                     await api.mergeTags(pair.a_id, pair.b_id);
                     await load();
                   }}
-                  className="rounded border border-edge px-2 py-0.5 text-xs"
+                  className="rounded border border-field px-2 py-0.5 text-xs"
                 >
                   Merge →
                 </button>
@@ -441,7 +441,7 @@ function Taxonomy() {
               try { await api.scanDuplicates(); await load(); } finally { setBusy(false); }
             }}
             disabled={busy}
-            className="rounded border border-edge px-2 py-1 text-xs disabled:opacity-40"
+            className="rounded border border-field px-2 py-1 text-xs disabled:opacity-40"
           >
             {busy ? "Scanning…" : "Scan"}
           </button>
@@ -639,7 +639,7 @@ function UnifyPass() {
                       type="button"
                       onClick={() => void apply(group)}
                       disabled={applying !== null}
-                      className="rounded border border-edge px-2.5 py-1 text-xs hover:border-accent/60 disabled:opacity-40"
+                      className="rounded border border-field px-2.5 py-1 text-xs hover:border-accent/60 disabled:opacity-40"
                     >
                       {applying === group.canonical_id ? "Merging…" : "Merge these"}
                     </button>

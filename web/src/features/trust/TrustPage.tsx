@@ -603,7 +603,7 @@ function AuditPanel() {
           type="button"
           onClick={() => void load(true)}
           disabled={loading}
-          className="rounded border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+          className="rounded border border-field px-3 py-1.5 text-sm disabled:opacity-40"
         >
           {loading ? "Loading…" : "Load older"}
         </button>

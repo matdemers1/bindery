@@ -220,7 +220,7 @@ export default function ArchivePage() {
             {active && (
               <button
                 onClick={() => setParams(new URLSearchParams({ group: groupBy }), { replace: true })}
-                className="rounded-md border border-edge px-2 py-1.5 text-sm text-muted"
+                className="rounded-md border border-field px-2 py-1.5 text-sm text-muted"
               >
                 Clear
               </button>
@@ -251,7 +251,7 @@ export default function ArchivePage() {
                     setBulkNotice("Undone.");
                     await load();
                   }}
-                  className="rounded border border-edge px-2 py-0.5 text-xs text-muted"
+                  className="rounded border border-field px-2 py-0.5 text-xs text-muted"
                 >
                   Undo
                 </button>
@@ -430,7 +430,7 @@ function BulkBar({
             }
           }}
           disabled={busy || !tags.trim()}
-          className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+          className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
         >
           Preview
         </button>

@@ -143,7 +143,7 @@ export default function VaultPage() {
             <button
               type="button"
               onClick={() => void lock()}
-              className="flex items-center gap-1.5 rounded-lg border border-edge px-3 py-1.5 text-sm hover:border-accent/60"
+              className="flex items-center gap-1.5 rounded-lg border border-field px-3 py-1.5 text-sm hover:border-accent/60"
             >
               <Lock size={14} /> Lock now
             </button>
@@ -319,7 +319,7 @@ export default function VaultPage() {
                             onClick={() => void moveOut(item.document_id)}
                             disabled={busy === item.document_id}
                             title="Decrypt it back into the archive, where it becomes searchable again"
-                            className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+                            className="flex items-center gap-1.5 rounded-md border border-field px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
                           >
                             <Undo2 size={13} />
                             {busy === item.document_id ? "Restoring…" : "Take out"}

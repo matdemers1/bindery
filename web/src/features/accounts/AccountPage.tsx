@@ -133,7 +133,7 @@ function TwoFactor({ account, onChanged }: { account: Account; onChanged: () => 
             <button
               type="button"
               onClick={() => void disable()}
-              className="mt-3 rounded border border-edge px-2.5 py-1 text-xs text-muted hover:text-neutral-100"
+              className="mt-3 rounded border border-field px-2.5 py-1 text-xs text-muted hover:text-neutral-100"
             >
               Turn off
             </button>
@@ -161,7 +161,7 @@ function TwoFactor({ account, onChanged }: { account: Account; onChanged: () => 
                 setCopied(true);
                 window.setTimeout(() => setCopied(false), 1500);
               }}
-              className="rounded border border-edge p-2 text-muted hover:text-neutral-100"
+              className="rounded border border-field p-2 text-muted hover:text-neutral-100"
               aria-label="Copy the secret"
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}

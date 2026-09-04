@@ -165,7 +165,7 @@ export default function PhotosPage() {
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm ${
               undescribed
                 ? "border-accent/60 bg-accent/10 text-accent"
-                : "border-edge text-muted hover:text-neutral-100"
+                : "border-field text-muted hover:text-neutral-100"
             }`}
           >
             <Sparkles size={14} />
@@ -218,7 +218,7 @@ export default function PhotosPage() {
                 <button
                   type="button"
                   onClick={() => setSelected(photo)}
-                  className="group w-full overflow-hidden rounded-xl border border-edge bg-surface text-left transition-colors hover:border-accent/60"
+                  className="group w-full overflow-hidden rounded-xl border border-field bg-surface text-left transition-colors hover:border-accent/60"
                 >
                   {photo.kind === "video" ? (
                     <VideoCard photo={photo} />

@@ -12,6 +12,7 @@ import {
 } from "../../api";
 import { matchesTerm, queryTerms } from "../../lib/highlight";
 import { pageParts } from "../../lib/pages";
+import { Empty, ErrorState } from "../../components/States";
 import { isInteractiveTarget, isTypingTarget, shortcutsEnabled } from "../../lib/keyboard";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
@@ -63,7 +64,9 @@ function Viewer({
   // highlight, and saying so at render cannot leave the previous page's boxes
   // drawn over this one for a frame.
   const boxes = query.trim() && detail ? fetchedBoxes : null;
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  // Bumped by the retry button so the load effect runs again.
+  const [reloadToken, setReloadToken] = useState(0);
   const [showWhy, setShowWhy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
@@ -80,14 +83,12 @@ function Viewer({
           })
         : api.file(routeId).then(setDetail);
 
-    load.catch((caught) =>
-      setError(
-        caught instanceof ApiError && caught.status === 404
-          ? "This document is in a library you can’t see, or it no longer exists."
-          : "Could not load this document.",
-      ),
-    );
-  }, [mode, routeId]);
+    // The error itself, not a sentence about it. A transient failure and a
+    // 404 need different offers — one is worth retrying and the other is not —
+    // and flattening both to a string made that impossible to tell apart
+    // downstream (D-06).
+    load.catch(setError);
+  }, [mode, routeId, reloadToken]);
 
   // Offset between this view's page numbering and the file's.
   const pageStart = document_?.document.page_start ?? 1;
@@ -185,7 +186,46 @@ function Viewer({
   }, [go, localPage]);
 
   if (error) {
-    return <div className="mx-auto max-w-2xl py-12 text-center text-muted">{error}</div>;
+    // A 404 here is deliberately ambiguous and must stay that way: the API
+    // answers 404 rather than 403 for a library you are not in, because a 403
+    // would confirm the document exists (ADR-005). So this does not claim
+    // "not yours" — it says what is true, and gives a way onward, which is
+    // what the single grey sentence never did.
+    const missing = error instanceof ApiError && error.status === 404;
+    return (
+      <div className="mx-auto max-w-2xl py-12">
+        {missing ? (
+          <Empty title="Not here">
+            <p>
+              This {mode === "document" ? "document" : "file"} either does not
+              exist or is in a library you are not a member of. Bindery cannot
+              tell you which — saying so would confirm whether it exists.
+            </p>
+            <p className="mt-3 flex flex-wrap gap-3">
+              <Link
+                to="/search"
+                className="rounded-md border border-field px-3 py-1.5 text-sm text-neutral-100"
+              >
+                Search the archive
+              </Link>
+              <Link
+                to="/libraries"
+                className="self-center text-sm text-accent underline underline-offset-2"
+              >
+                Check which libraries you are in
+              </Link>
+            </p>
+          </Empty>
+        ) : (
+          <ErrorState error={error} onRetry={() => {
+              // Clear the error too, or the branch keeps rendering
+              // over a load that has already succeeded.
+              setError(null);
+              setReloadToken((n) => n + 1);
+            }} />
+        )}
+      </div>
+    );
   }
   if (!detail) {
     return <div className="mx-auto max-w-2xl py-12 text-center text-muted">Loading…</div>;
@@ -299,7 +339,7 @@ function Viewer({
               <button
                 aria-pressed={showWhy}
                 onClick={() => setShowWhy((open) => !open)}
-                className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted hover:border-accent/60"
+                className="rounded-md border border-field px-3 py-1.5 text-sm text-muted hover:border-accent/60"
               >
                 Why?
               </button>
@@ -311,7 +351,7 @@ function Viewer({
                 className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm ${
                   editing
                     ? "border-accent/60 bg-accent/10 text-accent"
-                    : "border-edge text-muted hover:border-accent/60"
+                    : "border-field text-muted hover:border-accent/60"
                 }`}
               >
                 <Pencil size={14} />
@@ -399,7 +439,7 @@ function NavButton({
   return (
     <button
       {...props}
-      className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+      className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
     >
       {children}
     </button>
@@ -465,7 +505,11 @@ function PageCanvas({
         <span
           key={index}
           aria-hidden
-          className="pointer-events-none absolute rounded-[2px] bg-amber-400/40 ring-1 ring-amber-500/70"
+          /* On the white of a scanned page. Amber was 1.26:1 here — the one
+             mark that proves the product found the word, and it was all but
+             invisible. The 2px ring is 4.2:1 on paper; the wash stays light
+             so the printed word underneath is still readable. */
+          className="pointer-events-none absolute rounded-[2px] bg-mark/15 ring-2 ring-mark"
           style={{
             left: `${box.left}%`,
             top: `${box.top}%`,

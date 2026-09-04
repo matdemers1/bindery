@@ -154,7 +154,7 @@ export default function PipelinePage() {
             <button
               type="button"
               onClick={() => setShowAll((value) => !value)}
-              className="rounded border border-edge px-2 py-1 text-xs text-muted hover:text-neutral-100"
+              className="rounded border border-field px-2 py-1 text-xs text-muted hover:text-neutral-100"
             >
               {showAll ? "Show recent" : `Show all ${files.length}`}
             </button>
@@ -273,7 +273,7 @@ function JobList({
               <button
                 onClick={() => onRetry(job.id)}
                 disabled={busy === job.id}
-                className="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-md border border-field px-2.5 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
               >
                 <RotateCw size={12} className={busy === job.id ? "animate-spin" : ""} />
                 {busy === job.id ? "Retrying…" : "Retry now"}
@@ -291,7 +291,7 @@ function JobList({
                       ? "Count this as outstanding again"
                       : "Stop counting this toward the badge. It stays here, with its error."
                   }
-                  className="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1.5 text-xs text-muted hover:text-neutral-100 disabled:opacity-40"
+                  className="flex items-center gap-1.5 rounded-md border border-field px-2.5 py-1.5 text-xs text-muted hover:text-neutral-100 disabled:opacity-40"
                 >
                   <Check size={12} />
                   {job.acknowledged_at ? "Undo" : "Acknowledge"}

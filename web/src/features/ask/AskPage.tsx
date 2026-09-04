@@ -208,7 +208,7 @@ export default function AskPage({
                     setQuestion(example);
                     void submit(example);
                   }}
-                  className="rounded-full border border-edge px-3 py-1.5 text-sm text-muted transition-colors hover:border-accent/60 hover:text-neutral-100"
+                  className="rounded-full border border-field px-3 py-1.5 text-sm text-muted transition-colors hover:border-accent/60 hover:text-neutral-100"
                 >
                   {example}
                 </button>
@@ -394,7 +394,7 @@ function Answer({
         <button
           type="button"
           onClick={onOpenSources}
-          className="inline-flex items-center gap-2 rounded-full border border-edge px-3.5 py-1.5 text-sm text-muted transition-colors hover:border-accent/60 hover:text-neutral-100"
+          className="inline-flex items-center gap-2 rounded-full border border-field px-3.5 py-1.5 text-sm text-muted transition-colors hover:border-accent/60 hover:text-neutral-100"
         >
           <BookOpen size={15} />
           {answered

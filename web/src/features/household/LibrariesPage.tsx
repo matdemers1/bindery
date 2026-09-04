@@ -195,7 +195,7 @@ function LibraryCard({
           <button
             type="submit"
             disabled={!email.trim()}
-            className="rounded border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+            className="rounded border border-field px-3 py-1.5 text-sm disabled:opacity-40"
           >
             Add
           </button>

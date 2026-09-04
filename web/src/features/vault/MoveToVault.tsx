@@ -75,7 +75,7 @@ export default function MoveToVault({
         title="Encrypt this behind the vault passphrase and take it out of search"
         className={
           className ??
-          "flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-sm text-muted hover:border-accent/60"
+          "flex items-center gap-1.5 rounded-md border border-field px-3 py-1.5 text-sm text-muted hover:border-accent/60"
         }
       >
         <ShieldCheck size={14} />
@@ -145,7 +145,7 @@ export default function MoveToVault({
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="rounded-lg border border-edge px-3 py-2 text-sm text-muted hover:text-neutral-100"
+                  className="rounded-lg border border-field px-3 py-2 text-sm text-muted hover:text-neutral-100"
                 >
                   Cancel
                 </button>

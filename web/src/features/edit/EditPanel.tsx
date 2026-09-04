@@ -400,7 +400,7 @@ export default function EditPanel({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-edge px-3 py-2 text-sm text-muted hover:text-neutral-100"
+            className="rounded-lg border border-field px-3 py-2 text-sm text-muted hover:text-neutral-100"
           >
             Cancel
           </button>

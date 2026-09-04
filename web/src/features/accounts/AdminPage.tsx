@@ -124,7 +124,7 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={() => void act(() => accountsApi.revokeInvite(invite.id))}
-                    className="rounded border border-edge px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
+                    className="rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
                   >
                     Withdraw
                   </button>
@@ -236,7 +236,7 @@ function Row({
               className="w-20 rounded border border-field bg-ink px-1.5 py-0.5 text-xs outline-none focus:border-accent"
             />
             <span className="text-xs text-muted">GB</span>
-            <button type="submit" className="rounded border border-edge px-1.5 py-0.5 text-xs">
+            <button type="submit" className="rounded border border-field px-1.5 py-0.5 text-xs">
               Save
             </button>
             <button
@@ -258,7 +258,7 @@ function Row({
               );
               setEditingQuota(true);
             }}
-            className="mt-1.5 rounded border border-edge px-1.5 py-0.5 text-[11px] text-muted hover:text-neutral-100"
+            className="mt-1.5 rounded border border-field px-1.5 py-0.5 text-[11px] text-muted hover:text-neutral-100"
           >
             Change quota
           </button>
@@ -290,7 +290,7 @@ function Row({
                 setCode(issued.code);
               })
             }
-            className="rounded border border-edge px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
+            className="rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
           >
             Reset code
           </button>
@@ -298,7 +298,7 @@ function Row({
             <button
               type="button"
               onClick={() => void act(() => accountsApi.unlock(account.id))}
-              className="flex items-center gap-1 rounded border border-edge px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
+              className="flex items-center gap-1 rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
             >
               <Lock size={11} /> Unlock
             </button>
@@ -307,7 +307,7 @@ function Row({
             <button
               type="button"
               onClick={() => void act(() => accountsApi.grantAdmin(account.id))}
-              className="flex items-center gap-1 rounded border border-edge px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
+              className="flex items-center gap-1 rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
             >
               <ShieldCheck size={11} /> Make admin
             </button>
@@ -316,7 +316,7 @@ function Row({
             <button
               type="button"
               onClick={() => void act(() => accountsApi.suspend(account.id))}
-              className="flex items-center gap-1 rounded border border-edge px-2 py-0.5 text-xs text-muted hover:text-red-300"
+              className="flex items-center gap-1 rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-red-300"
             >
               <Ban size={11} /> Suspend
             </button>
@@ -324,7 +324,7 @@ function Row({
             <button
               type="button"
               onClick={() => void act(() => accountsApi.restore(account.id))}
-              className="flex items-center gap-1 rounded border border-edge px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
+              className="flex items-center gap-1 rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
             >
               <RotateCcw size={11} /> Restore
             </button>
@@ -439,7 +439,7 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
                 setCopied(true);
                 window.setTimeout(() => setCopied(false), 1500);
               }}
-              className="rounded border border-edge p-2 text-muted hover:text-neutral-100"
+              className="rounded border border-field p-2 text-muted hover:text-neutral-100"
               aria-label="Copy the link"
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}

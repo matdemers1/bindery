@@ -12,7 +12,13 @@ export default function Snippet({ html }: { html: string }) {
     const start = match.index ?? 0;
     if (start > cursor) parts.push(decode(html.slice(cursor, start)));
     parts.push(
-      <mark key={start} className="rounded-sm bg-accent/25 px-0.5 text-inherit">
+      <mark
+        key={start}
+        /* A wash alone measured 1.64:1 — a stain rather than a mark, and the
+           same hue as the buttons beside it. The ring carries the contrast
+           (4.2:1) so the wash can stay light enough to read through. */
+        className="rounded-sm bg-mark/20 px-0.5 text-inherit ring-1 ring-mark"
+      >
         {decode(match[1])}
       </mark>,
     );

@@ -299,7 +299,7 @@ export default function Shell({
           <button
             onClick={onOpenPalette}
             title="Jump to a page (⌘K)"
-            className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-lg border border-edge px-3 py-2 text-sm text-muted hover:text-neutral-100"
+            className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-lg border border-field px-3 py-2 text-sm text-muted hover:text-neutral-100"
           >
             <Search size={15} />
             {!collapsed && (

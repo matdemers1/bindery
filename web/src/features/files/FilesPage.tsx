@@ -341,7 +341,7 @@ function MoveControl({
             type="button"
             disabled={busy}
             onClick={() => void run(() => api.previewMove(sourceFileId, target))}
-            className="rounded border border-edge px-2 py-1 disabled:opacity-40"
+            className="rounded border border-field px-2 py-1 disabled:opacity-40"
           >
             {busy ? "Checking…" : "Preview"}
           </button>
@@ -390,7 +390,7 @@ function MoveControl({
             <button
               type="button"
               onClick={() => setPlan(null)}
-              className="rounded border border-edge px-2 py-1"
+              className="rounded border border-field px-2 py-1"
             >
               Cancel
             </button>

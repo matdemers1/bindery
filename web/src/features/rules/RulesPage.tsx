@@ -111,7 +111,7 @@ export default function RulesPage({ libraries }: { libraries: Library[] }) {
                   <button
                     onClick={() => dryRun(rule)}
                     disabled={busy === rule.id}
-                    className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+                    className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
                   >
                     Dry run
                   </button>
@@ -120,7 +120,7 @@ export default function RulesPage({ libraries }: { libraries: Library[] }) {
                     disabled={busy === rule.id}
                     className={`rounded-md px-3 py-1.5 text-sm disabled:opacity-40 ${
                       rule.enabled
-                        ? "border border-edge"
+                        ? "border border-field"
                         : "bg-accent font-medium text-ink"
                     }`}
                   >
@@ -257,7 +257,7 @@ function NewRuleForm({
       </div>
       <button
         type="submit"
-        className="mt-3 rounded-md border border-edge px-3 py-1.5 text-sm hover:border-accent/60"
+        className="mt-3 rounded-md border border-field px-3 py-1.5 text-sm hover:border-accent/60"
       >
         Create — disabled until you dry-run it
       </button>

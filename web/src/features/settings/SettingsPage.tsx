@@ -110,7 +110,7 @@ export default function SettingsPage() {
               type="button"
               onClick={() => void save(null)}
               disabled={busy}
-              className="rounded-md border border-edge px-3 py-2 text-sm disabled:opacity-40"
+              className="rounded-md border border-field px-3 py-2 text-sm disabled:opacity-40"
             >
               Remove
             </button>
@@ -152,7 +152,7 @@ export default function SettingsPage() {
             }
           }}
           disabled={busy}
-          className="mt-4 rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+          className="mt-4 rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
         >
           Test the current key
         </button>
@@ -367,7 +367,7 @@ function NotificationSettings({
             type="button"
             disabled={busy}
             onClick={() => void save("")}
-            className="rounded border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+            className="rounded border border-field px-3 py-1.5 text-sm disabled:opacity-40"
           >
             Turn off
           </button>
@@ -657,7 +657,7 @@ function OffsiteReplication({
             onClick={() => void runTest()}
             disabled={testing || !configured}
             title={configured ? undefined : "Fill in and save the fields first"}
-            className="rounded-md border border-edge px-3 py-2 text-sm disabled:opacity-40"
+            className="rounded-md border border-field px-3 py-2 text-sm disabled:opacity-40"
           >
             {testing ? "Testing…" : "Test connection"}
           </button>
@@ -722,7 +722,7 @@ function ApiTokens() {
           <button
             type="button"
             onClick={() => setIssued(null)}
-            className="mt-2 rounded border border-edge px-2 py-1 text-xs"
+            className="mt-2 rounded border border-field px-2 py-1 text-xs"
           >
             I have copied it
           </button>
@@ -789,7 +789,7 @@ function ApiTokens() {
                 <button
                   type="button"
                   onClick={() => void api.revokeApiToken(token.id).then(load)}
-                  className="rounded border border-edge px-2 py-1 text-xs"
+                  className="rounded border border-field px-2 py-1 text-xs"
                 >
                   Revoke
                 </button>

@@ -127,7 +127,7 @@ export default function LogViewer({
           onClick={() => setLive((value) => !value)}
           title={live ? "Following new entries" : "Paused"}
           className={`rounded border px-2 py-1 text-xs ${
-            live ? "border-accent/60 text-accent" : "border-edge text-muted"
+            live ? "border-accent/60 text-accent" : "border-field text-muted"
           }`}
         >
           <RefreshCw size={12} className={live ? "animate-spin" : ""} />
@@ -207,7 +207,7 @@ export default function LogViewer({
             type="button"
             onClick={() => void load(true)}
             disabled={loading}
-            className="w-full rounded border border-edge px-3 py-1.5 text-xs disabled:opacity-40"
+            className="w-full rounded border border-field px-3 py-1.5 text-xs disabled:opacity-40"
           >
             {loading ? "Loading…" : "Load older"}
           </button>

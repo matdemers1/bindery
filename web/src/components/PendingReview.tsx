@@ -98,7 +98,7 @@ export default function PendingReviewPanel({ compact = false }: { compact?: bool
               type="button"
               onClick={() => void run(reason.code)}
               disabled={busy !== null}
-              className="mt-2 rounded border border-edge px-2.5 py-1 text-xs disabled:opacity-40"
+              className="mt-2 rounded border border-field px-2.5 py-1 text-xs disabled:opacity-40"
             >
               {busy === reason.code ? "Queueing…" : `Run AI review on these ${reason.count}`}
             </button>

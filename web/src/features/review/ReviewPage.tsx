@@ -219,7 +219,7 @@ export default function ReviewPage() {
                 className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm disabled:opacity-40 ${
                   correcting
                     ? "border-accent/60 bg-accent/10 text-accent"
-                    : "border-edge hover:border-accent/60"
+                    : "border-field hover:border-accent/60"
                 }`}
               >
                 <Pencil size={14} />
@@ -228,7 +228,7 @@ export default function ReviewPage() {
               <button
                 onClick={() => act("undo")}
                 disabled={busy}
-                className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+                className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
               >
                 Undo
               </button>

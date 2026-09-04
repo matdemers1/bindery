@@ -47,7 +47,7 @@ export default function VaultGrid({
             <button
               type="button"
               onClick={() => setOpen(item)}
-              className="group w-full overflow-hidden rounded-xl border border-edge bg-surface text-left transition-colors hover:border-accent/60"
+              className="group w-full overflow-hidden rounded-xl border border-field bg-surface text-left transition-colors hover:border-accent/60"
             >
               {broken.has(item.document_id) ? (
                 // A format the browser will not draw — HEIC outside Safari is
@@ -114,7 +114,7 @@ export default function VaultGrid({
               type="button"
               onClick={() => onTakeOut(open.document_id)}
               disabled={busy === open.document_id}
-              className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-md border border-field px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
             >
               <Undo2 size={13} />
               {busy === open.document_id ? "Restoring…" : "Take out of the vault"}

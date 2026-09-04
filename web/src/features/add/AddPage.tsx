@@ -257,7 +257,7 @@ export default function AddPage({
               type="button"
               onClick={() => setStaged([])}
               disabled={busy}
-              className="rounded border border-edge px-2.5 py-1 text-xs text-muted hover:text-neutral-100 disabled:opacity-40"
+              className="rounded border border-field px-2.5 py-1 text-xs text-muted hover:text-neutral-100 disabled:opacity-40"
             >
               Clear
             </button>
@@ -311,7 +311,7 @@ export default function AddPage({
                 <button
                   type="button"
                   onClick={() => setWatching([])}
-                  className="flex items-center gap-1 rounded border border-edge px-2 py-1 text-xs text-muted hover:text-neutral-100"
+                  className="flex items-center gap-1 rounded border border-field px-2 py-1 text-xs text-muted hover:text-neutral-100"
                 >
                   <Plus size={12} />
                   Show everything recent

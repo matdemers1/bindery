@@ -159,7 +159,7 @@ export function FileRow({
         <button
           type="button"
           onClick={() => onShowLog(file)}
-          className="rounded border border-edge px-2 py-0.5 text-[11px] text-muted hover:text-neutral-100"
+          className="rounded border border-field px-2 py-0.5 text-[11px] text-muted hover:text-neutral-100"
         >
           Log
         </button>

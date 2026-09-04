@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 
 import { ApiError, api, type SegmentList, type SourceFileDetail } from "../../api";
+import { Empty, ErrorState } from "../../components/States";
 
 /**
  * The manual segmentation editor (REQ-036).
@@ -24,7 +25,9 @@ export default function SegmentationPage() {
   const [titles, setTitles] = useState<Record<number, string>>({});
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  // Bumped by the retry button so the load effect runs again.
+  const [reloadToken, setReloadToken] = useState(0);
 
   const adopt = useCallback((list: SegmentList) => {
     setSaved(list);
@@ -50,14 +53,11 @@ export default function SegmentationPage() {
         setDetail(file);
         adopt(list);
       })
-      .catch((caught) =>
-        setError(
-          caught instanceof ApiError && caught.status === 404
-            ? "This file is in a library you can’t see, or it no longer exists."
-            : "Could not load this file.",
-        ),
-      );
-  }, [fileId, adopt]);
+      // The error itself, not a sentence about it — a transient failure is
+      // worth retrying and a 404 is not, and one string could not say which
+      // (D-06).
+      .catch(setError);
+  }, [fileId, adopt, reloadToken]);
 
   const pageCount = detail?.pages.length ?? 0;
 
@@ -136,7 +136,45 @@ export default function SegmentationPage() {
   }
 
   if (error) {
-    return <div className="mx-auto max-w-2xl py-12 text-center text-muted">{error}</div>;
+    // Deliberately not "not yours": the API answers 404 rather than 403 for a
+    // library you are not in, because a 403 would confirm the file exists
+    // (ADR-005). The ambiguity is the boundary working; what was missing was
+    // any way onward from it.
+    const missing = error instanceof ApiError && error.status === 404;
+    return (
+      <div className="mx-auto max-w-2xl py-12">
+        {missing ? (
+          <Empty title="Not here">
+            <p>
+              This file either does not exist or is in a library you are not a
+              member of. Bindery cannot tell you which — saying so would confirm
+              whether it exists.
+            </p>
+            <p className="mt-3 flex flex-wrap gap-3">
+              <Link
+                to="/files"
+                className="rounded-md border border-field px-3 py-1.5 text-sm text-neutral-100"
+              >
+                Browse files
+              </Link>
+              <Link
+                to="/libraries"
+                className="self-center text-sm text-accent underline underline-offset-2"
+              >
+                Check which libraries you are in
+              </Link>
+            </p>
+          </Empty>
+        ) : (
+          <ErrorState error={error} onRetry={() => {
+              // Clear the error too, or the branch keeps rendering
+              // over a load that has already succeeded.
+              setError(null);
+              setReloadToken((n) => n + 1);
+            }} />
+        )}
+      </div>
+    );
   }
   if (!detail || !saved) {
     return <div className="mx-auto max-w-2xl py-12 text-center text-muted">Loading…</div>;
@@ -159,14 +197,18 @@ export default function SegmentationPage() {
           <button
             onClick={undo}
             disabled={busy}
-            className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+            className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-50"
           >
             Undo last save
           </button>
           <button
             onClick={save}
             disabled={busy || !dirty}
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
+            /* "Saved" is the resting state of this button, so it is on screen
+               far more than "Save segmentation" is — and `opacity-40` faded the
+               whole group, label included, to 2.3:1. Disabled should read as
+               "nothing to do", not as "unreadable". */
+            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:bg-accent/70"
           >
             {busy ? "Saving…" : dirty ? "Save segmentation" : "Saved"}
           </button>
@@ -187,7 +229,11 @@ export default function SegmentationPage() {
         {segments.map((segment, index) => (
           <section
             key={segment.start}
-            className="rounded-lg border border-edge bg-surface p-4"
+            /* `field`, not `edge`: this border is not a divider, it is the
+               boundary of the one thing this screen is about — where a
+               document starts and stops inside the file. At 1.35:1 the
+               grouping that carries the whole meaning was invisible. */
+            className="rounded-lg border border-field bg-surface p-4"
           >
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <span className="rounded-full border border-edge px-2 py-0.5 font-mono text-xs text-muted">
