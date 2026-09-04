@@ -39,7 +39,7 @@ export default function PageThumb({
         className={`flex flex-col items-center justify-center gap-1.5 rounded border border-dashed border-edge bg-ink/50 text-muted ${className}`}
       >
         <FileWarning size={18} aria-hidden />
-        <span className="text-[11px]">p. {page}</span>
+        <span className="text-11">p. {page}</span>
       </div>
     );
   }

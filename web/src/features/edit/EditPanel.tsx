@@ -10,6 +10,7 @@ import {
 import { useLiveQuery } from "../../live/LiveProvider";
 import MetadataPanel from "../media/MetadataPanel";
 import SourceBadge from "./SourceBadge";
+import { Button, Alert } from "@d3cloud/ui";
 
 /**
  * Correcting a document (REQ-188 to REQ-190).
@@ -379,38 +380,28 @@ export default function EditPanel({
       </Field>
 
       {error && (
-        <p
-          role="alert"
-          className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300"
-        >
+        <Alert tone="danger" dynamic>
           {error}
-        </p>
+        </Alert>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={busy}
-          className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
+        <Button variant="primary" onClick={() => void save()} disabled={busy}
+          icon={<Check size={14} />}
         >
-          <Check size={14} /> {busy ? "Saving…" : "Save"}
-        </button>
+          {busy ? "Saving…" : "Save"}
+        </Button>
         {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg border border-field px-3 py-2 text-sm text-muted hover:text-neutral-100"
-          >
+          <Button onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
         )}
         <button
           type="button"
           onClick={() => void undo()}
           disabled={busy}
           title="Walk back the last change to this document"
-          className="ml-auto flex items-center gap-1.5 text-xs text-muted underline underline-offset-2 hover:text-neutral-100 disabled:opacity-40"
+          className="ml-auto flex items-center gap-1.5 text-xs text-muted underline underline-offset-2 hover:text-fg disabled:opacity-40"
         >
           <Undo2 size={12} /> Undo last change
         </button>

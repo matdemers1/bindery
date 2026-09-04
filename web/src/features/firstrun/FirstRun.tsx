@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { ApiError, api, type Library, type PipelineStatus } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
+import { Button } from "@d3cloud/ui";
 
 /**
  * First run (T-8.6, REQ-119).
@@ -115,21 +116,16 @@ export default function FirstRun({
           className="hidden"
           onChange={(event) => void upload(event.target.files)}
         />
-        <button
-          type="button"
-          onClick={() => input.current?.click()}
-          disabled={busy || libraries.length === 0}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink disabled:opacity-50"
-        >
+        <Button variant="primary" onClick={() => input.current?.click()} disabled={busy || libraries.length === 0}>
           {busy ? "Adding…" : "Add your first document"}
-        </button>
+        </Button>
         <span className="text-xs text-muted">
           Or drop files anywhere on this page.
         </span>
       </div>
 
       {error && (
-        <p role="alert" className="mt-3 text-sm text-red-300">
+        <p role="alert" className="mt-3 text-sm text-danger">
           {error}
         </p>
       )}

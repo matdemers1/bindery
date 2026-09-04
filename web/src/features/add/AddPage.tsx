@@ -12,6 +12,7 @@ import { useLiveQuery } from "../../live/LiveProvider";
 import LogViewer from "../../components/LogViewer";
 import PageHeader from "../../components/PageHeader";
 import PipelineFlow, { FileRow } from "./PipelineFlow";
+import { Button, Alert } from "@d3cloud/ui";
 
 /**
  * Adding files.
@@ -144,9 +145,9 @@ export default function AddPage({
       </PageHeader>
 
       {error && (
-        <p role="alert" className="rounded-lg border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+        <Alert tone="danger" dynamic>
           {error}
-        </p>
+        </Alert>
       )}
 
       <div
@@ -253,23 +254,14 @@ export default function AddPage({
               </>
             )}
 
-            <button
-              type="button"
-              onClick={() => setStaged([])}
-              disabled={busy}
-              className="rounded border border-field px-2.5 py-1 text-xs text-muted hover:text-neutral-100 disabled:opacity-40"
-            >
+            <Button size="sm" onClick={() => setStaged([])} disabled={busy}>
               Clear
-            </button>
-            <button
-              type="button"
-              onClick={() => void uploadAll()}
-              disabled={busy || !libraryId}
-              className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
+            </Button>
+            <Button variant="primary" onClick={() => void uploadAll()} disabled={busy || !libraryId}
+              icon={<Upload size={14} />}
             >
-              <Upload size={14} />
               {busy ? "Adding…" : `Add ${staged.length}`}
-            </button>
+            </Button>
           </header>
 
           <ul className="max-h-80 divide-y divide-edge/60 overflow-y-auto">
@@ -287,7 +279,7 @@ export default function AddPage({
                   }
                   disabled={busy}
                   aria-label={`Remove ${item.file.name}`}
-                  className="rounded p-1 text-muted hover:text-red-300 disabled:opacity-40"
+                  className="rounded p-1 text-muted hover:text-danger disabled:opacity-40"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -308,14 +300,11 @@ export default function AddPage({
               </h2>
               <span className="flex-1" />
               {watching.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setWatching([])}
-                  className="flex items-center gap-1 rounded border border-field px-2 py-1 text-xs text-muted hover:text-neutral-100"
+                <Button size="sm" onClick={() => setWatching([])}
+                  icon={<Plus size={12} />}
                 >
-                  <Plus size={12} />
                   Show everything recent
-                </button>
+                </Button>
               )}
             </header>
             <ul className="divide-y divide-edge/60">

@@ -4,6 +4,7 @@ import { Download, Film, Undo2, X } from "lucide-react";
 import { fileUrl, type VaultItem } from "../../api";
 import Modal from "../../components/Modal";
 import MetadataPanel, { formatDuration } from "../media/MetadataPanel";
+import { Button } from "@d3cloud/ui";
 
 /**
  * Vaulted videos, playable (REQ-192, REQ-195).
@@ -56,7 +57,7 @@ export default function VaultVideos({
                     </span>
                   )}
                   {!playable && (
-                    <span className="px-2 text-center text-[11px]">
+                    <span className="px-2 text-center text-11">
                       {item.media_type ?? "this format"} — download to watch
                     </span>
                   )}
@@ -65,7 +66,7 @@ export default function VaultVideos({
                   <span className="block truncate text-xs font-medium">
                     {item.title ?? item.original_filename ?? "Untitled"}
                   </span>
-                  <span className="mt-0.5 block text-[11px] text-muted">
+                  <span className="mt-0.5 block text-11 text-muted">
                     {(item.byte_size / 1024 / 1024).toFixed(1)} MB
                     {item.media?.captured_at && ` · ${item.media.captured_at.slice(0, 10)}`}
                   </span>
@@ -112,16 +113,12 @@ export default function VaultVideos({
               </button>
             </div>
             {open.media && <MetadataPanel media={open.media} />}
-            <button
-              type="button"
-              onClick={() => onTakeOut(open.document_id)}
-              disabled={busy === open.document_id}
-              className="flex items-center gap-1.5 rounded-md border border-field px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+            <Button size="sm" onClick={() => onTakeOut(open.document_id)} disabled={busy === open.document_id}
+              icon={<Undo2 size={13} />}
             >
-              <Undo2 size={13} />
               {busy === open.document_id ? "Restoring…" : "Take out of the vault"}
-            </button>
-            <p className="text-[11px] text-muted">
+            </Button>
+            <p className="text-11 text-muted">
               Streamed by decrypting only the part you are watching. Nothing is
               cached; locking the vault stops playback.
             </p>

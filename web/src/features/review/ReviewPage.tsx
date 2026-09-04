@@ -14,6 +14,7 @@ import { isInteractiveTarget, isTypingTarget, shortcutsEnabled } from "../../lib
 import { useLiveQuery } from "../../live/LiveProvider";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
+import { Button } from "@d3cloud/ui";
 
 /**
  * Keyboard triage (T-3.10): preview left, provenance right.
@@ -143,7 +144,7 @@ export default function ReviewPage() {
             .
           </p>
         ) : (
-          <p className="mt-4 text-sm text-emerald-400">
+          <p className="mt-4 text-sm text-success">
             Everything in the archive has been through AI review.
           </p>
         )}
@@ -192,13 +193,9 @@ export default function ReviewPage() {
               {current.title ?? <span className="text-muted">(untitled)</span>}
             </h2>
             <div className="flex gap-2">
-              <button
-                onClick={() => act("accept")}
-                disabled={busy}
-                className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-              >
+              <Button variant="primary" onClick={() => act("accept")} disabled={busy}>
                 Accept
-              </button>
+              </Button>
               {/* The case the queue had no expression for. Until now the only
                   answers were "accept all of it" and "throw all of it away",
                   so "this is right except the date" meant accepting something
@@ -225,13 +222,9 @@ export default function ReviewPage() {
                 <Pencil size={14} />
                 Correct
               </button>
-              <button
-                onClick={() => act("undo")}
-                disabled={busy}
-                className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
-              >
+              <Button onClick={() => act("undo")} disabled={busy}>
                 Undo
-              </button>
+              </Button>
               <Link
                 to={`/document/${current.id}/page/1`}
                 className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted hover:border-accent/60"

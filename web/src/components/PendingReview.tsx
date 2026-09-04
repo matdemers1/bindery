@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { ApiError, api, type PendingReview } from "../api";
 import { useLiveQuery } from "../live/LiveProvider";
+import { Button } from "@d3cloud/ui";
 
 /**
  * "Run AI review over the documents that missed it."
@@ -20,8 +21,8 @@ import { useLiveQuery } from "../live/LiveProvider";
  */
 const TONE: Record<string, string> = {
   never_attempted: "border-edge bg-surface",
-  provider_unavailable: "border-amber-900/60 bg-amber-950/20",
-  failed: "border-red-900/60 bg-red-950/20",
+  provider_unavailable: "border-warning/40 bg-warning-muted/20",
+  failed: "border-danger/40 bg-danger-muted/20",
 };
 
 export default function PendingReviewPanel({ compact = false }: { compact?: boolean }) {
@@ -94,32 +95,22 @@ export default function PendingReviewPanel({ compact = false }: { compact?: bool
               </span>
             </div>
             <p className="mt-1 max-w-2xl text-sm text-muted">{reason.detail}</p>
-            <button
-              type="button"
-              onClick={() => void run(reason.code)}
-              disabled={busy !== null}
-              className="mt-2 rounded border border-field px-2.5 py-1 text-xs disabled:opacity-40"
-            >
+            <Button size="sm" className="mt-2" onClick={() => void run(reason.code)} disabled={busy !== null}>
               {busy === reason.code ? "Queueing…" : `Run AI review on these ${reason.count}`}
-            </button>
+            </Button>
           </li>
         ))}
       </ul>
 
       {pending.reasons.length > 1 && (
-        <button
-          type="button"
-          onClick={() => void run(null)}
-          disabled={busy !== null}
-          className="mt-3 rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-        >
+        <Button variant="primary" className="mt-3" onClick={() => void run(null)} disabled={busy !== null}>
           {busy === "all" ? "Queueing…" : `Run AI review on all ${pending.total}`}
-        </button>
+        </Button>
       )}
 
       {notice && <p className="mt-3 text-sm text-muted">{notice}</p>}
       {error && (
-        <p role="alert" className="mt-3 text-sm text-red-300">
+        <p role="alert" className="mt-3 text-sm text-danger">
           {error}
         </p>
       )}

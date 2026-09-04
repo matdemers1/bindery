@@ -108,7 +108,9 @@ describe("PhotosPage", () => {
     renderWall();
     await screen.findByAltText("Passport photo");
 
-    fireEvent.click(screen.getByRole("tab", { name: /^Videos/ }));
+    // `mouseDown`, not `click`: Radix activates a tab on mouse-down, so a
+    // synthetic click alone never reaches it.
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /^Videos/ }));
 
     expect(await screen.findByText("Driveway")).toBeTruthy();
     expect(screen.queryByAltText("Passport photo")).toBeNull();
@@ -130,9 +132,10 @@ describe("PhotosPage", () => {
   it("says how many of each kind there are on the tab that holds them", async () => {
     archiveOf(["a", "b", "c"], ["d"]);
     renderWall();
-    // The count sits in its own span beside the label, so the accessible name
-    // is the two run together.
-    expect(await screen.findByRole("tab", { name: /^Photos\s*3$/ })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: /^Videos\s*1$/ })).toBeTruthy();
+    // The count carries its unit into the accessible name. It used to sit in
+    // its own span beside the label, so the name was the two run together —
+    // "Photos 3", which is a label and a loose number rather than a count.
+    expect(await screen.findByRole("tab", { name: "Photos, 3 items" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Videos, 1 item" })).toBeTruthy();
   });
 });

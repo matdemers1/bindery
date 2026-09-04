@@ -82,9 +82,10 @@ export function Logo({
 /** Icon plus name, for the top of the sidebar. */
 export function Wordmark({ collapsed = false }: { collapsed?: boolean }) {
   return (
-    <span className="flex items-center gap-2.5 text-neutral-100">
+    <span className="flex items-center gap-2.5 text-fg">
       <Logo size={26} className="shrink-0" />
       {!collapsed && (
+        /* d3-allow: brand lockup — the wordmark is sized to the 26px mark beside it, not to the type scale. */
         <span className="text-[15px] font-semibold tracking-tight">Bindery</span>
       )}
     </span>

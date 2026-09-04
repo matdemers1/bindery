@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { ApiError, api, type WhyPanel as WhyPanelData } from "../../api";
 import OcrTextPanel from "../../components/OcrText";
 import SourceBadge from "../edit/SourceBadge";
+import { Alert, Button } from "@d3cloud/ui";
 
 /**
  * Why every AI-written field says what it says (REQ-063).
@@ -82,25 +83,25 @@ export default function WhyPanel({
         first and discovering that afterwards is the wrong order.
       */}
       {data.extraction.characters === 0 && (
-        <div className="border-b border-edge bg-amber-950/20 p-4">
-          <p className="text-sm font-medium text-amber-300">
-            No text was read from this document.
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            Nothing below is based on anything the machine could actually read, and
-            none of this document is searchable. The original is stored and intact —
-            reading it again is safe and rebuilds only what was derived.
-          </p>
-          <button
-            type="button"
-            onClick={() => void requestRescan(data.source_file_id)}
-            disabled={rescan !== null}
-            className="mt-2 rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-50"
-          >
-            {rescan ? "Rescanning…" : "Rescan with forced OCR"}
-          </button>
-          {rescan && <p className="mt-2 text-sm text-muted">{rescan}</p>}
-        </div>
+        <Alert
+          tone="warning"
+          flush
+          title="No text was read from this document."
+          actions={
+            <Button
+              variant="primary"
+              loading={rescan !== null}
+              onClick={() => void requestRescan(data.source_file_id)}
+            >
+              {rescan ? "Rescanning…" : "Rescan with forced OCR"}
+            </Button>
+          }
+        >
+          Nothing below is based on anything the machine could actually read, and
+          none of this document is searchable. The original is stored and intact —
+          reading it again is safe and rebuilds only what was derived.
+          {rescan && <p className="mt-2">{rescan}</p>}
+        </Alert>
       )}
 
       {data.field_sources.some((row) => row.source === "human") && (
@@ -161,7 +162,7 @@ export default function WhyPanel({
                 </p>
                 {row ? (
                   <>
-                    <blockquote className="mt-1.5 border-l-2 border-accent/50 pl-3 text-sm text-neutral-300 italic">
+                    <blockquote className="mt-1.5 border-l-2 border-accent/50 pl-3 text-sm text-fg italic">
                       “{row.snippet}”
                     </blockquote>
                     {row.page_number !== null && (
@@ -212,7 +213,7 @@ export default function WhyPanel({
                 ? "Filed automatically."
                 : "Held for your review."}
             </p>
-            <ul className="space-y-1 text-sm text-neutral-300">
+            <ul className="space-y-1 text-sm text-fg">
               {classification.gate_reasons.map((reason) => (
                 <li key={reason} className="flex gap-2">
                   <span className="text-accent">·</span>
@@ -268,9 +269,9 @@ export function SourceChip({
   children: React.ReactNode;
 }) {
   const style = {
-    ai: "border-dashed border-sky-500/60 text-sky-300",
-    rule: "border-violet-500/60 text-violet-300",
-    human: "border-edge text-neutral-200",
+    ai: "border-dashed border-info/60 text-info",
+    rule: "border-accent/60 text-accent",
+    human: "border-edge text-fg",
   }[source];
   const label = { ai: "set by the classifier", rule: "set by a rule you wrote", human: "set by you" }[
     source

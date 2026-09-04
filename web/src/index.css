@@ -1,44 +1,71 @@
-@import "tailwindcss";
+/* Bindery on @d3cloud/ui.
+ *
+ * One import replaces the seven colours, the focus ring, the reduced-motion
+ * rule, the colour-scheme declaration and the font stack this file used to
+ * define by hand. What remains below is the compatibility layer and the few
+ * things that are genuinely Bindery's. */
+@import "@d3cloud/ui/theme.css";
 
-/* Dark-first: the archive is looked at in the evening, at a desk, in a room
-   with the lights off. Light mode is a Phase 8 concern. */
-@theme {
-  --color-ink: #0b0d12;
-  --color-surface: #141821;
-  --color-edge: #232a37;
-  --color-muted: #8b94a7;
-  --color-accent: #d8a657;
+/* Tailwind v4 finds content relative to the CSS file, which now lives in
+   node_modules — so point it back at this app. */
+@source "./";
 
-  /* `edge` is a card stroke — 1.2:1 against surface, which is all a divider
-     needs to be. A form control's border is not a divider: it is the boundary
-     of a user-interface component, and WCAG 1.4.11 asks for 3:1 so the box can
-     be found before it is focused. `field` is 3.3:1 on surface, 3.6:1 on ink
-     and 3.5:1 on the ink/40 fill the edit panel uses. */
-  --color-field: #606c7e;
+/* ---------------------------------------------------------------------------
+ * Compatibility layer.
+ *
+ * Bindery names four things differently from the system. Mapping them here
+ * keeps 1,268 existing utility usages working unchanged, so the reskin lands in
+ * one commit and the call sites can be migrated at leisure rather than in a
+ * single unreviewable diff. `surface` and `accent` already match the system's
+ * names and are deliberately NOT redeclared — the system's own theme entry
+ * provides them.
+ *
+ * This layer is temporary. It is deleted once the call sites use the system's
+ * names directly.
+ * ------------------------------------------------------------------------- */
+@theme inline {
+  --color-ink: var(--color-bg);
+  --color-edge: var(--color-border);
+  --color-muted: var(--color-text-muted);
+  --color-field: var(--color-border-field);
 
-  /* The mark that says "this is your match" — and the one colour in here that
-     has to work on two grounds. A snippet highlight sits on `surface`; the box
-     drawn over a matched word sits on the white of a scanned page. The accent
-     cannot do both: it is 8.0:1 on surface and 2.2:1 on white, so on paper it
-     was a 1.3:1 stain that the reader had to be told was there. This is 4.2:1
-     on surface and 4.2:1 on white.
-
-     Deliberately not amber, beyond the arithmetic: the accent is this app's
-     action colour, and "this is a button" and "this is your match" being the
-     same signal is how the evidence that retrieval worked got lost among the
-     controls. */
+  /* --------------------------------------------------------------------------
+   * NOT a compatibility shim — a Bindery-specific token the system does not have
+   * and should not.
+   *
+   * This is the mark that says "this is your match", and it is the one colour in
+   * the app that has to work on two grounds: a snippet highlight sits on a dark
+   * surface, and the box drawn over a matched word sits on the white of a
+   * scanned page. Measured against the system's palette it is 4.06:1 on
+   * `surface` and 4.23:1 on white — still the two-ground property it was chosen
+   * for.
+   *
+   * Deliberately not the accent: "this is a button" and "this is your match"
+   * being the same signal is how the evidence that retrieval worked got lost
+   * among the controls.
+   * ------------------------------------------------------------------------ */
+  /* d3-allow: Bindery's own two-ground search highlight (D-047). Deliberately
+     teal against a violet accent, so "this is your match" and "this is a
+     button" stay different signals. It is app-local by design and has no
+     equivalent in the system. */
   --color-mark: #2a8699;
 }
 
-/* The parts of a control the browser paints itself read this and nothing else:
-   the calendar button and picker of an `input type=date`, an unstyled
-   checkbox, a `<select>`'s option popup, scrollbars, the autofill highlight.
-   Without it they are drawn light on a near-black page — which is how the
-   "I have written the passphrase down" checkbox, the gate on a vault whose
-   passphrase cannot be recovered, ended up a pale grey box on #141821. */
+/* `@theme inline` inlines values into utilities and does not emit the custom
+   property, so `var(--color-mark)` would be empty for any plain CSS that wants
+   it. Declared here too, because a token with reasoning attached should be
+   readable, not only usable through a utility. */
 :root {
-  color-scheme: dark;
+  /* d3-allow: Bindery's own two-ground search highlight (D-047). Deliberately
+     teal against a violet accent, so "this is your match" and "this is a
+     button" stay different signals. It is app-local by design and has no
+     equivalent in the system. */
+  --color-mark: #2a8699;
 }
+
+/* Bindery is dark-only. Without this the system would follow the OS and render
+   the archive in light mode for anyone whose machine prefers it. */
+html { color-scheme: dark; }
 
 html,
 body,
@@ -47,42 +74,17 @@ body,
 }
 
 body {
-  background: var(--color-ink);
-  color: #e6e9ef;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-}
-
-/* Accessibility pass (T-8.9).
-
-   The retrieval flow — search, pick a result, read the page — has to be
-   completable without a mouse, and visibly so. `:focus-visible` rather than
-   `:focus` keeps the ring off mouse clicks while guaranteeing it on Tab, which
-   is the distinction that makes people leave keyboard focus styling on. */
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  border-radius: 2px;
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 /* Anything the user is expected to click is at least 24px tall even at the
-   smallest text size. */
+   smallest text size. The library's own controls already clear this; the rule
+   stays until the last hand-rolled button is gone. */
 button,
 [role="button"],
 select {
   min-height: 1.75rem;
-}
-
-/* Respect a stated preference for less motion: the pulse on skeleton loaders
-   and the palette transition are decorative, and for some people they are worse
-   than decorative. */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-  }
 }
 
 /* The skip link is off-screen until focused, which is the only time it helps. */

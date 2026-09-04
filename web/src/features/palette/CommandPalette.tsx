@@ -94,7 +94,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
       label="Command palette"
       onClose={onClose}
       backdropClassName="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 pt-[12vh]"
-      className="w-full max-w-xl overflow-hidden rounded-xl border border-edge bg-surface shadow-2xl"
+      className="w-full max-w-xl overflow-hidden rounded-xl border border-float bg-surface-raised"
     >
       <input
         ref={input}
@@ -161,7 +161,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
                   filename: result.original_filename,
                 })}
               </p>
-              <p className="mt-1 truncate text-xs text-neutral-300">
+              <p className="mt-1 truncate text-xs text-fg">
                 <Snippet html={result.best_page.snippet} />
               </p>
             </li>

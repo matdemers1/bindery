@@ -53,7 +53,7 @@ export default function NextSteps({
         <button
           type="button"
           onClick={onDismiss}
-          className="text-xs text-muted hover:text-neutral-100"
+          className="text-xs text-muted hover:text-fg"
         >
           Hide this
         </button>
@@ -66,7 +66,7 @@ export default function NextSteps({
           >
             <div className="flex items-center gap-2 text-sm font-medium">
               {step.done ? (
-                <Check size={14} className="text-emerald-400" />
+                <Check size={14} className="text-success" />
               ) : (
                 <step.icon size={14} className="text-muted" />
               )}

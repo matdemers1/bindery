@@ -4,6 +4,7 @@ import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api, type Library, type RuleDryRun, type RuleRecord } from "../../api";
+import { Button } from "@d3cloud/ui";
 
 /**
  * The rules editor (T-3.13, REQ-061).
@@ -108,24 +109,16 @@ export default function RulesPage({ libraries }: { libraries: Library[] }) {
                   </p>
                 </div>
                 <div className="flex shrink-0 gap-2">
-                  <button
-                    onClick={() => dryRun(rule)}
-                    disabled={busy === rule.id}
-                    className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
-                  >
+                  <Button onClick={() => dryRun(rule)} disabled={busy === rule.id}>
                     Dry run
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant={rule.enabled ? "secondary" : "primary"}
                     onClick={() => toggle(rule)}
                     disabled={busy === rule.id}
-                    className={`rounded-md px-3 py-1.5 text-sm disabled:opacity-40 ${
-                      rule.enabled
-                        ? "border border-field"
-                        : "bg-accent font-medium text-ink"
-                    }`}
                   >
                     {rule.enabled ? "Disable" : "Enable"}
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -149,7 +142,7 @@ function DryRunPreview({ result }: { result: RuleDryRun }) {
       {result.matches.length > 0 && (
         <ul className="max-h-40 space-y-1 overflow-y-auto text-sm">
           {result.matches.slice(0, 20).map((match) => (
-            <li key={match.document_id} className="truncate text-neutral-300">
+            <li key={match.document_id} className="truncate text-fg">
               {match.title ?? "(untitled)"}
             </li>
           ))}
@@ -255,12 +248,9 @@ function NewRuleForm({
           className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
         />
       </div>
-      <button
-        type="submit"
-        className="mt-3 rounded-md border border-field px-3 py-1.5 text-sm hover:border-accent/60"
-      >
+      <Button className="mt-3" type="submit">
         Create — disabled until you dry-run it
-      </button>
+      </Button>
     </form>
   );
 }

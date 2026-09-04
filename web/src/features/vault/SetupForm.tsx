@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { ShieldPlus } from "lucide-react";
 
 import { api, type VaultState } from "../../api";
+import { Button, Alert } from "@d3cloud/ui";
 
 /**
  * Creating the vault, once.
@@ -39,14 +40,11 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
 
   return (
     <form onSubmit={submit} className="max-w-xl space-y-4">
-      <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3 text-sm text-amber-300">
-        <p className="font-medium">This passphrase cannot be recovered.</p>
-        <p className="mt-1 text-amber-300/80">
-          It is not stored anywhere — only a key wrapped with it is. If you forget
-          it and the PIN has been switched off, everything in the vault stays
-          encrypted for good. Write it down somewhere physical before you go on.
-        </p>
-      </div>
+      <Alert tone="warning" title="This passphrase cannot be recovered.">
+        It is not stored anywhere — only a key wrapped with it is. If you forget
+        it and the PIN has been switched off, everything in the vault stays
+        encrypted for good. Write it down somewhere physical before you go on.
+      </Alert>
 
       <div>
         <label htmlFor="setup-passphrase" className="block text-sm text-muted">
@@ -78,7 +76,7 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
           className="mt-1 w-full rounded-lg border border-field bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
         />
         {mismatch && (
-          <p id={mismatchId} role="alert" className="mt-1 text-xs text-red-400">
+          <p id={mismatchId} role="alert" className="mt-1 text-xs text-danger">
             These do not match.
           </p>
         )}
@@ -95,6 +93,7 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
           autoComplete="off"
           value={pin}
           onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
+          /* d3-allow: a PIN field, spaced so the digits can be counted. Not a type choice. */
           className="mt-1 w-40 rounded-lg border border-field bg-surface px-3 py-2 font-mono text-lg tracking-[0.4em] outline-none focus:border-accent"
         />
         <p className="mt-1 text-xs text-muted">
@@ -115,22 +114,20 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
       </label>
 
       {error && (
-        <p
-          role="alert"
-          className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300"
-        >
+        <Alert tone="danger" dynamic>
           {error}
-        </p>
+        </Alert>
       )}
 
-      <button
+      <Button
+        variant="primary"
         type="submit"
-        disabled={!ready || busy}
-        className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
+        icon={<ShieldPlus size={14} />}
+        loading={busy}
+        disabled={!ready}
       >
-        <ShieldPlus size={14} />
         {busy ? "Creating…" : "Create the vault"}
-      </button>
+      </Button>
     </form>
   );
 }

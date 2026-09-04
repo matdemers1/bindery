@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { KeyRound, Lock } from "lucide-react";
 
 import { ApiError, api, type VaultState } from "../../api";
+import { Button, Alert } from "@d3cloud/ui";
 
 /**
  * Opening the vault, by PIN or by passphrase.
@@ -105,10 +106,11 @@ export default function UnlockForm({
             aria-describedby={describedBy}
             value={pin}
             onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
+            /* d3-allow: a PIN field, spaced so the digits can be counted. Not a type choice. */
             className="mt-1 w-full rounded-lg border border-field bg-surface px-3 py-2 font-mono text-lg tracking-[0.4em] outline-none focus:border-accent"
           />
           {state.pin_failures > 0 && (
-            <p id={attemptsId} role="status" className="mt-1 text-xs text-amber-400">
+            <p id={attemptsId} role="status" className="mt-1 text-xs text-warning">
               {remaining} attempt{remaining === 1 ? "" : "s"} left. After that the
               PIN is switched off and the passphrase is the way in — nothing in
               the vault is lost.
@@ -118,24 +120,21 @@ export default function UnlockForm({
       )}
 
       {error && (
-        <p
-          id={errorId}
-          role="alert"
-          className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300"
-        >
+        <Alert tone="danger" dynamic id={errorId}>
           {error}
-        </p>
+        </Alert>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button
+        <Button
+          variant="primary"
           type="submit"
-          disabled={busy || (usePassphrase ? !passphrase : pin.length < 4)}
-          className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
+          icon={<KeyRound size={14} />}
+          loading={busy}
+          disabled={usePassphrase ? !passphrase : pin.length < 4}
         >
-          <KeyRound size={14} />
           {busy ? "Opening…" : "Unlock"}
-        </button>
+        </Button>
         {state.pin_enabled && (
           <button
             type="button"
@@ -143,7 +142,7 @@ export default function UnlockForm({
               setUsePassphrase((value) => !value);
               setError(null);
             }}
-            className="text-xs text-muted underline underline-offset-2 hover:text-neutral-100"
+            className="text-xs text-muted underline underline-offset-2 hover:text-fg"
           >
             {usePassphrase ? "Use the PIN instead" : "Use the passphrase instead"}
           </button>

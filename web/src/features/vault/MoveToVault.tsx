@@ -5,6 +5,7 @@ import { ShieldCheck } from "lucide-react";
 import { ApiError, api, type VaultState } from "../../api";
 import Modal from "../../components/Modal";
 import UnlockForm from "./UnlockForm";
+import { Button, Alert } from "@d3cloud/ui";
 
 /**
  * "Move to vault", from wherever you are looking at the thing.
@@ -96,13 +97,9 @@ export default function MoveToVault({
                 There is no vault on this account yet. Setting one up takes a
                 passphrase and a PIN.
               </p>
-              <button
-                type="button"
-                onClick={() => navigate("/vault")}
-                className="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink"
-              >
+              <Button variant="primary" onClick={() => navigate("/vault")}>
                 Set up the vault
-              </button>
+              </Button>
             </>
           ) : !state.unlocked ? (
             <>
@@ -126,29 +123,17 @@ export default function MoveToVault({
                 back into the archive, with its title and page text.
               </p>
               {error && (
-                <p
-                  role="alert"
-                  className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300"
-                >
+                <Alert tone="danger" dynamic>
                   {error}
-                </p>
+                </Alert>
               )}
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void confirm()}
-                  disabled={busy}
-                  className="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
-                >
+                <Button variant="primary" onClick={() => void confirm()} disabled={busy}>
                   {busy ? "Moving…" : "Move to vault"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="rounded-lg border border-field px-3 py-2 text-sm text-muted hover:text-neutral-100"
-                >
+                </Button>
+                <Button onClick={() => setOpen(false)}>
                   Cancel
-                </button>
+                </Button>
               </div>
             </>
           )}

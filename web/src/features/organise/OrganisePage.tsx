@@ -18,6 +18,7 @@ import {
   type UnifyProposal,
   type TimelineEntry,
 } from "../../api";
+import { Alert, Button, SegmentedControl } from "@d3cloud/ui";
 
 /**
  * Organise (Phase 5) — correspondents, assets, and taxonomy health.
@@ -44,19 +45,16 @@ export default function OrganisePage({ libraries }: { libraries: { id: string }[
         make documents unfindable under the name you&apos;d actually reach for.
       </PageHeader>
 
-      <div className="mb-5 flex gap-1">
-        {TABS.map((option) => (
-          <button
-            key={option.key}
-            onClick={() => setParams({ tab: option.key }, { replace: true })}
-            className={`rounded-md px-3 py-1.5 text-sm ${
-              tab === option.key ? "bg-surface text-neutral-100" : "text-muted hover:text-neutral-200"
-            }`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+      {/* Manual activation: each view mounts a component that fetches, so
+          arrowing across would load all three. */}
+      <SegmentedControl
+        className="mb-5"
+        activationMode="manual"
+        aria-label="Organise view"
+        items={TABS.map((o) => ({ value: o.key, label: o.label }))}
+        value={tab}
+        onValueChange={(next) => setParams({ tab: next }, { replace: true })}
+      />
 
       {tab === "correspondents" && <Correspondents />}
       {tab === "assets" && <Assets libraryId={libraries[0]?.id} />}
@@ -100,41 +98,20 @@ function MergeControl({
         <Select value={target} onChange={setTarget} options={options} placeholder="…this" />
 
         {onPreview && (
-          <button
-            onClick={async () => {
-              setBusy(true); setError(null);
-              try { setPreview(await onPreview(source, target)); }
-              catch (e) { setError(e instanceof ApiError ? e.message : "Could not preview."); }
-              finally { setBusy(false); }
-            }}
-            disabled={!ready || busy}
-            className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
-          >
+          <Button onClick={async () => { setBusy(true); setError(null); try { setPreview(await onPreview(source, target)); } catch (e) { setError(e instanceof ApiError ? e.message : "Could not preview."); } finally { setBusy(false); } }} disabled={!ready || busy}>
             Preview
-          </button>
+          </Button>
         )}
-        <button
-          onClick={async () => {
-            setBusy(true); setError(null);
-            try {
-              setDone(await onMerge(source, target));
-              setPreview(null); setSource(""); setTarget("");
-            } catch (e) { setError(e instanceof ApiError ? e.message : "Could not merge."); }
-            finally { setBusy(false); }
-          }}
-          disabled={!ready || busy || (Boolean(onPreview) && !preview)}
-          title={onPreview && !preview ? "Preview it first" : undefined}
-          className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-        >
+        <Button variant="primary" onClick={async () => { setBusy(true); setError(null); try { setDone(await onMerge(source, target)); setPreview(null); setSource(""); setTarget(""); } catch (e) { setError(e instanceof ApiError ? e.message : "Could not merge."); } finally { setBusy(false); } }} disabled={!ready || busy || (Boolean(onPreview) && !preview)} title={onPreview && !preview ? "Preview it first" : undefined}>
           Merge
-        </button>
+        </Button>
       </div>
 
-      {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
 
       {preview && (
         <p className="mt-2 text-sm text-muted">
-          Would move <strong className="text-neutral-200">{preview.document_count}</strong>{" "}
+          Would move <strong className="text-fg">{preview.document_count}</strong>{" "}
           documents from “{preview.from_name}” into “{preview.into_name}”, and keep the old
           name as an alias. Nothing has been written.
         </p>
@@ -144,16 +121,9 @@ function MergeControl({
         <p className="mt-2 flex flex-wrap items-center gap-3 text-sm text-accent">
           Merged “{done.from_name}” into “{done.into_name}”.
           {done.operation_id && (
-            <button
-              onClick={async () => {
-                await api.undoMerge(done.operation_id!);
-                setDone(null);
-                location.reload();
-              }}
-              className="rounded border border-field px-2 py-0.5 text-xs text-muted"
-            >
+            <Button size="sm" onClick={async () => { await api.undoMerge(done.operation_id!); setDone(null); location.reload(); }}>
               Undo
-            </button>
+            </Button>
           )}
         </p>
       )}
@@ -250,9 +220,9 @@ function AliasForm({ correspondentId, onAdded }: { correspondentId: string; onAd
         placeholder="Add another spelling…"
         className="min-w-0 flex-1 rounded border border-field bg-ink px-2 py-1 text-xs outline-none focus:border-accent"
       />
-      <button type="submit" className="rounded border border-field px-2 py-1 text-xs text-muted">
+      <Button size="sm" type="submit">
         Add
-      </button>
+      </Button>
     </form>
   );
 }
@@ -298,12 +268,9 @@ function Assets({ libraryId }: { libraryId?: string }) {
           placeholder="2020 Honda Accord"
           className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
         />
-        <button
-          type="submit"
-          className="rounded-md border border-field px-3 py-1.5 text-sm hover:border-accent/60"
-        >
+        <Button type="submit">
           Add
-        </button>
+        </Button>
       </form>
 
       {rows.length === 0 ? (
@@ -354,6 +321,7 @@ function Assets({ libraryId }: { libraryId?: string }) {
                           {entry.title ?? "(untitled)"}
                         </span>
                       </Link>
+                      {/* d3-allow: aligns under the icon and gap on the line above — a measured offset, not a spacing step. */}
                       <p className="ml-[4.2rem] text-xs text-muted">
                         {entry.correspondent ?? "unknown sender"}
                         {!entry.dated_precisely && " · dated by arrival"}
@@ -394,7 +362,7 @@ function Taxonomy() {
           <div><dt className="text-xs text-muted">Never used</dt><dd className="font-mono text-lg">{health.unused}</dd></div>
         </dl>
         {health.exceeds_alarm && (
-          <p className="mt-3 rounded-md border border-amber-500/40 p-3 text-sm text-amber-300">
+          <p className="mt-3 rounded-md border border-warning/40 p-3 text-sm text-warning">
             {Math.round(health.orphan_ratio * 100)}% of tags are used exactly once. Past
             15% the plan treats that as the taxonomy drifting despite the reuse
             contract — worth merging the near-duplicates below and tightening the
@@ -417,15 +385,9 @@ function Taxonomy() {
                     {Math.round(pair.similarity * 100)}% alike
                   </span>
                 </span>
-                <button
-                  onClick={async () => {
-                    await api.mergeTags(pair.a_id, pair.b_id);
-                    await load();
-                  }}
-                  className="rounded border border-field px-2 py-0.5 text-xs"
-                >
+                <Button size="sm" onClick={async () => { await api.mergeTags(pair.a_id, pair.b_id); await load(); }}>
                   Merge →
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -435,16 +397,9 @@ function Taxonomy() {
       <section className="rounded-lg border border-edge bg-surface p-4">
         <div className="mb-2 flex items-center justify-between">
           <p className="text-xs tracking-wide text-muted uppercase">Possible duplicates</p>
-          <button
-            onClick={async () => {
-              setBusy(true);
-              try { await api.scanDuplicates(); await load(); } finally { setBusy(false); }
-            }}
-            disabled={busy}
-            className="rounded border border-field px-2 py-1 text-xs disabled:opacity-40"
-          >
+          <Button size="sm" onClick={async () => { setBusy(true); try { await api.scanDuplicates(); await load(); } finally { setBusy(false); } }} disabled={busy}>
             {busy ? "Scanning…" : "Scan"}
-          </button>
+          </Button>
         </div>
         {duplicates.length === 0 ? (
           <p className="text-sm text-muted">None found.</p>
@@ -558,38 +513,27 @@ function UnifyPass() {
     <section className="mb-5 rounded-xl border border-edge bg-surface p-4">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-sm font-medium">Unify</h2>
-        <div className="flex rounded-lg border border-edge p-0.5" role="tablist">
-          {UNIFY_KINDS.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              role="tab"
-              aria-selected={kind === option.key}
-              onClick={() => {
-                setKind(option.key);
-                setProposal(null);
-                setApplied(new Set());
-                setError(null);
-              }}
-              className={`rounded-md px-2.5 py-1 text-xs ${
-                kind === option.key
-                  ? "bg-accent/15 text-accent"
-                  : "text-muted hover:text-neutral-100"
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        {/* Was a `tablist` with no tabpanel anywhere — a promise to a screen
+            reader that nothing kept. Manual activation because choosing throws
+            away the proposals already applied, which is not something to do to
+            somebody on the way past. */}
+        <SegmentedControl
+          size="sm"
+          activationMode="manual"
+          aria-label="What to unify"
+          items={UNIFY_KINDS.map((o) => ({ value: o.key, label: o.label }))}
+          value={kind}
+          onValueChange={(next) => {
+            setKind(next as UnifyKind);
+            setProposal(null);
+            setApplied(new Set());
+            setError(null);
+          }}
+        />
         <span className="flex-1" />
-        <button
-          type="button"
-          onClick={() => void propose()}
-          disabled={busy}
-          className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-        >
+        <Button variant="primary" onClick={() => void propose()} disabled={busy}>
           {busy ? "Looking…" : "Look for duplicates"}
-        </button>
+        </Button>
       </div>
       <p className="mt-1 max-w-2xl text-sm text-muted">
         {UNIFY_KINDS.find((option) => option.key === kind)?.blurb} Nothing merges
@@ -597,9 +541,9 @@ function UnifyPass() {
       </p>
 
       {error && (
-        <p role="alert" className="mt-3 rounded border border-red-900 bg-red-950/40 p-2.5 text-sm text-red-300">
+        <Alert tone="danger" dynamic className="mt-3">
           {error}
-        </p>
+        </Alert>
       )}
 
       {proposal?.unavailable_reason && (
@@ -623,7 +567,7 @@ function UnifyPass() {
               <li
                 key={group.canonical_id ?? group.canonical}
                 className={`rounded-lg border p-3 ${
-                  done ? "border-emerald-900/60 bg-emerald-950/20" : "border-edge bg-ink"
+                  done ? "border-success/40 bg-success-muted/20" : "border-edge bg-ink"
                 }`}
               >
                 <div className="flex flex-wrap items-baseline gap-2">
@@ -633,16 +577,11 @@ function UnifyPass() {
                   </span>
                   <span className="flex-1" />
                   {done ? (
-                    <span className="text-xs text-emerald-400">merged</span>
+                    <span className="text-xs text-success">merged</span>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => void apply(group)}
-                      disabled={applying !== null}
-                      className="rounded border border-field px-2.5 py-1 text-xs hover:border-accent/60 disabled:opacity-40"
-                    >
+                    <Button size="sm" onClick={() => void apply(group)} disabled={applying !== null}>
                       {applying === group.canonical_id ? "Merging…" : "Merge these"}
-                    </button>
+                    </Button>
                   )}
                 </div>
                 {group.reason && (
@@ -652,7 +591,7 @@ function UnifyPass() {
                   {group.members.map((member) => (
                     <li
                       key={member.id}
-                      className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                      className={`rounded-full border px-2 py-0.5 text-11 ${
                         member.id === group.canonical_id
                           ? "border-accent/60 text-accent"
                           : "border-edge text-muted"

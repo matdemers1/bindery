@@ -24,6 +24,7 @@ import {
   type MirrorResult,
   type OffsiteStatus,
 } from "../../api";
+import { Button, Alert } from "@d3cloud/ui";
 
 /**
  * Trust — export, integrity, backup, and the audit log.
@@ -64,7 +65,7 @@ export default function TrustPage() {
             className={
               tab === key
                 ? "-mb-px border-b-2 border-accent px-3 py-2 text-sm font-medium"
-                : "-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-muted hover:text-neutral-100"
+                : "-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-muted hover:text-fg"
             }
           >
             {label}
@@ -115,9 +116,9 @@ function ResiliencePanel() {
   return (
     <div className="space-y-4">
       {error && (
-        <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+        <Alert tone="danger" dynamic>
           {error}
-        </p>
+        </Alert>
       )}
 
       <Card
@@ -133,7 +134,7 @@ function ResiliencePanel() {
         {integrity && (
           <div className="mt-3 text-sm">
             {integrity.healthy ? (
-              <p className="text-emerald-400">
+              <p className="text-success">
                 All {integrity.checked} originals match their hashes.
                 {integrity.sealed?.length > 0 && (
                   <>
@@ -147,7 +148,7 @@ function ResiliencePanel() {
                 )}
               </p>
             ) : (
-              <div className="space-y-2 text-red-300">
+              <div className="space-y-2 text-danger">
                 <p className="font-medium">
                   {integrity.corrupt.length} corrupt, {integrity.missing.length} missing.
                   Do not back up over this.
@@ -183,11 +184,11 @@ function ResiliencePanel() {
           onClick={() => run("export", () => api.exportFull(), setExported)}
         />
         {exported && (
-          <p className="mt-3 text-sm text-neutral-200">
+          <p className="mt-3 text-sm text-fg">
             {exported.document_count} documents in {exported.file_count} files →{" "}
             <code className="text-muted">{exported.path}</code>
             {exported.missing_blobs.length > 0 && (
-              <span className="block text-red-300">
+              <span className="block text-danger">
                 {exported.missing_blobs.length} originals could not be found and are
                 marked missing in the export.
               </span>
@@ -229,7 +230,7 @@ function ResiliencePanel() {
           or on the server stores it, so a lost passphrase is a lost go-bag.
         </p>
         {goBag && (
-          <p className="mt-2 text-sm text-neutral-200">
+          <p className="mt-2 text-sm text-fg">
             {goBag.document_count} vital documents, encrypted →{" "}
             <code className="text-muted">{goBag.path}</code>
           </p>
@@ -248,7 +249,7 @@ function ResiliencePanel() {
           onClick={() => run("mirror", () => api.rebuildMirror(), setMirror)}
         />
         {mirror && (
-          <p className="mt-3 text-sm text-neutral-200">
+          <p className="mt-3 text-sm text-fg">
             {mirror.linked} linked, {mirror.copied} copied, {mirror.bundles} bundles,{" "}
             {mirror.removed} stale entries cleared → <code>{mirror.root}</code>
           </p>
@@ -267,7 +268,7 @@ function ResiliencePanel() {
           onClick={() => run("backup", () => api.runBackup(), setBackup)}
         />
         {backup && (
-          <p className="mt-3 text-sm text-neutral-200">
+          <p className="mt-3 text-sm text-fg">
             {backup.blob_count} originals → <code>{backup.path}</code>
           </p>
         )}
@@ -279,7 +280,7 @@ function ResiliencePanel() {
             original it references is actually in the backup, and then searches the
             restored archive for the DD-214. It never touches the live stack.
           </p>
-          <pre className="mt-2 overflow-x-auto rounded bg-black/60 p-2 text-xs text-neutral-200">
+          <pre className="mt-2 overflow-x-auto rounded bg-black/60 p-2 text-xs text-fg">
 scripts/restore-drill.sh /data/backups/&lt;generation&gt;
           </pre>
           <p className="mt-1 text-xs text-muted">
@@ -322,14 +323,9 @@ function Action({
   disabled?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy || disabled}
-      className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-    >
+    <Button variant="primary" onClick={onClick} disabled={busy || disabled}>
       {busy ? "Working…" : label}
-    </button>
+    </Button>
   );
 }
 
@@ -386,7 +382,7 @@ function OffsitePanel() {
         in this building on the same array — they survive a dead disk, not a fire."
     >
       {!status.configured ? (
-        <p className="text-sm text-amber-400">
+        <p className="text-sm text-warning">
           Not configured. Nothing is leaving this machine — add the credentials in
           Settings.
         </p>
@@ -395,10 +391,10 @@ function OffsitePanel() {
           <div className="flex flex-wrap items-baseline gap-2 text-sm">
             <span
               className={`h-2 w-2 rounded-full ${
-                status.stale ? "bg-red-400" : "bg-emerald-400"
+                status.stale ? "bg-danger" : "bg-success"
               }`}
             />
-            <span className={status.stale ? "text-red-300" : ""}>
+            <span className={status.stale ? "text-danger" : ""}>
               Last successful copy {describeAge(status.last_success_age_seconds)}
             </span>
             {status.in_flight && (
@@ -407,7 +403,7 @@ function OffsitePanel() {
           </div>
 
           {status.stale && (
-            <p className="mt-1 text-sm text-red-300">
+            <p className="mt-1 text-sm text-danger">
               {status.last_success_at
                 ? "Two days is longer than the schedule allows — something is failing."
                 : "No copy has ever left this machine."}
@@ -425,7 +421,7 @@ function OffsitePanel() {
         </>
       )}
 
-      {error && <p className="mt-2 text-sm text-red-300">{error}</p>}
+      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
 
       {status.runs.length > 0 && (
         <table className="mt-4 w-full text-left text-sm">
@@ -450,9 +446,9 @@ function OffsitePanel() {
                   <span
                     className={
                       run.state === "succeeded"
-                        ? "text-emerald-400"
+                        ? "text-success"
                         : run.state === "failed"
-                          ? "text-red-400"
+                          ? "text-danger"
                           : "text-muted"
                     }
                   >
@@ -462,7 +458,7 @@ function OffsitePanel() {
                       diagnose from the screen sends you to the host logs. */}
                   {run.detail && <span className="text-muted"> — {run.detail}</span>}
                   {run.failures?.map((failure) => (
-                    <div key={failure} className="text-xs text-red-300/80">
+                    <div key={failure} className="text-xs text-danger/80">
                       {failure}
                     </div>
                   ))}
@@ -588,7 +584,7 @@ function AuditPanel() {
                   <summary className="cursor-pointer text-xs text-muted">
                     what changed
                   </summary>
-                  <pre className="mt-1 overflow-x-auto rounded bg-black/50 p-2 text-[11px] text-neutral-200">
+                  <pre className="mt-1 overflow-x-auto rounded bg-black/50 p-2 text-11 text-fg">
 {JSON.stringify({ before: event.before, after: event.after }, null, 2)}
                   </pre>
                 </details>
@@ -599,14 +595,9 @@ function AuditPanel() {
       )}
 
       {cursor !== null && (
-        <button
-          type="button"
-          onClick={() => void load(true)}
-          disabled={loading}
-          className="rounded border border-field px-3 py-1.5 text-sm disabled:opacity-40"
-        >
+        <Button onClick={() => void load(true)} disabled={loading}>
           {loading ? "Loading…" : "Load older"}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -663,9 +654,9 @@ function HealthPanelView() {
 
   if (error) {
     return (
-      <p role="alert" className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+      <Alert tone="danger" dynamic>
         {error}
-      </p>
+      </Alert>
     );
   }
   if (loading && !panel) return <p className="text-sm text-muted">Loading…</p>;
@@ -676,9 +667,9 @@ function HealthPanelView() {
   return (
     <div className="space-y-4">
       {panel.alerts.length === 0 ? (
-        <p className="rounded-md border border-emerald-900 bg-emerald-950/30 p-3 text-sm text-emerald-300">
+        <Alert tone="success">
           Everything is moving. {queued === 0 ? "Nothing is waiting." : `${queued} waiting.`}
-        </p>
+        </Alert>
       ) : (
         <ul className="space-y-2">
           {panel.alerts.map((alert) => (
@@ -687,8 +678,8 @@ function HealthPanelView() {
               role={alert.severity === "critical" ? "alert" : undefined}
               className={
                 alert.severity === "critical"
-                  ? "rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300"
-                  : "rounded-md border border-amber-900 bg-amber-950/30 p-3 text-sm text-amber-300"
+                  ? "rounded-md border border-danger/40 bg-danger-muted/40 p-3 text-sm text-danger"
+                  : "rounded-md border border-warning/40 bg-warning-muted/30 p-3 text-sm text-warning"
               }
             >
               {alert.message}
@@ -806,24 +797,24 @@ function Stat({
     <div
       className={`rounded-lg border p-3 ${
         loud === "bad"
-          ? "border-red-900/70 bg-red-950/25"
+          ? "border-danger/40 bg-danger-muted/25"
           : loud === "warn"
-            ? "border-amber-900/70 bg-amber-950/20"
+            ? "border-warning/40 bg-warning-muted/20"
             : "border-edge bg-surface"
       }`}
     >
-      <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted">
+      <p className="flex items-center gap-1.5 text-11 uppercase tracking-wide text-muted">
         <Icon
           size={12}
           className={
-            loud === "bad" ? "text-red-400" : loud === "warn" ? "text-amber-400" : ""
+            loud === "bad" ? "text-danger" : loud === "warn" ? "text-warning" : ""
           }
         />
         {label}
       </p>
       <p
         className={`mt-1 text-2xl font-semibold ${
-          loud === "bad" ? "text-red-300" : loud === "warn" ? "text-amber-300" : ""
+          loud === "bad" ? "text-danger" : loud === "warn" ? "text-warning" : ""
         }`}
       >
         {value}

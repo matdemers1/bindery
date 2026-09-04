@@ -85,7 +85,7 @@ describe("VaultPage", () => {
     open(item("Deed", "document"), item("Beach", "photo"));
     renderVault();
     expect(
-      await screen.findByRole("tab", { name: /^documents/, selected: true }),
+      await screen.findByRole("tab", { name: /^Documents,/, selected: true }),
     ).toBeTruthy();
     expect(screen.getByText("Deed")).toBeTruthy();
   });
@@ -96,7 +96,7 @@ describe("VaultPage", () => {
     open(item("Beach", "photo"));
     renderVault();
     expect(
-      await screen.findByRole("tab", { name: /^photos/, selected: true }),
+      await screen.findByRole("tab", { name: /^Photos,/, selected: true }),
     ).toBeTruthy();
   });
 
@@ -104,16 +104,21 @@ describe("VaultPage", () => {
     open(item("Driveway", "video"));
     renderVault();
     expect(
-      await screen.findByRole("tab", { name: /^videos/, selected: true }),
+      await screen.findByRole("tab", { name: /^Videos,/, selected: true }),
     ).toBeTruthy();
   });
 
   it("offers no Videos tab when there are no videos", async () => {
     // A tab that is always empty is furniture.
+    //
+    // The names here are capitalised because they are now real labels. They
+    // used to be lowercase text wearing a `capitalize` class, which styles the
+    // pixels and never reaches the accessible name — so this screen read out
+    // "documents 12" while showing "Documents 12".
     open(item("Deed", "document"), item("Beach", "photo"));
     renderVault();
-    await screen.findByRole("tab", { name: /^documents/ });
-    expect(screen.queryByRole("tab", { name: /^videos/ })).toBeNull();
+    await screen.findByRole("tab", { name: /^Documents,/ });
+    expect(screen.queryByRole("tab", { name: /^Videos,/ })).toBeNull();
   });
 
   it("offers to fill an empty vault rather than showing empty tabs", async () => {

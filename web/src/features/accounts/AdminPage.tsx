@@ -5,6 +5,7 @@ import { Users, UserPlus, Copy, Check, Lock, Ban, RotateCcw, ShieldCheck } from 
 import { ApiError, type AdminAccount, type AdminInvitation, accountsApi } from "../../api";
 import PageHeader from "../../components/PageHeader";
 import { useLiveQuery } from "../../live/LiveProvider";
+import { Alert, Button, IconButton } from "@d3cloud/ui";
 
 const GB = 1024 ** 3;
 
@@ -64,10 +65,10 @@ export default function AdminPage() {
       </PageHeader>
 
       {accounts.some((a) => a.is_admin && !a.totp_enabled) && (
-        <p className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3 text-sm text-amber-200">
-          <strong className="font-medium">
-            An administrator here has no two-factor authentication.
-          </strong>{" "}
+        <Alert
+          tone="warning"
+          title="An administrator here has no two-factor authentication."
+        >
           Granting administrator rights now requires it (REQ-156), but the
           account that existed before this shipped was made an administrator by
           the migration — it had to be, or nobody could reach this screen. Set it
@@ -76,13 +77,13 @@ export default function AdminPage() {
             your account
           </Link>
           . This account can issue a password reset for every other one.
-        </p>
+        </Alert>
       )}
 
       {error && (
-        <p role="alert" className="rounded border border-red-900 bg-red-950/40 p-2.5 text-sm text-red-300">
+        <Alert tone="danger" dynamic>
           {error}
-        </p>
+        </Alert>
       )}
 
       <Invite onInvited={load} />
@@ -121,13 +122,9 @@ export default function AdminPage() {
                       : `expires ${invite.expires_at.slice(0, 10)}`}
                 </span>
                 {!invite.accepted_at && !invite.revoked_at && (
-                  <button
-                    type="button"
-                    onClick={() => void act(() => accountsApi.revokeInvite(invite.id))}
-                    className="rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
-                  >
+                  <Button size="sm" onClick={() => void act(() => accountsApi.revokeInvite(invite.id))}>
                     Withdraw
-                  </button>
+                  </Button>
                 )}
               </li>
             ))}
@@ -163,32 +160,28 @@ function Row({
           <div className="text-xs text-muted">{account.email}</div>
         )}
         {account.is_admin && (
-          <span className="mt-1 inline-block rounded-full border border-accent/50 px-2 py-0.5 text-[11px] text-accent">
+          <span className="mt-1 inline-block rounded-full border border-accent/50 px-2 py-0.5 text-11 text-accent">
             administrator
           </span>
         )}
         {code && (
-          <div className="mt-2 rounded border border-amber-900/60 bg-amber-950/20 p-2">
-            <div className="text-[11px] text-amber-300">
-              Read this out. It works once and expires in a day. They enter it
-              on the sign-in page, under <em>I have a reset code</em>.
-            </div>
+          <Alert tone="warning" className="mt-2">
+            Read this out. It works once and expires in a day. They enter it
+            on the sign-in page, under <em>I have a reset code</em>.
             <div className="mt-1 flex items-center gap-2">
               <code className="font-mono text-sm">{code}</code>
-              <button
-                type="button"
+              <IconButton
+                size="sm"
+                label="Copy the code"
+                icon={copied ? <Check size={13} /> : <Copy size={13} />}
                 onClick={() => {
                   void navigator.clipboard.writeText(code);
                   setCopied(true);
                   window.setTimeout(() => setCopied(false), 1500);
                 }}
-                className="text-muted hover:text-neutral-100"
-                aria-label="Copy the code"
-              >
-                {copied ? <Check size={13} /> : <Copy size={13} />}
-              </button>
+              />
             </div>
-          </div>
+          </Alert>
         )}
       </td>
       <td className="px-4 py-3">
@@ -201,7 +194,7 @@ function Row({
         {account.storage_quota_bytes && (
           <div className="mt-1 h-1.5 w-24 overflow-hidden rounded-full bg-ink">
             <div
-              className={`h-full ${share > 0.9 ? "bg-red-500" : share > 0.75 ? "bg-amber-500" : "bg-accent"}`}
+              className={`h-full ${share > 0.9 ? "bg-danger" : share > 0.75 ? "bg-warning" : "bg-accent"}`}
               style={{ width: `${Math.max(3, share * 100)}%` }}
             />
           </div>
@@ -236,98 +229,66 @@ function Row({
               className="w-20 rounded border border-field bg-ink px-1.5 py-0.5 text-xs outline-none focus:border-accent"
             />
             <span className="text-xs text-muted">GB</span>
-            <button type="submit" className="rounded border border-field px-1.5 py-0.5 text-xs">
+            <Button size="sm" type="submit">
               Save
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditingQuota(false)}
-              className="px-1 text-xs text-muted"
-            >
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setEditingQuota(false)}>
               Cancel
-            </button>
+            </Button>
           </form>
         ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setQuotaGb(
-                account.storage_quota_bytes
-                  ? String(Math.round((account.storage_quota_bytes / GB) * 10) / 10)
-                  : "",
-              );
-              setEditingQuota(true);
-            }}
-            className="mt-1.5 rounded border border-field px-1.5 py-0.5 text-[11px] text-muted hover:text-neutral-100"
-          >
+          <Button size="sm" className="mt-1.5" onClick={() => { setQuotaGb( account.storage_quota_bytes ? String(Math.round((account.storage_quota_bytes / GB) * 10) / 10) : "", ); setEditingQuota(true); }}>
             Change quota
-          </button>
+          </Button>
         )}
       </td>
       <td className="px-4 py-3 text-xs">
         {account.totp_enabled ? (
-          <span className="text-emerald-400">on</span>
+          <span className="text-success">on</span>
         ) : (
           <span className="text-muted">off</span>
         )}
       </td>
       <td className="px-4 py-3 text-xs">
         {!account.is_active ? (
-          <span className="text-red-400">suspended</span>
+          <span className="text-danger">suspended</span>
         ) : locked ? (
-          <span className="text-amber-400">locked out</span>
+          <span className="text-warning">locked out</span>
         ) : (
           <span className="text-muted">active</span>
         )}
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap justify-end gap-1.5">
-          <button
-            type="button"
-            onClick={() =>
-              void act(async () => {
-                const issued = await accountsApi.resetCode(account.id);
-                setCode(issued.code);
-              })
-            }
-            className="rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
-          >
+          <Button size="sm" onClick={() => void act(async () => { const issued = await accountsApi.resetCode(account.id); setCode(issued.code); }) }>
             Reset code
-          </button>
+          </Button>
           {locked && (
-            <button
-              type="button"
-              onClick={() => void act(() => accountsApi.unlock(account.id))}
-              className="flex items-center gap-1 rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
+            <Button size="sm" onClick={() => void act(() => accountsApi.unlock(account.id))}
+              icon={<Lock size={11} />}
             >
-              <Lock size={11} /> Unlock
-            </button>
+              Unlock
+            </Button>
           )}
           {!account.is_admin && (
-            <button
-              type="button"
-              onClick={() => void act(() => accountsApi.grantAdmin(account.id))}
-              className="flex items-center gap-1 rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
+            <Button size="sm" onClick={() => void act(() => accountsApi.grantAdmin(account.id))}
+              icon={<ShieldCheck size={11} />}
             >
-              <ShieldCheck size={11} /> Make admin
-            </button>
+              Make admin
+            </Button>
           )}
           {account.is_active ? (
-            <button
-              type="button"
-              onClick={() => void act(() => accountsApi.suspend(account.id))}
-              className="flex items-center gap-1 rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-red-300"
+            <Button variant="danger-ghost" size="sm" onClick={() => void act(() => accountsApi.suspend(account.id))}
+              icon={<Ban size={11} />}
             >
-              <Ban size={11} /> Suspend
-            </button>
+              Suspend
+            </Button>
           ) : (
-            <button
-              type="button"
-              onClick={() => void act(() => accountsApi.restore(account.id))}
-              className="flex items-center gap-1 rounded border border-field px-2 py-0.5 text-xs text-muted hover:text-neutral-100"
+            <Button size="sm" onClick={() => void act(() => accountsApi.restore(account.id))}
+              icon={<RotateCcw size={11} />}
             >
-              <RotateCcw size={11} /> Restore
-            </button>
+              Restore
+            </Button>
           )}
         </div>
       </td>
@@ -413,39 +374,35 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
           />
         </label>
         <div className="sm:col-span-2">
-          {error && <p className="mb-2 text-sm text-red-400">{error}</p>}
-          <button
-            type="submit"
-            className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink"
-          >
+          {error && <p className="mb-2 text-sm text-danger">{error}</p>}
+          <Button variant="primary" type="submit">
             Create the link
-          </button>
+          </Button>
         </div>
       </form>
 
       {link && (
-        <div className="mt-3 rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
-          <p className="text-sm text-amber-300">
-            Send this to them. It is not stored and will not be shown again.
-          </p>
-          <div className="mt-2 flex items-center gap-2">
+        <Alert
+          tone="warning"
+          className="mt-3"
+          title="Send this to them. It is not stored and will not be shown again."
+        >
+          <div className="flex items-center gap-2">
             <code className="flex-1 break-all rounded border border-edge bg-ink px-2 py-1.5 font-mono text-xs">
               {link}
             </code>
-            <button
-              type="button"
+            <IconButton
+              variant="secondary"
+              label="Copy the link"
+              icon={copied ? <Check size={14} /> : <Copy size={14} />}
               onClick={() => {
                 void navigator.clipboard.writeText(link);
                 setCopied(true);
                 window.setTimeout(() => setCopied(false), 1500);
               }}
-              className="rounded border border-field p-2 text-muted hover:text-neutral-100"
-              aria-label="Copy the link"
-            >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-            </button>
+            />
           </div>
-        </div>
+        </Alert>
       )}
     </section>
   );

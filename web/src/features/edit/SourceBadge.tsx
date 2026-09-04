@@ -13,10 +13,10 @@ import type { FieldSourceRef } from "../../api";
  */
 const LOOK = {
   human: { icon: Pencil, label: "you set this", cls: "text-accent" },
-  rule: { icon: Workflow, label: "a rule set this", cls: "text-sky-400" },
+  rule: { icon: Workflow, label: "a rule set this", cls: "text-info" },
   ai: { icon: Bot, label: "AI set this", cls: "text-muted" },
   // A fact the file carried — an EXIF capture date — not an inference.
-  file: { icon: FileText, label: "from the file", cls: "text-emerald-400" },
+  file: { icon: FileText, label: "from the file", cls: "text-success" },
 } as const;
 
 export default function SourceBadge({
@@ -35,7 +35,7 @@ export default function SourceBadge({
   return (
     <span
       title={when ? `${look.label} on ${when.slice(0, 10)}` : look.label}
-      className={`inline-flex items-center gap-1 text-[11px] ${look.cls}`}
+      className={`inline-flex items-center gap-1 text-11 ${look.cls}`}
     >
       <Icon size={11} aria-hidden />
       {look.label}

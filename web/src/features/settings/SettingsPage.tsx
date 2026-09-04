@@ -7,6 +7,7 @@ import LogViewer from "../../components/LogViewer";
 import { setShortcutsEnabled, shortcutsEnabled } from "../../lib/keyboard";
 import PendingReviewPanel from "../../components/PendingReview";
 import { ApiError, api, type ApiTokenRecord, type IssuedApiToken, type OffsiteTest, type Settings, type SettingsTest } from "../../api";
+import { Button, Alert } from "@d3cloud/ui";
 
 /**
  * Settings (screen 19).
@@ -66,7 +67,7 @@ export default function SettingsPage() {
         <div className="mt-4 flex items-center gap-2 text-sm">
           <span
             className={`h-2 w-2 rounded-full ${
-              settings.anthropic_key_configured ? "bg-emerald-400" : "bg-muted"
+              settings.anthropic_key_configured ? "bg-success" : "bg-muted"
             }`}
           />
           {settings.anthropic_key_configured ? (
@@ -98,22 +99,13 @@ export default function SettingsPage() {
             spellCheck={false}
             className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent"
           />
-          <button
-            type="submit"
-            disabled={busy || !key.trim()}
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
-          >
+          <Button variant="primary" type="submit" disabled={busy || !key.trim()}>
             {busy ? "Saving…" : "Save and test"}
-          </button>
+          </Button>
           {settings.anthropic_key_configured && (
-            <button
-              type="button"
-              onClick={() => void save(null)}
-              disabled={busy}
-              className="rounded-md border border-field px-3 py-2 text-sm disabled:opacity-40"
-            >
+            <Button onClick={() => void save(null)} disabled={busy}>
               Remove
-            </button>
+            </Button>
           )}
         </form>
 
@@ -128,8 +120,8 @@ export default function SettingsPage() {
           <div
             className={`mt-3 rounded-md border p-3 text-sm ${
               test.ok
-                ? "border-emerald-500/40 text-emerald-300"
-                : "border-red-500/40 text-red-300"
+                ? "border-success/40 text-success"
+                : "border-danger/40 text-danger"
             }`}
           >
             <p className="font-medium">{test.ok ? "The key works." : "The key was rejected."}</p>
@@ -142,20 +134,9 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <button
-          onClick={async () => {
-            setBusy(true);
-            try {
-              setTest(await api.testAi());
-            } finally {
-              setBusy(false);
-            }
-          }}
-          disabled={busy}
-          className="mt-4 rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
-        >
+        <Button className="mt-4" onClick={async () => { setBusy(true); try { setTest(await api.testAi()); } finally { setBusy(false); } }} disabled={busy}>
           Test the current key
-        </button>
+        </Button>
       </section>
 
       <ModelPicker settings={settings} onSaved={load} />
@@ -325,7 +306,7 @@ function NotificationSettings({
         <span
           aria-hidden
           className={`inline-block h-2 w-2 rounded-full ${
-            settings.notify_webhook_configured ? "bg-emerald-400" : "bg-muted"
+            settings.notify_webhook_configured ? "bg-success" : "bg-muted"
           }`}
         />
         {settings.notify_webhook_configured ? (
@@ -355,22 +336,13 @@ function NotificationSettings({
           placeholder="https://ntfy.sh/your-topic"
           className="w-96 max-w-full rounded border border-field bg-ink px-2 py-1.5 text-sm"
         />
-        <button
-          type="submit"
-          disabled={busy || !url.trim()}
-          className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-        >
+        <Button variant="primary" type="submit" disabled={busy || !url.trim()}>
           Save
-        </button>
+        </Button>
         {settings.notify_webhook_configured && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void save("")}
-            className="rounded border border-field px-3 py-1.5 text-sm disabled:opacity-40"
-          >
+          <Button disabled={busy} onClick={() => void save("")}>
             Turn off
-          </button>
+          </Button>
         )}
       </form>
       {notice && <p className="mt-2 text-sm text-muted">{notice}</p>}
@@ -528,7 +500,7 @@ function OffsiteReplication({
 
       <div className="mt-4 flex items-center gap-2 text-sm">
         <span
-          className={`h-2 w-2 rounded-full ${configured ? "bg-emerald-400" : "bg-muted"}`}
+          className={`h-2 w-2 rounded-full ${configured ? "bg-success" : "bg-muted"}`}
         />
         {configured ? (
           <span>
@@ -544,7 +516,7 @@ function OffsiteReplication({
           talked to AWS. "Four fields are non-empty" is not a connection, and a
           green light that means less than it looks like is worse than none. */}
       {configured && !test && (
-        <p className="mt-2 text-sm text-amber-400/90">
+        <p className="mt-2 text-sm text-warning/90">
           Saved, but not tested. This says the fields are filled in — not that a
           backup would succeed. Run the test.
         </p>
@@ -554,18 +526,18 @@ function OffsiteReplication({
         <div
           className={`mt-3 rounded-md border p-3 text-sm ${
             test.ok
-              ? "border-emerald-500/40 bg-emerald-500/5"
-              : "border-red-500/40 bg-red-500/5"
+              ? "border-success/40 bg-success/5"
+              : "border-danger/40 bg-danger/5"
           }`}
         >
-          <p className={test.ok ? "text-emerald-300" : "text-red-300"}>{test.detail}</p>
+          <p className={test.ok ? "text-success" : "text-danger"}>{test.detail}</p>
           {test.checks.length > 0 && (
             <ul className="mt-2 space-y-0.5 text-xs text-muted">
               {test.checks.map((check) => (
                 <li key={check}>
                   {/* Everything listed is something that happened, so a failure
                       reads as "it got this far" rather than only "it stopped". */}
-                  <span className="text-emerald-400">✓</span> {check}
+                  <span className="text-success">✓</span> {check}
                 </li>
               ))}
             </ul>
@@ -645,22 +617,12 @@ function OffsiteReplication({
         </label>
 
         <div className="flex items-center gap-3 sm:col-span-2">
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
-          >
+          <Button variant="primary" type="submit" disabled={busy}>
             {busy ? "Saving…" : "Save"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void runTest()}
-            disabled={testing || !configured}
-            title={configured ? undefined : "Fill in and save the fields first"}
-            className="rounded-md border border-field px-3 py-2 text-sm disabled:opacity-40"
-          >
+          </Button>
+          <Button onClick={() => void runTest()} disabled={testing || !configured} title={configured ? undefined : "Fill in and save the fields first"}>
             {testing ? "Testing…" : "Test connection"}
-          </button>
+          </Button>
           {notice && <span className="text-sm text-muted">{notice}</span>}
         </div>
       </form>
@@ -705,9 +667,9 @@ function ApiTokens() {
       </p>
 
       {error && (
-        <p role="alert" className="mt-3 rounded border border-red-900 bg-red-950/40 p-2 text-sm text-red-300">
+        <Alert tone="danger" dynamic className="mt-3">
           {error}
-        </p>
+        </Alert>
       )}
 
       {issued && (
@@ -719,13 +681,9 @@ function ApiTokens() {
           <code className="mt-2 block break-all rounded bg-black/50 p-2 font-mono text-xs">
             {issued.secret}
           </code>
-          <button
-            type="button"
-            onClick={() => setIssued(null)}
-            className="mt-2 rounded border border-field px-2 py-1 text-xs"
-          >
+          <Button size="sm" className="mt-2" onClick={() => setIssued(null)}>
             I have copied it
-          </button>
+          </Button>
         </div>
       )}
 
@@ -764,13 +722,9 @@ function ApiTokens() {
             </label>
           ))}
         </fieldset>
-        <button
-          type="submit"
-          disabled={!name.trim() || scopes.length === 0}
-          className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-        >
+        <Button variant="primary" type="submit" disabled={!name.trim() || scopes.length === 0}>
           Create
-        </button>
+        </Button>
       </form>
 
       {tokens.length > 0 && (
@@ -786,13 +740,9 @@ function ApiTokens() {
               {token.revoked_at ? (
                 <span className="text-xs text-muted">revoked</span>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => void api.revokeApiToken(token.id).then(load)}
-                  className="rounded border border-field px-2 py-1 text-xs"
-                >
+                <Button size="sm" onClick={() => void api.revokeApiToken(token.id).then(load)}>
                   Revoke
-                </button>
+                </Button>
               )}
             </li>
           ))}

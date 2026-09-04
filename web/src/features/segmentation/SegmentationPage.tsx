@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, api, type SegmentList, type SourceFileDetail } from "../../api";
 import { Empty, ErrorState } from "../../components/States";
+import { Button } from "@d3cloud/ui";
 
 /**
  * The manual segmentation editor (REQ-036).
@@ -153,7 +154,7 @@ export default function SegmentationPage() {
             <p className="mt-3 flex flex-wrap gap-3">
               <Link
                 to="/files"
-                className="rounded-md border border-field px-3 py-1.5 text-sm text-neutral-100"
+                className="rounded-md border border-field px-3 py-1.5 text-sm text-fg"
               >
                 Browse files
               </Link>
@@ -194,24 +195,12 @@ export default function SegmentationPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={undo}
-            disabled={busy}
-            className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-50"
-          >
+          <Button onClick={undo} disabled={busy}>
             Undo last save
-          </button>
-          <button
-            onClick={save}
-            disabled={busy || !dirty}
-            /* "Saved" is the resting state of this button, so it is on screen
-               far more than "Save segmentation" is — and `opacity-40` faded the
-               whole group, label included, to 2.3:1. Disabled should read as
-               "nothing to do", not as "unreadable". */
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:bg-accent/70"
-          >
+          </Button>
+          <Button variant="primary" onClick={save} disabled={busy || !dirty} /* "Saved" is the resting state of this button, so it is on screen far more than "Save segmentation" is — and `opacity-40` faded the whole group, label included, to 2.3:1. Disabled should read as "nothing to do", not as "unreadable". */>
             {busy ? "Saving…" : dirty ? "Save segmentation" : "Saved"}
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -304,7 +293,7 @@ function PageThumb({ fileId, page }: { fileId: string; page: number }) {
         page={page}
         className="block aspect-[3/4] w-full rounded border border-edge object-cover object-top"
       />
-      <figcaption className="pt-0.5 text-center font-mono text-[10px] text-muted">
+      <figcaption className="pt-0.5 text-center font-mono text-11 text-muted">
         {page}
       </figcaption>
     </figure>

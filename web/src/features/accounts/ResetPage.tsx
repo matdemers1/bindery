@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 
 import { ApiError, accountsApi } from "../../api";
 import { Logo } from "../../components/brand/Logo";
+import { Button } from "@d3cloud/ui";
 
 /**
  * The other half of an administrator's reset (REQ-136).
@@ -72,7 +73,7 @@ export default function ResetPage() {
     return (
       <div className="flex min-h-full items-center justify-center p-6">
         <div className="w-full max-w-sm rounded-xl border border-edge bg-surface p-8 text-center">
-          <Logo size={44} variant="mascot" className="text-neutral-300" />
+          <Logo size={44} variant="mascot" className="text-fg" />
           <h1 className="mt-3 text-2xl font-semibold tracking-tight">
             Password changed
           </h1>
@@ -99,7 +100,7 @@ export default function ResetPage() {
         onSubmit={submit}
         className="w-full max-w-sm rounded-xl border border-edge bg-surface p-8"
       >
-        <Logo size={44} variant="mascot" className="text-neutral-300" />
+        <Logo size={44} variant="mascot" className="text-fg" />
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">
           Use a reset code
         </h1>
@@ -170,20 +171,16 @@ export default function ResetPage() {
         </label>
 
         {error && (
-          <p id={errorId} role="alert" className="mb-4 text-sm text-red-400">
+          <p id={errorId} role="alert" className="mb-4 text-sm text-danger">
             {error}
           </p>
         )}
 
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded-md bg-accent px-3 py-2 font-medium text-ink disabled:opacity-50"
-        >
+        <Button variant="primary" className="w-full" type="submit" disabled={busy}>
           {busy ? "Setting the password…" : "Set my password"}
-        </button>
+        </Button>
 
-        <a href="/" className="mt-4 block text-center text-sm text-muted hover:text-neutral-100">
+        <a href="/" className="mt-4 block text-center text-sm text-muted hover:text-fg">
           Back to sign in
         </a>
       </form>

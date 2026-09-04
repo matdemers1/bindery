@@ -57,7 +57,7 @@ function rich(text: string, key: number) {
       {parts.map((part, index) => {
         if (part.startsWith("**") && part.endsWith("**")) {
           return (
-            <strong key={index} className="font-medium text-neutral-200">
+            <strong key={index} className="font-medium text-fg">
               {part.slice(2, -2)}
             </strong>
           );
@@ -110,7 +110,7 @@ export default function HelpPage() {
                   className={`flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-sm ${
                     one.route === selected
                       ? "bg-accent/15 text-accent"
-                      : "text-muted hover:text-neutral-100"
+                      : "text-muted hover:text-fg"
                   }`}
                 >
                   {one.title}
@@ -125,7 +125,7 @@ export default function HelpPage() {
                 className={`flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-sm ${
                   view === "changelog"
                     ? "bg-accent/15 text-accent"
-                    : "text-muted hover:text-neutral-100"
+                    : "text-muted hover:text-fg"
                 }`}
               >
                 <Sparkles size={13} />
@@ -137,7 +137,7 @@ export default function HelpPage() {
                 type="button"
                 onClick={() => setParams({})}
                 className={`flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-sm ${
-                  !selected ? "bg-accent/15 text-accent" : "text-muted hover:text-neutral-100"
+                  !selected ? "bg-accent/15 text-accent" : "text-muted hover:text-fg"
                 }`}
               >
                 <HelpCircle size={13} />
@@ -197,7 +197,7 @@ function GuideBody({ guide }: { guide: Guide }) {
             <p
               className={`mt-3 rounded-lg border p-3 text-sm ${
                 section.callout.kind === "warning"
-                  ? "border-amber-900/60 bg-amber-950/20 text-amber-200"
+                  ? "border-warning/40 bg-warning-muted/20 text-warning"
                   : "border-edge bg-ink text-muted"
               }`}
             >

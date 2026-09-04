@@ -10,6 +10,7 @@ import {
 
 import { ApiError, api, type LogEntry } from "../api";
 import { useLiveQuery } from "../live/LiveProvider";
+import { Alert, Button, IconButton } from "@d3cloud/ui";
 
 /**
  * The log, on screen.
@@ -25,9 +26,9 @@ import { useLiveQuery } from "../live/LiveProvider";
  * one occasion you need it, and noise on every other.
  */
 const LEVEL_STYLE: Record<string, string> = {
-  critical: "text-red-300",
-  error: "text-red-300",
-  warning: "text-amber-300",
+  critical: "text-danger",
+  error: "text-danger",
+  warning: "text-warning",
   info: "text-muted",
   debug: "text-muted",
 };
@@ -122,23 +123,21 @@ export default function LogViewer({
           className="w-40 rounded border border-field bg-ink px-2 py-1 text-xs"
         />
 
-        <button
-          type="button"
+        <IconButton
+          size="sm"
+          variant="secondary"
+          pressed={live}
+          label={live ? "Following new entries" : "Paused — follow new entries"}
+          icon={<RefreshCw size={12} className={live ? "animate-spin" : ""} />}
           onClick={() => setLive((value) => !value)}
-          title={live ? "Following new entries" : "Paused"}
-          className={`rounded border px-2 py-1 text-xs ${
-            live ? "border-accent/60 text-accent" : "border-field text-muted"
-          }`}
-        >
-          <RefreshCw size={12} className={live ? "animate-spin" : ""} />
-        </button>
+        />
 
         {onClose && (
           <button
             type="button"
             onClick={onClose}
             aria-label="Close log"
-            className="rounded p-1 text-muted hover:text-neutral-100"
+            className="rounded p-1 text-muted hover:text-fg"
           >
             <X size={15} />
           </button>
@@ -146,14 +145,14 @@ export default function LogViewer({
       </header>
 
       {pending > 0 && (
-        <p className="border-b border-edge bg-amber-950/20 px-4 py-1.5 text-xs text-amber-300">
+        <Alert tone="warning" flush>
           {pending} entries are still being written — what you are reading is slightly
           behind.
-        </p>
+        </Alert>
       )}
 
       {error && (
-        <p role="alert" className="px-4 py-3 text-sm text-red-300">
+        <p role="alert" className="px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}
@@ -168,17 +167,17 @@ export default function LogViewer({
           <li key={entry.id} className="px-4 py-2">
             <div className="flex items-start gap-2">
               {entry.level === "error" || entry.level === "critical" ? (
-                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-red-400" />
+                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-danger" />
               ) : entry.level === "warning" ? (
-                <TriangleAlert size={13} className="mt-0.5 shrink-0 text-amber-400" />
+                <TriangleAlert size={13} className="mt-0.5 shrink-0 text-warning" />
               ) : (
                 <Info size={13} className="mt-0.5 shrink-0 text-muted" />
               )}
-              <span className="shrink-0 font-mono text-[11px] text-muted">
+              <span className="shrink-0 font-mono text-11 text-muted">
                 {new Date(entry.created_at).toLocaleTimeString()}
               </span>
               {entry.stage && (
-                <span className="shrink-0 rounded bg-edge px-1.5 text-[11px] text-neutral-300">
+                <span className="shrink-0 rounded bg-edge px-1.5 text-11 text-fg">
                   {entry.stage}
                 </span>
               )}
@@ -188,11 +187,12 @@ export default function LogViewer({
             </div>
 
             {entry.detail && (
+              /* d3-allow: aligns under the icon and gap on the line above — a measured offset, not a spacing step. */
               <details className="ml-[1.4rem] mt-1">
-                <summary className="cursor-pointer text-[11px] text-muted">
+                <summary className="cursor-pointer text-11 text-muted">
                   traceback
                 </summary>
-                <pre className="mt-1 max-h-60 overflow-auto rounded bg-ink p-2 font-mono text-[11px] leading-relaxed text-neutral-300">
+                <pre className="mt-1 max-h-60 overflow-auto rounded bg-ink p-2 font-mono text-11 leading-relaxed text-fg">
                   {entry.detail}
                 </pre>
               </details>
@@ -203,14 +203,9 @@ export default function LogViewer({
 
       {cursor !== null && (
         <div className="border-t border-edge p-2">
-          <button
-            type="button"
-            onClick={() => void load(true)}
-            disabled={loading}
-            className="w-full rounded border border-field px-3 py-1.5 text-xs disabled:opacity-40"
-          >
+          <Button size="sm" className="w-full" onClick={() => void load(true)} disabled={loading}>
             {loading ? "Loading…" : "Load older"}
-          </button>
+          </Button>
         </div>
       )}
     </section>

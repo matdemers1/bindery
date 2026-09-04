@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Vault } from "lucide-react";
 
 import { api, type VaultSearchResults, type VaultState } from "../../api";
 import UnlockForm from "./UnlockForm";
+import { Alert } from "@d3cloud/ui";
 
 /**
  * "Look in the vault too", on the search screen.
@@ -101,7 +102,7 @@ export default function VaultSearchPanel({ query }: { query: string }) {
         onClick={() => void toggle()}
         aria-expanded={on}
         aria-controls="vault-search-panel"
-        className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-muted hover:text-neutral-100"
+        className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-muted hover:text-fg"
       >
         {on ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
         <Vault size={15} aria-hidden />
@@ -131,13 +132,13 @@ export default function VaultSearchPanel({ query }: { query: string }) {
           ) : loading ? (
             <p className="text-sm text-muted">Decrypting and scanning…</p>
           ) : error ? (
-            <p className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300">
+            <Alert tone="danger" dynamic>
               {error}
-            </p>
+            </Alert>
           ) : results && results.total > 0 ? (
             <>
               {results.slow && (
-                <p className="text-xs text-amber-400">
+                <p className="text-xs text-warning">
                   Scanned {results.pages_scanned} pages in {results.elapsed_ms}ms.
                   The vault searches by decrypting every page, so this gets
                   slower as it grows.

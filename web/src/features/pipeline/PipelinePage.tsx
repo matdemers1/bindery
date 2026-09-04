@@ -7,6 +7,7 @@ import PageHeader from "../../components/PageHeader";
 import PendingReviewPanel from "../../components/PendingReview";
 import { useLiveQuery } from "../../live/LiveProvider";
 import PipelineFlow, { FileRow } from "../add/PipelineFlow";
+import { Button } from "@d3cloud/ui";
 
 /**
  * The pipeline, as a pipeline.
@@ -133,7 +134,7 @@ export default function PipelinePage() {
           <ul className="divide-y divide-edge/60">
             {status?.in_flight.map((job) => (
               <li key={job.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                <span className="rounded bg-edge px-1.5 text-[11px] text-neutral-300">
+                <span className="rounded bg-edge px-1.5 text-11 text-fg">
                   {job.stage}
                 </span>
                 <span className="min-w-0 flex-1 truncate">
@@ -151,13 +152,9 @@ export default function PipelinePage() {
           <span className="text-xs text-muted">{files.length}</span>
           <span className="flex-1" />
           {files.length > 10 && (
-            <button
-              type="button"
-              onClick={() => setShowAll((value) => !value)}
-              className="rounded border border-field px-2 py-1 text-xs text-muted hover:text-neutral-100"
-            >
+            <Button size="sm" onClick={() => setShowAll((value) => !value)}>
               {showAll ? "Show recent" : `Show all ${files.length}`}
-            </button>
+            </Button>
           )}
         </header>
         {files.length === 0 ? (
@@ -223,18 +220,18 @@ function JobList({
         quiet
           ? "border-edge bg-surface"
           : bad
-            ? "border-red-900/70 bg-red-950/20"
-            : "border-amber-900/70 bg-amber-950/15"
+            ? "border-danger/40 bg-danger-muted/20"
+            : "border-warning/40 bg-warning-muted/15"
       }`}
     >
       <header className="px-4 pb-2 pt-3">
         <h2
           className={`flex items-center gap-2 text-sm font-medium ${
-            quiet ? "" : bad ? "text-red-300" : "text-amber-300"
+            quiet ? "" : bad ? "text-danger" : "text-warning"
           }`}
         >
           {title}
-          <span className="rounded-full bg-black/30 px-1.5 text-[11px]">{jobs.length}</span>
+          <span className="rounded-full bg-black/30 px-1.5 text-11">{jobs.length}</span>
         </h2>
         <p className="mt-1 max-w-2xl text-xs text-muted">{blurb}</p>
       </header>
@@ -244,7 +241,7 @@ function JobList({
             <div className="min-w-0 flex-1">
               <p className="flex flex-wrap items-baseline gap-2 text-sm">
                 <span className="font-medium">{nameOf(job) ?? "(unnamed file)"}</span>
-                <span className="rounded bg-black/30 px-1.5 text-[11px] text-neutral-300">
+                <span className="rounded bg-black/30 px-1.5 text-11 text-fg">
                   {job.stage}
                 </span>
                 <span className="text-xs text-muted">
@@ -261,8 +258,8 @@ function JobList({
                 // Verbatim and wrapped rather than truncated: the specific
                 // message is the whole diagnosis.
                 <p
-                  className={`mt-1.5 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded bg-black/30 px-2 py-1.5 font-mono text-[11px] leading-relaxed ${
-                    quiet ? "text-muted" : "text-red-300/90"
+                  className={`mt-1.5 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded bg-black/30 px-2 py-1.5 font-mono text-11 leading-relaxed ${
+                    quiet ? "text-muted" : "text-danger/90"
                   }`}
                 >
                   {job.last_error}
@@ -270,32 +267,21 @@ function JobList({
               )}
             </div>
             <div className="flex shrink-0 flex-col gap-1.5">
-              <button
-                onClick={() => onRetry(job.id)}
-                disabled={busy === job.id}
-                className="flex items-center gap-1.5 rounded-md border border-field px-2.5 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+              <Button size="sm" onClick={() => onRetry(job.id)} disabled={busy === job.id}
+                icon={<RotateCw size={12} className={busy === job.id ? "animate-spin" : ""} />}
               >
-                <RotateCw size={12} className={busy === job.id ? "animate-spin" : ""} />
                 {busy === job.id ? "Retrying…" : "Retry now"}
-              </button>
+              </Button>
               {/* The weakest action available, and deliberately so: it does not
                   retry, hide or remove anything. It only stops the job counting
                   toward the badge, so a warning that is still lit means there is
                   still something to do. */}
               {onAcknowledge && (
-                <button
-                  onClick={() => onAcknowledge(job.id, !!job.acknowledged_at)}
-                  disabled={busy === job.id}
-                  title={
-                    job.acknowledged_at
-                      ? "Count this as outstanding again"
-                      : "Stop counting this toward the badge. It stays here, with its error."
-                  }
-                  className="flex items-center gap-1.5 rounded-md border border-field px-2.5 py-1.5 text-xs text-muted hover:text-neutral-100 disabled:opacity-40"
+                <Button size="sm" onClick={() => onAcknowledge(job.id, !!job.acknowledged_at)} disabled={busy === job.id} title={ job.acknowledged_at ? "Count this as outstanding again" : "Stop counting this toward the badge. It stays here, with its error." }
+                  icon={<Check size={12} />}
                 >
-                  <Check size={12} />
                   {job.acknowledged_at ? "Undo" : "Acknowledge"}
-                </button>
+                </Button>
               )}
             </div>
           </li>

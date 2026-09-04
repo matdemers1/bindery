@@ -6,6 +6,7 @@ import { Library as LibraryIcon } from "lucide-react";
 import { ApiError, api, type Archive, type ArchiveEntry, type BulkResult, type Tree } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
 import { SourceChip } from "../why/WhyPanel";
+import { Button, SegmentedControl } from "@d3cloud/ui";
 
 /**
  * The archive browser (screen 2).
@@ -142,21 +143,18 @@ export default function ArchivePage() {
 
       <div className="grid gap-6 lg:grid-cols-[15rem_1fr]">
         <aside>
-          <div className="mb-4 flex flex-wrap gap-1">
-            {GROUPINGS.map((option) => (
-              <button
-                key={option.key}
-                onClick={() => update((next) => next.set("group", option.key))}
-                className={`rounded-md px-2 py-1 text-xs ${
-                  groupBy === option.key
-                    ? "bg-surface text-neutral-100"
-                    : "text-muted hover:text-neutral-200"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          {/* Manual activation: `groupBy` drives `api.tree(groupBy)` in `load`,
+              so arrowing across four options under automatic activation would
+              fire three requests on the way past. */}
+          <SegmentedControl
+            className="mb-4"
+            size="sm"
+            activationMode="manual"
+            aria-label="Group the archive by"
+            items={GROUPINGS.map((o) => ({ value: o.key, label: o.label }))}
+            value={groupBy}
+            onValueChange={(next) => update((params) => params.set("group", next))}
+          />
 
           <ul className="space-y-0.5">
             {tree?.groups.map((group) => {
@@ -177,7 +175,7 @@ export default function ArchivePage() {
                       })
                     }
                     className={`flex w-full items-baseline justify-between gap-2 rounded px-2 py-1 text-left text-sm ${
-                      selected ? "bg-accent/15 text-accent" : "text-neutral-300 hover:bg-surface"
+                      selected ? "bg-accent/15 text-accent" : "text-fg hover:bg-surface"
                     }`}
                   >
                     <span className="truncate">{group.label}</span>
@@ -218,12 +216,9 @@ export default function ArchivePage() {
               <option value="title">Title</option>
             </select>
             {active && (
-              <button
-                onClick={() => setParams(new URLSearchParams({ group: groupBy }), { replace: true })}
-                className="rounded-md border border-field px-2 py-1.5 text-sm text-muted"
-              >
+              <Button onClick={() => setParams(new URLSearchParams({ group: groupBy }), { replace: true })}>
                 Clear
-              </button>
+              </Button>
             )}
           </div>
 
@@ -244,17 +239,9 @@ export default function ArchivePage() {
             <p className="mb-3 flex items-center gap-3 text-sm text-accent">
               {bulkNotice}
               {lastOperation?.operation_id && (
-                <button
-                  onClick={async () => {
-                    await api.bulkUndo(lastOperation.operation_id!);
-                    setLastOperation(null);
-                    setBulkNotice("Undone.");
-                    await load();
-                  }}
-                  className="rounded border border-field px-2 py-0.5 text-xs text-muted"
-                >
+                <Button size="sm" onClick={async () => { await api.bulkUndo(lastOperation.operation_id!); setLastOperation(null); setBulkNotice("Undone."); await load(); }}>
                   Undo
-                </button>
+                </Button>
               )}
             </p>
           )}
@@ -324,7 +311,7 @@ function Row({
         checked={selected}
         onChange={onToggle}
         aria-label={`Select ${entry.title ?? entry.original_filename ?? "document"}`}
-        className="mt-1 shrink-0 accent-amber-400"
+        className="mt-1 shrink-0 accent-accent"
       />
       <Link to={`/document/${entry.document_id}/page/1`} className="flex min-w-0 flex-1 gap-3">
         <PageThumb
@@ -344,7 +331,7 @@ function Row({
               </span>
             )}
             {entry.review_state === "needs_review" && (
-              <span className="shrink-0 rounded-full border border-amber-500/50 px-2 text-xs text-amber-300">
+              <span className="shrink-0 rounded-full border border-warning/50 px-2 text-xs text-warning">
                 needs review
               </span>
             )}
@@ -420,41 +407,12 @@ function BulkBar({
           placeholder="Add tags, comma separated"
           className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
         />
-        <button
-          onClick={async () => {
-            setBusy(true);
-            try {
-              setPreview(await api.bulkPreview([...selected], actions()));
-            } finally {
-              setBusy(false);
-            }
-          }}
-          disabled={busy || !tags.trim()}
-          className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
-        >
+        <Button onClick={async () => { setBusy(true); try { setPreview(await api.bulkPreview([...selected], actions())); } finally { setBusy(false); } }} disabled={busy || !tags.trim()}>
           Preview
-        </button>
-        <button
-          onClick={async () => {
-            setBusy(true);
-            try {
-              const result = await api.bulkApply([...selected], actions());
-              onDone(result, `Tagged ${result.matched} documents.`);
-            } catch (error) {
-              onDone(
-                { matched: 0, operation_id: null, changes: [] },
-                error instanceof ApiError ? error.message : "That didn't work.",
-              );
-            } finally {
-              setBusy(false);
-            }
-          }}
-          disabled={busy || !preview}
-          title={preview ? undefined : "Preview it first"}
-          className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-        >
+        </Button>
+        <Button variant="primary" onClick={async () => { setBusy(true); try { const result = await api.bulkApply([...selected], actions()); onDone(result, `Tagged ${result.matched} documents.`); } catch (error) { onDone( { matched: 0, operation_id: null, changes: [] }, error instanceof ApiError ? error.message : "That didn't work.", ); } finally { setBusy(false); } }} disabled={busy || !preview} title={preview ? undefined : "Preview it first"}>
           Apply
-        </button>
+        </Button>
         <button onClick={onClear} className="text-sm text-muted hover:underline">
           Clear
         </button>

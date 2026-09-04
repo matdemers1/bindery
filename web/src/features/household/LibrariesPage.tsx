@@ -5,6 +5,7 @@ import { useCallback, useState } from "react";
 
 import { ApiError, api, type LibraryDetail } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
+import { Button, Alert } from "@d3cloud/ui";
 
 /**
  * Libraries — who is in the household, and what they may do (T-7.7).
@@ -64,9 +65,9 @@ export default function LibrariesPage() {
       </PageHeader>
 
       {error && (
-        <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+        <Alert tone="danger" dynamic>
           {error}
-        </p>
+        </Alert>
       )}
 
       {loading ? (
@@ -108,13 +109,9 @@ export default function LibrariesPage() {
             placeholder="Library name"
             className="w-64 rounded border border-field bg-ink px-2 py-1.5 text-sm"
           />
-          <button
-            type="submit"
-            disabled={!newName.trim()}
-            className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-          >
+          <Button variant="primary" type="submit" disabled={!newName.trim()}>
             Create
-          </button>
+          </Button>
         </form>
       </section>
     </div>
@@ -137,7 +134,7 @@ function LibraryCard({
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="font-semibold">{library.name}</h2>
         <span className="text-xs text-muted">{library.kind}</span>
-        <span className="rounded bg-edge px-1.5 py-0.5 text-[11px] text-neutral-200">
+        <span className="rounded bg-edge px-1.5 py-0.5 text-11 text-fg">
           you are {library.your_role}
         </span>
       </div>
@@ -192,13 +189,9 @@ function LibraryCard({
             <option value="contributor">contributor</option>
             <option value="owner">owner</option>
           </select>
-          <button
-            type="submit"
-            disabled={!email.trim()}
-            className="rounded border border-field px-3 py-1.5 text-sm disabled:opacity-40"
-          >
+          <Button type="submit" disabled={!email.trim()}>
             Add
-          </button>
+          </Button>
         </form>
       ) : (
         <p className="mt-3 text-xs text-muted">

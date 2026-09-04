@@ -44,19 +44,19 @@ export default function VersionBadge({ collapsed }: { collapsed: boolean }) {
   if (collapsed) {
     return worrying ? (
       <div className="flex justify-center py-1" title="Versions disagree">
-        <AlertTriangle size={14} className="text-amber-400" />
+        <AlertTriangle size={14} className="text-warning" />
       </div>
     ) : null;
   }
 
   return (
-    <div className="px-1 pb-1 text-[11px] text-muted">
+    <div className="px-1 pb-1 text-11 text-muted">
       <button
         type="button"
         onClick={() => setOpen((was) => !was)}
-        className="flex w-full items-center gap-1.5 hover:text-neutral-300"
+        className="flex w-full items-center gap-1.5 hover:text-fg"
       >
-        {worrying && <AlertTriangle size={11} className="text-amber-400" />}
+        {worrying && <AlertTriangle size={11} className="text-warning" />}
         <span className="font-mono">{api.short}</span>
         <span className="flex-1 text-left">
           {report.mismatch
@@ -74,7 +74,7 @@ export default function VersionBadge({ collapsed }: { collapsed: boolean }) {
               <dt className="w-14 shrink-0">{name}</dt>
               <dd className="font-mono">
                 {build.stale ? (
-                  <span className="text-amber-400">not reporting</span>
+                  <span className="text-warning">not reporting</span>
                 ) : (
                   build.short
                 )}
@@ -86,14 +86,14 @@ export default function VersionBadge({ collapsed }: { collapsed: boolean }) {
             <dd className="font-mono">
               {report.schema.applied ?? "none"}
               {schemaDrift && (
-                <span className="ml-1 text-amber-400">
+                <span className="ml-1 text-warning">
                   → {report.schema.expected}
                 </span>
               )}
             </dd>
           </div>
           {schemaDrift && (
-            <p className="pt-1 text-[10px] leading-snug">
+            <p className="pt-1 text-11 leading-snug">
               The code expects a newer schema. Run{" "}
               <code className="font-mono">alembic upgrade head</code> — it is
               never applied automatically on boot, by design.

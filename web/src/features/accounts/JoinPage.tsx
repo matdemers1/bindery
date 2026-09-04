@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, accountsApi } from "../../api";
 import { Logo } from "../../components/brand/Logo";
+import { Button } from "@d3cloud/ui";
 
 function humanBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -80,7 +81,7 @@ export default function JoinPage({ token }: { token: string }) {
   if (problem) {
     return (
       <Centered>
-        <Logo size={44} variant="mascot" className="text-neutral-300" />
+        <Logo size={44} variant="mascot" className="text-fg" />
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">Bindery</h1>
         <p className="mt-3 text-sm text-muted">{problem}</p>
         <p className="mt-4 text-sm text-muted">
@@ -101,12 +102,12 @@ export default function JoinPage({ token }: { token: string }) {
         onSubmit={submit}
         className="w-full max-w-md rounded-xl border border-edge bg-surface p-8"
       >
-        <Logo size={44} variant="mascot" className="text-neutral-300" />
+        <Logo size={44} variant="mascot" className="text-fg" />
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">
           Set up your archive
         </h1>
         <p className="mt-1 text-sm text-muted">
-          for <span className="text-neutral-200">{invite.email}</span>
+          for <span className="text-fg">{invite.email}</span>
         </p>
 
         {invite.note && (
@@ -117,11 +118,11 @@ export default function JoinPage({ token }: { token: string }) {
 
         <ul className="mt-5 space-y-2 text-sm text-muted">
           <li>
-            Your documents go in <span className="text-neutral-200">{invite.library_name}</span>,
+            Your documents go in <span className="text-fg">{invite.library_name}</span>,
             which only you can open.
           </li>
           <li>
-            <span className="text-neutral-200">
+            <span className="text-fg">
               Whoever runs this server cannot read them.
             </span>{" "}
             They can see how much space you are using and whether anything went
@@ -175,15 +176,11 @@ export default function JoinPage({ token }: { token: string }) {
           />
         </label>
 
-        {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
+        {error && <p className="mb-4 text-sm text-danger">{error}</p>}
 
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded-md bg-accent px-3 py-2 font-medium text-ink disabled:opacity-50"
-        >
+        <Button variant="primary" className="w-full" type="submit" disabled={busy}>
           {busy ? "Setting up…" : "Create my archive"}
-        </button>
+        </Button>
       </form>
     </div>
   );

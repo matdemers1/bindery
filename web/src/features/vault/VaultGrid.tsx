@@ -3,6 +3,7 @@ import { ImageOff, Undo2, X } from "lucide-react";
 
 import { fileUrl, type VaultItem } from "../../api";
 import Modal from "../../components/Modal";
+import { Button } from "@d3cloud/ui";
 
 /**
  * Vaulted photographs, as photographs.
@@ -54,7 +55,7 @@ export default function VaultGrid({
                 // the usual one. Saying so beats a silent empty square.
                 <span className="flex aspect-square w-full flex-col items-center justify-center gap-2 bg-ink text-muted">
                   <ImageOff size={20} aria-hidden />
-                  <span className="px-2 text-center text-[11px]">
+                  <span className="px-2 text-center text-11">
                     This browser cannot display {item.media_type ?? "this format"}
                   </span>
                 </span>
@@ -73,7 +74,7 @@ export default function VaultGrid({
                 <span className="block truncate text-xs font-medium">
                   {item.title ?? item.original_filename ?? "Untitled"}
                 </span>
-                <span className="mt-0.5 block text-[11px] text-muted">
+                <span className="mt-0.5 block text-11 text-muted">
                   {(item.byte_size / 1024 / 1024).toFixed(1)} MB
                   {item.vaulted_at && ` · vaulted ${item.vaulted_at.slice(0, 10)}`}
                 </span>
@@ -110,16 +111,12 @@ export default function VaultGrid({
               <dt className="text-muted">Vaulted</dt>
               <dd>{open.vaulted_at?.slice(0, 10) ?? "—"}</dd>
             </dl>
-            <button
-              type="button"
-              onClick={() => onTakeOut(open.document_id)}
-              disabled={busy === open.document_id}
-              className="flex items-center gap-1.5 rounded-md border border-field px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+            <Button size="sm" onClick={() => onTakeOut(open.document_id)} disabled={busy === open.document_id}
+              icon={<Undo2 size={13} />}
             >
-              <Undo2 size={13} />
               {busy === open.document_id ? "Restoring…" : "Take out of the vault"}
-            </button>
-            <p className="text-[11px] text-muted">
+            </Button>
+            <p className="text-11 text-muted">
               Nothing here is cached. Closing the vault makes this
               unreadable again until the PIN is entered.
             </p>

@@ -25,6 +25,7 @@ import {
 import PageHeader from "../../components/PageHeader";
 import { useLiveQuery } from "../../live/LiveProvider";
 import UnlockForm from "../vault/UnlockForm";
+import { Button, SegmentedControl } from "@d3cloud/ui";
 
 /**
  * Import (T-4.1 to T-4.5; redesigned in Phase 18, REQ-196, REQ-197).
@@ -178,16 +179,11 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
       <section className="space-y-3 rounded-xl border border-edge bg-surface p-4">
         <h2 className="text-xs tracking-wide text-muted uppercase">1 · Where from</h2>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => inbox && void scan(inbox)}
-            disabled={busy || !inbox}
-            title={inbox ?? ""}
-            className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
+          <Button variant="primary" onClick={() => inbox && void scan(inbox)} disabled={busy || !inbox} title={inbox ?? ""}
+            icon={<Inbox size={15} />}
           >
-            <Inbox size={15} />
             {busy ? "Scanning…" : "Scan the inbox"}
-          </button>
+          </Button>
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -202,13 +198,14 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
               placeholder={`…or a folder the worker can see, e.g. ${inbox ?? "/data/inbox"}/2019`}
               className="min-w-0 flex-1 rounded-lg border border-field bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent"
             />
-            <button
+            <Button
               type="submit"
-              disabled={busy || !path.trim()}
-              className="flex items-center gap-1.5 rounded-lg border border-field px-3 py-2 text-sm disabled:opacity-40"
+              icon={<FolderInput size={14} />}
+              loading={busy}
+              disabled={!path.trim()}
             >
-              <FolderInput size={14} /> Scan
-            </button>
+              Scan
+            </Button>
           </form>
         </div>
 
@@ -328,7 +325,7 @@ function ActiveRun({
       </div>
 
       {run.last_error && (
-        <p className="rounded-md border border-red-500/40 p-3 text-sm text-red-300">{run.last_error}</p>
+        <p className="rounded-md border border-danger/40 p-3 text-sm text-danger">{run.last_error}</p>
       )}
 
       <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
@@ -347,7 +344,7 @@ function ActiveRun({
       )}
 
       {cost.interactive_usd !== undefined && (
-        <div className={`rounded-md border p-3 text-sm ${cost.exceeds_alarm ? "border-red-500/40" : "border-edge"}`}>
+        <div className={`rounded-md border p-3 text-sm ${cost.exceeds_alarm ? "border-danger/40" : "border-edge"}`}>
           <p>
             AI review of these would cost about <strong>${cost.interactive_usd.toFixed(2)}</strong>.
           </p>
@@ -356,7 +353,7 @@ function ActiveRun({
             imported files are searchable before any of it runs.
           </p>
           {cost.exceeds_alarm && (
-            <p className="mt-1 text-red-300">
+            <p className="mt-1 text-danger">
               Over the ${cost.alarm_threshold_usd} threshold the plan set. Worth a look before you run it.
             </p>
           )}
@@ -388,26 +385,22 @@ function ActiveRun({
               Stop after this slice
             </button>
           ) : (
-            <button
-              onClick={() => void importEverything()}
-              disabled={busy || remaining === 0}
-              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
-            >
+            <Button variant="primary" onClick={() => void importEverything()} disabled={busy || remaining === 0}>
               Import all {remaining.toLocaleString()}
-            </button>
+            </Button>
           )}
-          <button onClick={() => act(() => api.runImport(run.id), "Imported a slice.")} disabled={busy || remaining === 0} className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40">
+          <Button onClick={() => act(() => api.runImport(run.id), "Imported a slice.")} disabled={busy || remaining === 0}>
             Just the next 50
-          </button>
-          <button onClick={() => act(() => api.sampleImport(run.id), "Sample selected.")} disabled={busy} className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40">
+          </Button>
+          <Button onClick={() => act(() => api.sampleImport(run.id), "Sample selected.")} disabled={busy}>
             Try a sample of {run.sample_size}
-          </button>
-          <button onClick={() => act(() => api.pauseImport(run.id), "Paused.")} disabled={busy} className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40">
+          </Button>
+          <Button onClick={() => act(() => api.pauseImport(run.id), "Paused.")} disabled={busy}>
             Pause
-          </button>
-          <button onClick={() => act(() => api.curateImport(run.id), "Paused for curation. Tidy the taxonomy, then run pass two.")} disabled={busy} className="rounded-md border border-field px-3 py-1.5 text-sm text-muted disabled:opacity-40">
+          </Button>
+          <Button onClick={() => act(() => api.curateImport(run.id), "Paused for curation. Tidy the taxonomy, then run pass two.")} disabled={busy}>
             Stop and curate
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -430,7 +423,7 @@ function VaultProgress({ run }: { run: ImportSession }) {
         {run.awaiting_vault > 0 && ` · ${run.awaiting_vault} finished and waiting`}
       </p>
       {run.awaiting_vault > 0 && !run.vault_unlocked && (
-        <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-300">
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
           <Lock size={12} /> Your vault is locked. {run.awaiting_vault} file{run.awaiting_vault === 1 ? " is" : "s are"} finished and waiting —
           <Link to="/vault" className="underline underline-offset-2">unlock it</Link> and they seal within a few seconds.
         </p>
@@ -468,9 +461,9 @@ function RunRow({ run, isActive, onOpen }: { run: ImportSession; isActive: boole
           </span>
         </button>
         <span className="flex items-center gap-3 text-xs">
-          {(p.ingested ?? 0) > 0 && <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 size={12} /> {p.ingested} imported</span>}
+          {(p.ingested ?? 0) > 0 && <span className="flex items-center gap-1 text-success"><CheckCircle2 size={12} /> {p.ingested} imported</span>}
           {(p.duplicate ?? 0) > 0 && <span className="text-muted">{p.duplicate} already here</span>}
-          {failed > 0 && <span className="flex items-center gap-1 text-red-300"><AlertTriangle size={12} /> {failed} failed</span>}
+          {failed > 0 && <span className="flex items-center gap-1 text-danger"><AlertTriangle size={12} /> {failed} failed</span>}
           {remainingOf(run) > 0 && <span className="text-muted">{remainingOf(run)} waiting</span>}
         </span>
       </div>
@@ -486,30 +479,23 @@ function RunDetail({ run, defaultOpen = false }: { run: ImportSession; defaultOp
   void defaultOpen;
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-1 text-xs">
-        {(["failed", "ingested", "duplicate", "skipped"] as const).map((state) => (
-          <button
-            key={state}
-            type="button"
-            // Which filter is applied was a background fill and nothing else.
-            // `aria-pressed` rather than the tab pattern because these narrow
-            // a list in place; they do not swap a panel.
-            aria-pressed={tab === state}
-            onClick={() => setTab(state)}
-            className={`rounded-md px-2 py-1 ${tab === state ? "bg-ink text-neutral-100" : "text-muted hover:text-neutral-100"}`}
-          >
-            {STATE_LABEL[state]} <span className="text-muted">{counts[state] ?? 0}</span>
-          </button>
-        ))}
-        <button
-          type="button"
-          aria-pressed={tab === "log"}
-          onClick={() => setTab("log")}
-          className={`rounded-md px-2 py-1 ${tab === "log" ? "bg-ink text-neutral-100" : "text-muted hover:text-neutral-100"}`}
-        >
-          worker log
-        </button>
-      </div>
+      {/* These narrow a list already in memory, so selection may follow focus.
+          The counts join the accessible name — "failed, 3 items" — rather than
+          trailing the label as a loose number. */}
+      <SegmentedControl
+        size="sm"
+        aria-label="Filter imported files"
+        items={[
+          ...(["failed", "ingested", "duplicate", "skipped"] as const).map((state) => ({
+            value: state,
+            label: STATE_LABEL[state],
+            count: counts[state] ?? 0,
+          })),
+          { value: "log", label: "worker log" },
+        ]}
+        value={tab}
+        onValueChange={(next) => setTab(next as typeof tab)}
+      />
       {/* Keyed on the tab so switching remounts the list: the previous tab's
           rows can never show under the new tab's heading, and no effect has
           to reset state by hand. */}
@@ -547,16 +533,16 @@ function RunDetailBody({
     };
   }, [run.id, tab]);
 
-  if (error) return <p className="text-xs text-red-300">{error}</p>;
+  if (error) return <p className="text-xs text-danger">{error}</p>;
   if (tab === "log") {
     if (log === null) return <p className="text-xs text-muted">Loading…</p>;
     if (log.length === 0) {
       return <p className="text-xs text-muted">The worker has not written anything about these files yet.</p>;
     }
     return (
-      <ul className="max-h-64 space-y-1 overflow-y-auto font-mono text-[11px]">
+      <ul className="max-h-64 space-y-1 overflow-y-auto font-mono text-11">
         {log.map((line, i) => (
-          <li key={i} className={line.level === "ERROR" ? "text-red-300" : line.level === "WARNING" ? "text-amber-300" : "text-neutral-300"}>
+          <li key={i} className={line.level === "ERROR" ? "text-danger" : line.level === "WARNING" ? "text-warning" : "text-fg"}>
             <span className="text-muted">{line.at.slice(11, 19)}</span>{" "}
             {line.stage && <span className="text-muted">[{line.stage}]</span>} {line.message}
           </li>
@@ -567,15 +553,15 @@ function RunDetailBody({
   if (items === null) return <p className="text-xs text-muted">Loading…</p>;
   if (items.length === 0) return <p className="text-xs text-muted">Nothing {STATE_LABEL[tab]}.</p>;
   return (
-    <ul className="max-h-64 space-y-1 overflow-y-auto font-mono text-[11px]">
+    <ul className="max-h-64 space-y-1 overflow-y-auto font-mono text-11">
       {items.map((item) => (
         <li key={item.path} className="flex flex-wrap gap-x-2">
           {item.source_file_id ? (
-            <Link to={`/file/${item.source_file_id}`} className="text-neutral-300 underline-offset-2 hover:underline">{item.path}</Link>
+            <Link to={`/file/${item.source_file_id}`} className="text-fg underline-offset-2 hover:underline">{item.path}</Link>
           ) : (
-            <span className="text-neutral-300">{item.path}</span>
+            <span className="text-fg">{item.path}</span>
           )}
-          {item.error && <span className="text-red-400/90">{item.error}</span>}
+          {item.error && <span className="text-danger/90">{item.error}</span>}
         </li>
       ))}
     </ul>

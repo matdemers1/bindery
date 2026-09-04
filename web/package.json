@@ -7,12 +7,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "eslint . --max-warnings 0 && npm run lint:system",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "lint:system": "node ../../d3-design-system/design-system/scripts/check-usage.mjs src"
   },
   "dependencies": {
+    "@d3cloud/ui": "file:../../d3-design-system/d3-ui",
     "lucide-react": "^1.35.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

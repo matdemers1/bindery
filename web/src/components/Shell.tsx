@@ -29,6 +29,7 @@ import { api, type Library, type User } from "../api";
 import VersionBadge from "./VersionBadge";
 import { useLiveQuery } from "../live/LiveProvider";
 import { Wordmark } from "./brand/Logo";
+import { Button } from "@d3cloud/ui";
 
 /**
  * The application shell.
@@ -276,7 +277,8 @@ export default function Shell({
           {visibleGroups(user.is_admin ?? false).map((group) => (
             <div key={group.title} className="mb-4">
               {!collapsed && (
-                <h2 className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+                /* d3-allow: the system has no letter-spacing scale, and four uses across two patterns is not enough evidence to invent one. */
+                <h2 className="px-2.5 pb-1.5 text-11 font-semibold uppercase tracking-[0.14em] text-muted">
                   {group.title}
                 </h2>
               )}
@@ -322,19 +324,19 @@ export default function Shell({
             {!collapsed && "Add files"}
           </NavLink>
 
-          <button
+          <Button
+            className="mt-1.5 w-full"
             onClick={onOpenPalette}
             title="Jump to a page (⌘K)"
-            className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-lg border border-field px-3 py-2 text-sm text-muted hover:text-neutral-100"
+            icon={<Search size={15} />}
           >
-            <Search size={15} />
             {!collapsed && (
               <>
                 Jump to…
-                <kbd className="ml-auto font-mono text-[11px]">⌘K</kbd>
+                <kbd className="ml-auto font-mono text-11">⌘K</kbd>
               </>
             )}
-          </button>
+          </Button>
 
           <VersionBadge collapsed={collapsed} />
 
@@ -363,7 +365,7 @@ export default function Shell({
               aria-expanded={accountOpen}
               aria-label="Account and setup"
               className={`flex min-w-0 items-center gap-2 rounded p-1.5 text-sm ${
-                accountOpen ? "text-neutral-100" : "text-muted hover:text-neutral-100"
+                accountOpen ? "text-fg" : "text-muted hover:text-fg"
               }`}
             >
               <UserCircle size={16} className="shrink-0" />
@@ -382,7 +384,7 @@ export default function Shell({
                 onClick={() => setCollapsed((value) => !value)}
                 title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                 aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                className="rounded p-1.5 text-muted hover:text-neutral-100"
+                className="rounded p-1.5 text-muted hover:text-fg"
               >
                 {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
               </button>
@@ -390,7 +392,7 @@ export default function Shell({
                 onClick={onSignedOut}
                 title={`Sign out (${user.email})`}
                 aria-label="Sign out"
-                className="rounded p-1.5 text-muted hover:text-neutral-100"
+                className="rounded p-1.5 text-muted hover:text-fg"
               >
                 <LogOut size={16} />
               </button>
@@ -481,7 +483,7 @@ function Tab({
         `group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors ${
           isActive
             ? "bg-accent/12 font-medium text-accent"
-            : "text-muted hover:bg-edge/50 hover:text-neutral-100"
+            : "text-muted hover:bg-edge/50 hover:text-fg"
         } ${collapsed ? "justify-center" : ""}`
       }
     >
@@ -490,9 +492,9 @@ function Tab({
       {badge && (
         <span
           aria-hidden
-          className={`ml-auto rounded-full px-1.5 text-[11px] font-medium ${
+          className={`ml-auto rounded-full px-1.5 text-11 font-medium ${
             badge === "!"
-              ? "bg-red-500/20 text-red-300"
+              ? "bg-danger/20 text-danger"
               : "bg-accent/20 text-accent"
           } ${collapsed ? "absolute translate-x-3 -translate-y-3" : ""}`}
         >

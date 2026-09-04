@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 
 import { ApiError, api } from "../api";
 import { Logo } from "../components/brand/Logo";
+import { Button } from "@d3cloud/ui";
 
 export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
   const [email, setEmail] = useState("");
@@ -62,7 +63,7 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
       >
         {/* The mascot rather than the plain mark: this is the one screen
             where nothing has happened yet and a little warmth costs nothing. */}
-        <Logo size={44} variant="mascot" className="text-neutral-300" />
+        <Logo size={44} variant="mascot" className="text-fg" />
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">Bindery</h1>
         <p className="mt-1 mb-6 text-sm text-muted">
           Accounts are by invitation. If someone sent you a link, open that
@@ -116,18 +117,14 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
         )}
 
         {error && (
-          <p id={errorId} role="alert" className="mb-4 text-sm text-red-400">
+          <p id={errorId} role="alert" className="mb-4 text-sm text-danger">
             {error}
           </p>
         )}
 
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded-md bg-accent px-3 py-2 font-medium text-ink disabled:opacity-50"
-        >
+        <Button variant="primary" className="w-full" type="submit" disabled={busy}>
           {busy ? "Signing in…" : needsCode ? "Confirm" : "Sign in"}
-        </button>
+        </Button>
 
         {/* The only way back in. There is no email here to send a link to, so
             recovery is an administrator reading a code out and this form
@@ -135,7 +132,7 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
             lost. A whole-document load: /reset is handled above the router. */}
         <a
           href="/reset"
-          className="mt-4 block text-center text-sm text-muted hover:text-neutral-100"
+          className="mt-4 block text-center text-sm text-muted hover:text-fg"
         >
           I have a reset code
         </a>

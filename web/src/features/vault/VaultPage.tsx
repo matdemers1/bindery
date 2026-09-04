@@ -17,6 +17,7 @@ import SetupForm from "./SetupForm";
 import VaultGrid from "./VaultGrid";
 import VaultVideos from "./VaultVideos";
 import UnlockForm from "./UnlockForm";
+import { Alert, Button, TabPanel, Tabs } from "@d3cloud/ui";
 
 /**
  * The private vault.
@@ -140,13 +141,11 @@ export default function VaultPage() {
               <LockOpen size={15} />
               Open. It locks itself after fifteen minutes.
             </span>
-            <button
-              type="button"
-              onClick={() => void lock()}
-              className="flex items-center gap-1.5 rounded-lg border border-field px-3 py-1.5 text-sm hover:border-accent/60"
+            <Button onClick={() => void lock()}
+              icon={<Lock size={14} />}
             >
-              <Lock size={14} /> Lock now
-            </button>
+              Lock now
+            </Button>
           </div>
 
           {/* The vault screen is the one place a vaulted document may be
@@ -188,7 +187,7 @@ export default function VaultPage() {
                 {results.pages_scanned} page{results.pages_scanned === 1 ? "" : "s"} ·{" "}
                 {results.elapsed_ms}ms
                 {results.slow && (
-                  <span className="ml-1 text-amber-400">
+                  <span className="ml-1 text-warning">
                     — the vault is large enough that this scan is getting slow.
                   </span>
                 )}
@@ -209,13 +208,9 @@ export default function VaultPage() {
           )}
 
           {error && (
-            <p
-              id="vault-search-error"
-              role="alert"
-              className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm text-red-300"
-            >
+            <Alert tone="danger" dynamic id="vault-search-error">
               {error}
-            </p>
+            </Alert>
           )}
 
           {items.length === 0 ? (
@@ -232,58 +227,36 @@ export default function VaultPage() {
                   of which list is below — three identically-shaped buttons to
                   a screen reader, and to anyone who does not see the accent.
                   Same shape as the Unify strip on Organise. */}
-              <div
-                role="tablist"
+              {/* Was a hand-rolled tablist: `role="tab"` on three buttons with no
+                  arrow keys and every one of them in the tab order, which is a
+                  tablist a keyboard cannot drive. `Tabs` owns that contract.
+                  Automatic activation is right here — the three lists are
+                  already in memory, so choosing costs nothing. */}
+              <Tabs
                 aria-label="What is in the vault"
-                className="flex gap-1 border-b border-edge"
-              >
-                {tabs.map((which) => {
-                  const count =
+                value={active}
+                onValueChange={(next) => setTab(next as Tab)}
+                items={tabs.map((which) => ({
+                  value: which,
+                  label: which === "photos" ? "Photos" : which === "videos" ? "Videos" : "Documents",
+                  count:
                     which === "photos" ? photos.length
                     : which === "videos" ? videos.length
-                    : documents.length;
-                  const Icon = which === "photos" ? Images : which === "videos" ? Film : FileLock2;
-                  return (
-                    <button
-                      key={which}
-                      type="button"
-                      role="tab"
-                      id={`vault-tab-${which}`}
-                      aria-selected={active === which}
-                      aria-controls="vault-panel"
-                      onClick={() => setTab(which)}
-                      className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm capitalize ${
-                        active === which
-                          ? "border-accent text-accent"
-                          : "border-transparent text-muted hover:text-neutral-100"
-                      }`}
-                    >
-                      <Icon size={14} />
-                      {which}
-                      <span className="text-xs text-muted">{count}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div
-                id="vault-panel"
-                role="tabpanel"
-                aria-labelledby={`vault-tab-${active}`}
+                    : documents.length,
+                  icon:
+                    which === "photos" ? <Images size={14} />
+                    : which === "videos" ? <Film size={14} />
+                    : <FileLock2 size={14} />,
+                }))}
               >
-                {active === "videos" ? (
-                  <VaultVideos
-                    items={videos}
-                    busy={busy}
-                    onTakeOut={(id) => void moveOut(id)}
-                  />
-                ) : active === "photos" ? (
-                  <VaultGrid
-                    items={photos}
-                    busy={busy}
-                    onTakeOut={(id) => void moveOut(id)}
-                  />
-                ) : documents.length === 0 ? (
+                <TabPanel value="photos">
+                  <VaultGrid items={photos} busy={busy} onTakeOut={(id) => void moveOut(id)} />
+                </TabPanel>
+                <TabPanel value="videos">
+                  <VaultVideos items={videos} busy={busy} onTakeOut={(id) => void moveOut(id)} />
+                </TabPanel>
+                <TabPanel value="documents">
+                  {documents.length === 0 ? (
                   <p className="rounded-xl border border-edge bg-surface p-8 text-center text-sm text-muted">
                     Nothing here is a document — look under Photos{videos.length ? " or Videos" : ""}.
                   </p>
@@ -314,22 +287,18 @@ export default function VaultPage() {
                           >
                             Open original
                           </a>
-                          <button
-                            type="button"
-                            onClick={() => void moveOut(item.document_id)}
-                            disabled={busy === item.document_id}
-                            title="Decrypt it back into the archive, where it becomes searchable again"
-                            className="flex items-center gap-1.5 rounded-md border border-field px-3 py-1.5 text-xs hover:border-accent/60 disabled:opacity-40"
+                          <Button size="sm" onClick={() => void moveOut(item.document_id)} disabled={busy === item.document_id} title="Decrypt it back into the archive, where it becomes searchable again"
+                            icon={<Undo2 size={13} />}
                           >
-                            <Undo2 size={13} />
                             {busy === item.document_id ? "Restoring…" : "Take out"}
-                          </button>
+                          </Button>
                         </div>
                       </li>
                     ))}
                   </ul>
                 )}
-              </div>
+                </TabPanel>
+              </Tabs>
             </>
           )}
 

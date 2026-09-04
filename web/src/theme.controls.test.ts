@@ -13,6 +13,13 @@ import { describe, expect, it } from "vitest";
  *
  * Read through Vite rather than `fs`: `src` is typed for the browser and has
  * no Node types, deliberately.
+ *
+ * The counts below fall as controls move to `@d3cloud/ui`, whose `Button` and
+ * `Select` draw their own boundary from the token. They are a floor against the
+ * guard silently parsing nothing, not a target — lower them when a migration
+ * batch lands. When they reach zero this file should be deleted outright: the
+ * rule will live in the library, enforced once, instead of being re-checked
+ * here against markup that no longer writes its own outline.
  */
 const sources = import.meta.glob("./**/*.tsx", {
   query: "?raw",
@@ -50,8 +57,8 @@ describe("control boundaries", () => {
     // The failure this guard could have: passing while parsing nothing.
     const all = Object.values(sources).flatMap(openingTags);
     expect(Object.keys(sources).length).toBeGreaterThan(30);
-    expect(all.length).toBeGreaterThan(100);
-    expect(all.filter((t) => t.includes("border-field")).length).toBeGreaterThan(40);
+    expect(all.length).toBeGreaterThan(40);
+    expect(all.filter((t) => t.includes("border-field")).length).toBeGreaterThan(15);
   });
 
   it("never draws a button or select outline with the divider token", () => {

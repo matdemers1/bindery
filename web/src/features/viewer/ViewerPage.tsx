@@ -17,6 +17,7 @@ import { isInteractiveTarget, isTypingTarget, shortcutsEnabled } from "../../lib
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 import MoveToVault from "../vault/MoveToVault";
+import { Button } from "@d3cloud/ui";
 
 /**
  * Renders a page range as if it were a standalone document (ADR-001), while
@@ -204,7 +205,7 @@ function Viewer({
             <p className="mt-3 flex flex-wrap gap-3">
               <Link
                 to="/search"
-                className="rounded-md border border-field px-3 py-1.5 text-sm text-neutral-100"
+                className="rounded-md border border-field px-3 py-1.5 text-sm text-fg"
               >
                 Search the archive
               </Link>
@@ -309,24 +310,12 @@ function Viewer({
                     ? `Match ${matchIndex + 1} of ${matches.length}`
                     : `${matches.length} match${matches.length === 1 ? "" : "es"}`}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => previousMatch && goToFilePage(previousMatch)}
-                  disabled={previousMatch === undefined}
-                  aria-label="Previous match"
-                  className="rounded px-1 text-sm text-muted transition-colors hover:text-neutral-100 disabled:opacity-30"
-                >
+                <Button variant="ghost" onClick={() => previousMatch && goToFilePage(previousMatch)} disabled={previousMatch === undefined} aria-label="Previous match">
                   ↑
-                </button>
-                <button
-                  type="button"
-                  onClick={() => nextMatch && goToFilePage(nextMatch)}
-                  disabled={nextMatch === undefined}
-                  aria-label="Next match"
-                  className="rounded px-1 text-sm text-muted transition-colors hover:text-neutral-100 disabled:opacity-30"
-                >
+                </Button>
+                <Button variant="ghost" onClick={() => nextMatch && goToFilePage(nextMatch)} disabled={nextMatch === undefined} aria-label="Next match">
                   ↓
-                </button>
+                </Button>
               </div>
             )}
             <NavButton onClick={() => go(localPage - 1)} disabled={localPage <= 1}>
@@ -336,27 +325,18 @@ function Viewer({
               Next →
             </NavButton>
             {mode === "document" && (
-              <button
-                aria-pressed={showWhy}
-                onClick={() => setShowWhy((open) => !open)}
-                className="rounded-md border border-field px-3 py-1.5 text-sm text-muted hover:border-accent/60"
-              >
+              <Button aria-pressed={showWhy} onClick={() => setShowWhy((open) => !open)}>
                 Why?
-              </button>
+              </Button>
             )}
             {mode === "document" && (
-              <button
-                aria-pressed={editing}
+              <Button
+                pressed={editing}
+                icon={<Pencil size={14} />}
                 onClick={() => setEditing((open) => !open)}
-                className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm ${
-                  editing
-                    ? "border-accent/60 bg-accent/10 text-accent"
-                    : "border-field text-muted hover:border-accent/60"
-                }`}
               >
-                <Pencil size={14} />
                 Edit
-              </button>
+              </Button>
             )}
             <Link
               to={`/file/${fileId}/segments`}
@@ -437,12 +417,9 @@ function NavButton({
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button
-      {...props}
-      className="rounded-md border border-field px-3 py-1.5 text-sm disabled:opacity-40"
-    >
+    <Button {...props}>
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -509,6 +486,7 @@ function PageCanvas({
              mark that proves the product found the word, and it was all but
              invisible. The 2px ring is 4.2:1 on paper; the wash stays light
              so the printed word underneath is still readable. */
+          /* d3-allow: a highlight drawn over a line of scanned text, sized to the word rather than to a UI surface. The radius scale starts at 6px because that is where a control reads as a control; a 6px corner on a box two lines high would round the word away. */
           className="pointer-events-none absolute rounded-[2px] bg-mark/15 ring-2 ring-mark"
           style={{
             left: `${box.left}%`,
@@ -562,6 +540,7 @@ function ThumbnailStrip({
                 src={fileUrl.thumb(fileId, number)}
                 alt=""
                 loading="lazy"
+                /* d3-allow: a highlight drawn over a line of scanned text, sized to the word rather than to a UI surface. The radius scale starts at 6px because that is where a control reads as a control; a 6px corner on a box two lines high would round the word away. */
                 className="block w-full rounded-[3px]"
               />
               <span className="block py-1 text-center text-xs text-muted">{number}</span>

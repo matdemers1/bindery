@@ -8,6 +8,7 @@ import PageHeader from "../../components/PageHeader";
 import { useLiveQuery } from "../../live/LiveProvider";
 import MetadataPanel, { formatDuration } from "../media/MetadataPanel";
 import MoveToVault from "../vault/MoveToVault";
+import { Alert, Button, TabPanel, Tabs } from "@d3cloud/ui";
 
 type Kind = "image" | "video";
 
@@ -97,6 +98,62 @@ export default function PhotosPage() {
     }
   }
 
+  // Both tabs render this; `kind` is what decides what is in it.
+  const wall = (
+          photos.length === 0 ? (
+            <p className="rounded-xl border border-edge bg-surface p-8 text-center text-sm text-muted">
+              {kind === "video"
+                ? "No videos yet. Drop one in the inbox or import a folder — they are stored and described by their own metadata, never OCR'd."
+                : undescribed
+                  ? "Every image had something readable on it."
+                  : "No images match that."}
+            </p>
+          ) : (
+            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              {photos.map((photo) => (
+                <li key={photo.document_id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(photo)}
+                    className="group w-full overflow-hidden rounded-xl border border-field bg-surface text-left transition-colors hover:border-accent/60"
+                  >
+                    {photo.kind === "video" ? (
+                      <VideoCard photo={photo} />
+                    ) : (
+                      <img
+                        src={fileUrl.thumb(photo.source_file_id, photo.page)}
+                        alt={photo.title ?? photo.original_filename ?? "Untitled image"}
+                        loading="lazy"
+                        className="aspect-square w-full bg-ink object-contain"
+                      />
+                    )}
+                    <span className="block px-2.5 py-2">
+                      <span className="block truncate text-xs font-medium">
+                        {photo.title ?? photo.original_filename ?? "Untitled"}
+                      </span>
+                      <span className="mt-0.5 block text-11 text-muted">
+                        {photo.kind === "video" ? (
+                          photo.media?.captured_at?.slice(0, 10) ??
+                          photo.document_date ??
+                          photo.received_at.slice(0, 10)
+                        ) : photo.described ? (
+                          photo.document_date ?? photo.received_at.slice(0, 10)
+                        ) : (
+                          <span className="text-warning">
+                            {photo.text_chars === 0
+                              ? "nothing readable on this"
+                              : `only ${photo.text_chars} characters read`}
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+  );
+
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <PageHeader icon={Images} title="Photos">
@@ -105,40 +162,26 @@ export default function PhotosPage() {
         when and how long.
       </PageHeader>
 
-      <div
-        role="tablist"
+      {/* Was a hand-rolled tablist: `role="tab"` on both buttons with no arrow
+          keys and both in the tab order — a tablist a keyboard cannot drive.
+          Manual activation because `kind` is a dependency of `load`, so
+          arrowing across under automatic activation would fetch the wall you
+          were only passing over. */}
+      <Tabs
         aria-label="Photos or videos"
-        className="flex gap-1 border-b border-edge"
+        value={kind}
+        activationMode="manual"
+        onValueChange={(next) => {
+          setChosen(next as Kind);
+          setSelected(null);
+        }}
+        items={[
+          { value: "image", label: "Photos", icon: <Images size={14} />,
+            ...(imageCount !== null ? { count: imageCount } : {}) },
+          { value: "video", label: "Videos", icon: <Film size={14} />,
+            ...(videoCount !== null ? { count: videoCount } : {}) },
+        ]}
       >
-        {(["image", "video"] as const).map((which) => {
-          const Icon = which === "image" ? Images : Film;
-          const count = which === "image" ? imageCount : videoCount;
-          return (
-            <button
-              key={which}
-              type="button"
-              role="tab"
-              id={`photos-tab-${which}`}
-              aria-selected={kind === which}
-              aria-controls="photos-panel"
-              onClick={() => {
-                setChosen(which);
-                setSelected(null);
-              }}
-              className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm ${
-                kind === which
-                  ? "border-accent text-accent"
-                  : "border-transparent text-muted hover:text-neutral-100"
-              }`}
-            >
-              <Icon size={14} />
-              {which === "image" ? "Photos" : "Videos"}
-              {count !== null && <span className="text-xs text-muted">{count}</span>}
-            </button>
-          );
-        })}
-      </div>
-
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-56 flex-1">
           <Search
@@ -158,30 +201,20 @@ export default function PhotosPage() {
           />
         </div>
         {kind === "image" && (
-          <button
-            type="button"
-            aria-pressed={undescribed}
+          <Button
+            pressed={undescribed}
+            icon={<Sparkles size={14} />}
             onClick={() => setUndescribed((value) => !value)}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm ${
-              undescribed
-                ? "border-accent/60 bg-accent/10 text-accent"
-                : "border-field text-muted hover:text-neutral-100"
-            }`}
           >
-            <Sparkles size={14} />
             Nothing said about these
-          </button>
+          </Button>
         )}
         {unread.length > 0 && (
-          <button
-            type="button"
-            onClick={() => void describe()}
-            disabled={describing}
-            className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-ink disabled:opacity-40"
+          <Button variant="primary" onClick={() => void describe()} disabled={describing}
+            icon={<Eye size={14} />}
           >
-            <Eye size={14} />
             {describing ? "Queueing…" : `Look at ${unread.length}`}
-          </button>
+          </Button>
         )}
         <span className="text-xs text-muted">
           {total} {kind === "image" ? "images" : "videos"}
@@ -202,60 +235,12 @@ export default function PhotosPage() {
         {outcome}
       </p>
 
-      <div id="photos-panel" role="tabpanel" aria-labelledby={`photos-tab-${kind}`}>
-        {photos.length === 0 ? (
-          <p className="rounded-xl border border-edge bg-surface p-8 text-center text-sm text-muted">
-            {kind === "video"
-              ? "No videos yet. Drop one in the inbox or import a folder — they are stored and described by their own metadata, never OCR'd."
-              : undescribed
-                ? "Every image had something readable on it."
-                : "No images match that."}
-          </p>
-        ) : (
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {photos.map((photo) => (
-              <li key={photo.document_id}>
-                <button
-                  type="button"
-                  onClick={() => setSelected(photo)}
-                  className="group w-full overflow-hidden rounded-xl border border-field bg-surface text-left transition-colors hover:border-accent/60"
-                >
-                  {photo.kind === "video" ? (
-                    <VideoCard photo={photo} />
-                  ) : (
-                    <img
-                      src={fileUrl.thumb(photo.source_file_id, photo.page)}
-                      alt={photo.title ?? photo.original_filename ?? "Untitled image"}
-                      loading="lazy"
-                      className="aspect-square w-full bg-ink object-contain"
-                    />
-                  )}
-                  <span className="block px-2.5 py-2">
-                    <span className="block truncate text-xs font-medium">
-                      {photo.title ?? photo.original_filename ?? "Untitled"}
-                    </span>
-                    <span className="mt-0.5 block text-[11px] text-muted">
-                      {photo.kind === "video" ? (
-                        photo.media?.captured_at?.slice(0, 10) ??
-                        photo.document_date ??
-                        photo.received_at.slice(0, 10)
-                      ) : photo.described ? (
-                        photo.document_date ?? photo.received_at.slice(0, 10)
-                      ) : (
-                        <span className="text-amber-400">
-                          {photo.text_chars === 0
-                            ? "nothing readable on this"
-                            : `only ${photo.text_chars} characters read`}
-                        </span>
-                      )}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+        {/* Both tabs show the same wall — it is `kind` that decides what is in
+            it — so the body is written once and each panel renders it. Only the
+            active panel is mounted, so this is not two of anything. */}
+        <TabPanel value="image">{wall}</TabPanel>
+        <TabPanel value="video">{wall}</TabPanel>
+      </Tabs>
 
       {selected && (
         <Lightbox
@@ -281,7 +266,7 @@ function VideoCard({ photo }: { photo: Photo }) {
       {broken ? (
         <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted">
           <Film size={22} aria-hidden />
-          <span className="text-[11px]">no poster frame</span>
+          <span className="text-11">no poster frame</span>
         </span>
       ) : (
         <img
@@ -292,7 +277,7 @@ function VideoCard({ photo }: { photo: Photo }) {
           className="h-full w-full object-cover"
         />
       )}
-      <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded bg-ink/80 px-1.5 py-0.5 font-mono text-[11px]">
+      <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded bg-ink/80 px-1.5 py-0.5 font-mono text-11">
         <Film size={11} aria-hidden /> {duration ?? "video"}
       </span>
     </span>
@@ -351,11 +336,11 @@ function Lightbox({
           photo.summary ? (
             <p className="text-sm text-muted">{photo.summary}</p>
           ) : (
-            <p className="rounded border border-amber-900/60 bg-amber-950/20 p-2.5 text-xs text-amber-300">
+            <Alert tone="warning">
               Nothing has described this image. If OCR read no text there is
               nothing to search on — running AI review over it is what gives it a
               title and tags.
-            </p>
+            </Alert>
           )
         )}
         {photo.media ? (

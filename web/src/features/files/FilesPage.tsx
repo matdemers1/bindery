@@ -6,6 +6,7 @@ import { Link, useSearchParams } from "react-router";
 
 import { ApiError, api, type FileTreeNode, type LibraryDetail, type MovePlan } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
+import { Badge, Button } from "@d3cloud/ui";
 
 /**
  * The folder tree, in the app.
@@ -88,7 +89,7 @@ export default function FilesPage() {
         </Crumb>
         {segments.map((segment, index) => (
           <span key={segment + index} className="flex items-center gap-1">
-            <span className="text-neutral-600">/</span>
+            <span className="text-fg-faint">/</span>
             <Crumb
               onClick={() => go(segments.slice(0, index + 1).join("/"))}
               active={index === segments.length - 1}
@@ -141,8 +142,8 @@ function Crumb({
       onClick={onClick}
       className={
         active
-          ? "rounded px-1.5 py-0.5 font-medium text-neutral-100"
-          : "rounded px-1.5 py-0.5 text-muted hover:bg-edge hover:text-neutral-100"
+          ? "rounded px-1.5 py-0.5 font-medium text-fg"
+          : "rounded px-1.5 py-0.5 text-muted hover:bg-edge hover:text-fg"
       }
     >
       {children}
@@ -201,10 +202,10 @@ function DocumentRow({
           {node.title ?? node.original_filename ?? node.name}
         </Link>
         {node.sensitivity === "vital" && (
-          <span className="flex items-center gap-1 rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] font-medium text-amber-300">
+          <Badge tone="attention" size="sm">
             <ShieldCheck size={11} aria-hidden />
             vital
-          </span>
+          </Badge>
         )}
         {node.document_date && (
           <span className="text-xs text-muted">{node.document_date}</span>
@@ -220,7 +221,7 @@ function DocumentRow({
         )}
         {node.document_type && <span>{node.document_type}</span>}
         {bundle ? (
-          <span className="text-neutral-200">
+          <span className="text-fg">
             one scan of {node.page_count} pages, holding several documents — not split,
             because originals are never modified
           </span>
@@ -235,7 +236,7 @@ function DocumentRow({
           )
         )}
         {node.review_state === "needs_review" && (
-          <Link to="/review" className="text-amber-400 underline">
+          <Link to="/review" className="text-warning underline">
             needs review
           </Link>
         )}
@@ -258,7 +259,7 @@ function DocumentRow({
           {node.tags.map((tag) => (
             <span
               key={tag}
-              className="rounded bg-edge px-1.5 py-0.5 text-[11px] text-neutral-200"
+              className="rounded bg-edge px-1.5 py-0.5 text-11 text-fg"
             >
               {tag}
             </span>
@@ -337,18 +338,13 @@ function MoveControl({
           ))}
         </select>
         {target && !plan && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void run(() => api.previewMove(sourceFileId, target))}
-            className="rounded border border-field px-2 py-1 disabled:opacity-40"
-          >
+          <Button size="sm" disabled={busy} onClick={() => void run(() => api.previewMove(sourceFileId, target))}>
             {busy ? "Checking…" : "Preview"}
-          </button>
+          </Button>
         )}
       </div>
 
-      {error && <p className="mt-1 text-red-300">{error}</p>}
+      {error && <p className="mt-1 text-danger">{error}</p>}
 
       {plan && (
         <div className="mt-2 rounded border border-edge bg-ink p-2">
@@ -357,7 +353,7 @@ function MoveControl({
             {plan.document_count === 1 ? "document" : "documents"}.
           </p>
           {plan.loses_metadata ? (
-            <p className="mt-1 text-amber-300">
+            <p className="mt-1 text-warning">
               These belong to the old library and will be cleared:{" "}
               {[
                 ...plan.cleared_tags,
@@ -370,30 +366,12 @@ function MoveControl({
             <p className="mt-1 text-muted">Nothing is lost in the move.</p>
           )}
           <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void run(
-                  () => api.moveFile(sourceFileId, target),
-                  () => {
-                    setPlan(null);
-                    setTarget("");
-                    onMoved();
-                  },
-                )
-              }
-              className="rounded bg-accent px-2 py-1 font-medium text-ink disabled:opacity-40"
-            >
+            <Button variant="primary" size="sm" disabled={busy} onClick={() => void run( () => api.moveFile(sourceFileId, target), () => { setPlan(null); setTarget(""); onMoved(); }, ) }>
               {busy ? "Moving…" : "Move"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setPlan(null)}
-              className="rounded border border-field px-2 py-1"
-            >
+            </Button>
+            <Button size="sm" onClick={() => setPlan(null)}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}

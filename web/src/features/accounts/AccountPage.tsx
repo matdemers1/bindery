@@ -4,6 +4,7 @@ import { KeyRound, ShieldCheck, HardDrive, Copy, Check } from "lucide-react";
 import { ApiError, type Account, accountsApi } from "../../api";
 import PageHeader from "../../components/PageHeader";
 import { useLiveQuery } from "../../live/LiveProvider";
+import { Alert, Button } from "@d3cloud/ui";
 
 function humanBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -57,7 +58,7 @@ function Storage({ account }: { account: Account }) {
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-ink">
           <div
             className={`h-full rounded-full ${
-              share > 0.9 ? "bg-red-500" : share > 0.75 ? "bg-amber-500" : "bg-accent"
+              share > 0.9 ? "bg-danger" : share > 0.75 ? "bg-warning" : "bg-accent"
             }`}
             style={{ width: `${Math.max(2, share * 100)}%` }}
           />
@@ -114,11 +115,11 @@ function TwoFactor({ account, onChanged }: { account: Account; onChanged: () => 
       <h2 className="flex items-center gap-2 text-sm font-medium">
         <ShieldCheck
           size={15}
-          className={account.totp_enabled ? "text-emerald-400" : "text-muted"}
+          className={account.totp_enabled ? "text-success" : "text-muted"}
         />
         Two-factor authentication
         {account.is_admin && (
-          <span className="rounded-full border border-edge px-2 py-0.5 text-[11px] text-muted">
+          <span className="rounded-full border border-edge px-2 py-0.5 text-11 text-muted">
             required for administrators
           </span>
         )}
@@ -130,13 +131,9 @@ function TwoFactor({ account, onChanged }: { account: Account; onChanged: () => 
             On. Signing in asks for a code from your authenticator.
           </p>
           {!account.is_admin && (
-            <button
-              type="button"
-              onClick={() => void disable()}
-              className="mt-3 rounded border border-field px-2.5 py-1 text-xs text-muted hover:text-neutral-100"
-            >
+            <Button size="sm" className="mt-3" onClick={() => void disable()}>
               Turn off
-            </button>
+            </Button>
           )}
           {account.is_admin && (
             <p className="mt-2 text-xs text-muted">
@@ -161,7 +158,7 @@ function TwoFactor({ account, onChanged }: { account: Account; onChanged: () => 
                 setCopied(true);
                 window.setTimeout(() => setCopied(false), 1500);
               }}
-              className="rounded border border-field p-2 text-muted hover:text-neutral-100"
+              className="rounded border border-field p-2 text-muted hover:text-fg"
               aria-label="Copy the secret"
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -177,45 +174,37 @@ function TwoFactor({ account, onChanged }: { account: Account; onChanged: () => 
             placeholder="123456"
             className="mt-3 w-full rounded-md border border-field bg-ink px-3 py-2 font-mono tracking-widest outline-none focus:border-accent"
           />
-          {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
-          <button
-            type="submit"
-            className="mt-3 rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink"
-          >
+          {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+          <Button variant="primary" className="mt-3" type="submit">
             Turn on
-          </button>
+          </Button>
         </form>
       ) : (
         <>
           <p className="mt-1 text-sm text-muted">
             Off. Adding it means a stolen password is not enough on its own.
           </p>
-          {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
-          <button
-            type="button"
-            onClick={() => void start()}
-            className="mt-3 rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink"
-          >
+          {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+          <Button variant="primary" className="mt-3" onClick={() => void start()}>
             Set up
-          </button>
+          </Button>
         </>
       )}
 
       {recovery && (
-        <div className="mt-4 rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
-          <p className="text-sm font-medium text-amber-300">
-            Write these down now — they are not shown again.
-          </p>
-          <p className="mt-1 text-xs text-muted">
-            Each works once, and gets you in if you lose your phone. Generating a
-            new set retires these.
-          </p>
+        <Alert
+          tone="warning"
+          className="mt-4"
+          title="Write these down now — they are not shown again."
+        >
+          Each works once, and gets you in if you lose your phone. Generating a
+          new set retires these.
           <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-xs">
             {recovery.map((one) => (
               <li key={one}>{one}</li>
             ))}
           </ul>
-        </div>
+        </Alert>
       )}
     </section>
   );
@@ -269,14 +258,11 @@ function ChangePassword() {
           onChange={(event) => setNext(event.target.value)}
           className="w-full rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
         />
-        {error && <p className="text-sm text-red-400">{error}</p>}
-        {done && <p className="text-sm text-emerald-400">Changed.</p>}
-        <button
-          type="submit"
-          className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-ink"
-        >
+        {error && <p className="text-sm text-danger">{error}</p>}
+        {done && <p className="text-sm text-success">Changed.</p>}
+        <Button variant="primary" type="submit">
           Change it
-        </button>
+        </Button>
       </form>
     </section>
   );

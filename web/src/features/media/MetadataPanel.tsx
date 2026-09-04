@@ -54,13 +54,13 @@ export default function MetadataPanel({
   }
   if (rows.length === 0) {
     return (
-      <p className={`text-muted ${compact ? "text-[11px]" : "text-xs"}`}>
+      <p className={`text-muted ${compact ? "text-11" : "text-xs"}`}>
         The file carried no metadata — a scan, or a screenshot.
       </p>
     );
   }
   return (
-    <dl className={`grid grid-cols-[5rem_1fr] gap-y-1 ${compact ? "text-[11px]" : "text-xs"}`}>
+    <dl className={`grid grid-cols-[5rem_1fr] gap-y-1 ${compact ? "text-11" : "text-xs"}`}>
       {rows.map((row) => {
         const Icon = row.icon;
         return (

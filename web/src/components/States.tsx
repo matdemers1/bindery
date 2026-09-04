@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { ApiError } from "../api";
+import { Alert, Button } from "@d3cloud/ui";
 
 /**
  * The four states every screen owes the reader (T-8.7).
@@ -76,23 +77,21 @@ export function ErrorState({
         : String(error);
 
   return (
-    <div
-      role="alert"
-      className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-sm text-red-300"
+    <Alert
+      tone="danger"
+      dynamic
+      title="That did not work."
+      actions={
+        onRetry ? (
+          <Button variant="danger-ghost" size="sm" onClick={onRetry}>
+            Try again
+          </Button>
+        ) : undefined
+      }
     >
-      <p className="font-medium">That did not work.</p>
       {/* The server's message verbatim: it is written for a person, and a
           generic replacement would throw away the only diagnosis available. */}
-      <p className="mt-1">{message}</p>
-      {onRetry && (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-3 rounded border border-red-800 px-2 py-1 text-xs"
-        >
-          Try again
-        </button>
-      )}
-    </div>
+      {message}
+    </Alert>
   );
 }

@@ -17,6 +17,7 @@ import Modal from "../../components/Modal";
 import FirstRun from "../firstrun/FirstRun";
 import NextSteps from "../firstrun/NextSteps";
 import { hasFoundSomething } from "../firstrun/onboarding";
+import { Alert } from "@d3cloud/ui";
 
 /**
  * Ask — the landing screen.
@@ -184,7 +185,7 @@ export default function AskPage({
               }
             }}
             placeholder="Ask anything about your documents…"
-            className="w-full resize-none rounded-2xl border border-field bg-surface py-4 pl-5 pr-14 text-[15px] outline-none transition-colors focus:border-accent"
+            className="w-full resize-none rounded-2xl border border-field bg-surface py-4 pl-5 pr-14 text-16 outline-none transition-colors focus:border-accent"
           />
           <button
             type="submit"
@@ -208,7 +209,7 @@ export default function AskPage({
                     setQuestion(example);
                     void submit(example);
                   }}
-                  className="rounded-full border border-field px-3 py-1.5 text-sm text-muted transition-colors hover:border-accent/60 hover:text-neutral-100"
+                  className="rounded-full border border-field px-3 py-1.5 text-sm text-muted transition-colors hover:border-accent/60 hover:text-fg"
                 >
                   {example}
                 </button>
@@ -223,7 +224,7 @@ export default function AskPage({
             questions that cannot be answered (D-02). */}
         {!asked && providerConfigured === false && (
           <div className="mt-4 rounded-lg border border-edge bg-surface p-4 text-sm">
-            <p className="text-neutral-200">Finding the page never needed a key.</p>
+            <p className="text-fg">Finding the page never needed a key.</p>
             <p className="mt-1 text-muted">
               Answering questions in prose does. Without one, asking still returns
               the pages that match — every page is OCR&apos;d and indexed either
@@ -232,7 +233,7 @@ export default function AskPage({
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <Link
                 to="/search"
-                className="rounded-md border border-field px-3 py-1.5 text-sm text-neutral-100 transition-colors hover:border-accent/60"
+                className="rounded-md border border-field px-3 py-1.5 text-sm text-fg transition-colors hover:border-accent/60"
               >
                 Search the archive
               </Link>
@@ -248,7 +249,7 @@ export default function AskPage({
 
         {asked && (
           <section className="mt-8" aria-live="polite">
-            <p className="mb-4 flex items-start gap-2.5 text-[15px] text-neutral-200">
+            <p className="mb-4 flex items-start gap-2.5 text-16 text-fg">
               <Quote size={15} className="mt-1.5 shrink-0 text-muted" />
               <span className="font-medium">{asked}</span>
             </p>
@@ -256,12 +257,9 @@ export default function AskPage({
             {loading && <Thinking />}
 
             {error != null && (
-              <p
-                role="alert"
-                className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-sm text-red-300"
-              >
+              <Alert tone="danger" dynamic>
                 {error instanceof ApiError ? error.message : String(error)}
-              </p>
+              </Alert>
             )}
 
             {result && (
@@ -301,7 +299,7 @@ export default function AskPage({
 function Hero() {
   return (
     <div className="mb-8 text-center">
-      <Logo size={56} variant="mascot" className="mx-auto text-neutral-300" />
+      <Logo size={56} variant="mascot" className="mx-auto text-fg" />
       <h1 className="mt-4 text-2xl font-semibold tracking-tight">
         What do you need to find?
       </h1>
@@ -336,7 +334,8 @@ function VitalRecords() {
 
   return (
     <section className="mt-6">
-      <h2 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+      {/* d3-allow: the system has no letter-spacing scale, and four uses across two patterns is not enough evidence to invent one. */}
+      <h2 className="flex items-center gap-1.5 text-11 font-semibold uppercase tracking-[0.14em] text-muted">
         <ShieldCheck size={12} className="text-accent" />
         Vital records
       </h2>
@@ -383,7 +382,7 @@ function Answer({
   return (
     <div className="space-y-4">
       {answered ? (
-        <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{result.answer}</p>
+        <p className="whitespace-pre-wrap text-16 leading-relaxed">{result.answer}</p>
       ) : (
         <div className="rounded-xl border border-edge bg-surface p-4">
           <p className="text-sm">{result.unavailable_reason}</p>
@@ -394,7 +393,7 @@ function Answer({
         <button
           type="button"
           onClick={onOpenSources}
-          className="inline-flex items-center gap-2 rounded-full border border-field px-3.5 py-1.5 text-sm text-muted transition-colors hover:border-accent/60 hover:text-neutral-100"
+          className="inline-flex items-center gap-2 rounded-full border border-field px-3.5 py-1.5 text-sm text-muted transition-colors hover:border-accent/60 hover:text-fg"
         >
           <BookOpen size={15} />
           {answered
@@ -459,7 +458,7 @@ function SourcesPanel({
           <button
             onClick={onClose}
             aria-label="Close sources"
-            className="rounded p-1 text-muted hover:text-neutral-100"
+            className="rounded p-1 text-muted hover:text-fg"
           >
             <PanelRightClose size={16} />
           </button>
@@ -475,10 +474,12 @@ function SourcesPanel({
                 <FileText size={15} className="mt-0.5 shrink-0 text-muted" />
                 <span className="min-w-0">{source.title}</span>
               </Link>
+              {/* d3-allow: aligns under the icon and gap on the line above — a measured offset, not a spacing step. */}
               <p className="ml-[1.4rem] mt-0.5 text-xs text-muted">
                 page {source.page_number}
               </p>
               {source.quote && (
+                /* d3-allow: aligns under the icon and gap on the line above — a measured offset, not a spacing step. */
                 <blockquote className="ml-[1.4rem] mt-2 border-l-2 border-accent/50 pl-2.5 text-sm text-muted">
                   {source.quote}
                 </blockquote>

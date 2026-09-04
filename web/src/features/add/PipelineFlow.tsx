@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import type { FileProgress } from "../../api";
+import { Alert, Badge, Button, CountBadge } from "@d3cloud/ui";
 
 /**
  * Where every file is, drawn as the pipeline it is actually moving through.
@@ -61,15 +62,18 @@ export default function PipelineFlow({ files }: { files: FileProgress[] }) {
                     active
                       ? "border-accent bg-accent/15 text-accent"
                       : done
-                        ? "border-emerald-800 bg-emerald-950/40 text-emerald-400"
+                        ? "border-success/40 bg-success-muted/40 text-success"
                         : "border-edge bg-ink text-muted"
                   }`}
                 >
                   <Icon size={17} />
                   {here > 0 && (
-                    <span className="absolute -right-1.5 -top-1.5 rounded-full bg-accent px-1.5 text-[11px] font-semibold text-ink">
-                      {here}
-                    </span>
+                    <CountBadge
+                      count={here}
+                      label={`${here} at ${stage.label}`}
+                      size="sm"
+                      className="absolute -right-1.5 -top-1.5"
+                    />
                   )}
                 </span>
                 <span
@@ -77,7 +81,7 @@ export default function PipelineFlow({ files }: { files: FileProgress[] }) {
                 >
                   {stage.label}
                 </span>
-                <span className="mt-0.5 hidden text-[11px] leading-tight text-muted sm:block">
+                <span className="mt-0.5 hidden text-11 leading-tight text-muted sm:block">
                   {stage.blurb}
                 </span>
               </div>
@@ -85,7 +89,7 @@ export default function PipelineFlow({ files }: { files: FileProgress[] }) {
                 <span
                   aria-hidden
                   className={`mt-5 h-px min-w-4 flex-1 ${
-                    done ? "bg-emerald-800" : "bg-edge"
+                    done ? "bg-success-muted" : "bg-edge"
                   }`}
                 />
               )}
@@ -97,16 +101,16 @@ export default function PipelineFlow({ files }: { files: FileProgress[] }) {
       {(duplicates > 0 || failed > 0) && (
         <div className="mt-4 flex flex-wrap gap-2 border-t border-edge pt-3 text-xs">
           {duplicates > 0 && (
-            <span className="flex items-center gap-1.5 rounded-full border border-edge px-2.5 py-1 text-muted">
+            <Badge>
               <Copy size={12} />
               {duplicates} already in the archive
-            </span>
+            </Badge>
           )}
           {failed > 0 && (
-            <span className="flex items-center gap-1.5 rounded-full border border-red-900/70 bg-red-950/25 px-2.5 py-1 text-red-300">
+            <Badge tone="danger">
               <AlertTriangle size={12} />
               {failed} could not be processed
-            </span>
+            </Badge>
           )}
         </div>
       )}
@@ -131,9 +135,9 @@ export function FileRow({
     <li className="px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {broken ? (
-          <AlertTriangle size={15} className="shrink-0 text-red-400" />
+          <AlertTriangle size={15} className="shrink-0 text-danger" />
         ) : finished ? (
-          <CheckCircle2 size={15} className="shrink-0 text-emerald-400" />
+          <CheckCircle2 size={15} className="shrink-0 text-success" />
         ) : duplicate ? (
           <Copy size={15} className="shrink-0 text-muted" />
         ) : (
@@ -156,19 +160,15 @@ export function FileRow({
                 : (STAGES[index]?.label ?? file.state)}
         </span>
 
-        <button
-          type="button"
-          onClick={() => onShowLog(file)}
-          className="rounded border border-field px-2 py-0.5 text-[11px] text-muted hover:text-neutral-100"
-        >
+        <Button size="sm" onClick={() => onShowLog(file)}>
           Log
-        </button>
+        </Button>
       </div>
 
       {broken && file.last_error && (
-        <p className="mt-1.5 rounded border border-red-900/60 bg-red-950/25 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-red-300">
+        <Alert tone="danger" className="mt-1.5 font-mono">
           {file.last_error}
-        </p>
+        </Alert>
       )}
     </li>
   );

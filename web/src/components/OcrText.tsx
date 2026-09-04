@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api, type OcrText } from "../api";
+import { Alert, Button } from "@d3cloud/ui";
 
 /**
  * What OCR actually read, verbatim.
@@ -62,7 +63,7 @@ export default function OcrTextPanel({
       {open && (
         <div className="border-t border-edge px-4 py-3">
           {error && (
-            <p role="alert" className="text-sm text-red-300">
+            <p role="alert" className="text-sm text-danger">
               {error}
             </p>
           )}
@@ -76,25 +77,22 @@ export default function OcrTextPanel({
               </p>
 
               {text.characters === 0 && (
-                <div className="mb-3 rounded border border-amber-900/60 bg-amber-950/20 p-3 text-sm">
-                  <p className="text-amber-300">
-                    Nothing was extracted from this file at all.
-                  </p>
-                  <p className="mt-1 text-muted">
-                    It is stored and safe, but no part of it is searchable. This
-                    usually means the page was drawn as vector content, which OCR
-                    skips by default — a rescan forces it.
-                  </p>
-                  {onRescan && (
-                    <button
-                      type="button"
-                      onClick={onRescan}
-                      className="mt-2 rounded bg-accent px-2.5 py-1 text-xs font-medium text-ink"
-                    >
-                      Rescan this file
-                    </button>
-                  )}
-                </div>
+                <Alert
+                  tone="warning"
+                  className="mb-3"
+                  title="Nothing was extracted from this file at all."
+                  actions={
+                    onRescan ? (
+                      <Button variant="primary" size="sm" onClick={onRescan}>
+                        Rescan this file
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  It is stored and safe, but no part of it is searchable. This
+                  usually means the page was drawn as vector content, which OCR
+                  skips by default — a rescan forces it.
+                </Alert>
               )}
 
               <ol className="space-y-3">

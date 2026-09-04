@@ -354,7 +354,7 @@ function Results({
                         result.matching_pages === 2 ? "page" : "pages"
                       }`}
                   </p>
-                  <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-neutral-300">
+                  <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-fg">
                     <Snippet html={result.best_page.snippet} />
                   </p>
                 </div>
@@ -396,7 +396,7 @@ function FacetGroup({
               className={`flex w-full items-baseline justify-between gap-2 rounded px-2 py-1 text-left text-sm ${
                 selected.includes(facet.value)
                   ? "bg-accent/15 text-accent"
-                  : "text-neutral-300 hover:bg-surface"
+                  : "text-fg hover:bg-surface"
               }`}
             >
               <span className="truncate">{label(facet.value)}</span>
