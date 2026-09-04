@@ -9,7 +9,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "5a6dad27936cadb6c1aa1d8f76d014d2eec4f5dc"
+      "source_commit": "d9b05c8da32ae736a0208530256f8710206f2470"
     },
     {
       "route": "/account",
@@ -99,7 +99,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "5a6dad27936cadb6c1aa1d8f76d014d2eec4f5dc"
+      "source_commit": "d9b05c8da32ae736a0208530256f8710206f2470"
     },
     {
       "route": "/review",
@@ -109,7 +109,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "0c704ad37609e03dac0ea3df62d7b5f1b866faba"
+      "source_commit": "d9b05c8da32ae736a0208530256f8710206f2470"
     },
     {
       "route": "/rules",
@@ -129,7 +129,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "5a6dad27936cadb6c1aa1d8f76d014d2eec4f5dc"
+      "source_commit": "d9b05c8da32ae736a0208530256f8710206f2470"
     },
     {
       "route": "/settings",
@@ -149,7 +149,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "acddbe953137685ad3f2982313a8f8b03e23d49c"
+      "source_commit": "d9b05c8da32ae736a0208530256f8710206f2470"
     },
     {
       "route": "/vault",
