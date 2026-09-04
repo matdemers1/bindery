@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@d3cloud/ui": "https://github.com/matdemers1/d3-design-system/releases/download/v0.1.1/d3cloud-ui-0.1.1.tgz",
-    "lucide-react": "^1.35.0",
+    "lucide-react": "^1.39.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^7.18.2"
