@@ -7,6 +7,7 @@ and must never leak across a library boundary.
 import uuid
 
 import pytest
+import sqlalchemy as sa
 
 from api.db.enums import IngestSource, LibraryKind, SourceFileState
 from api.db.models import Document, Library, Page, SourceFile, Tag
@@ -242,3 +243,47 @@ async def test_an_empty_query_matches_nothing_rather_than_everything(
     _user, _library, source_file = bundle
     body = (await client.get(f"/api/files/{source_file.id}/matches")).json()
     assert body["pages"] == []
+
+
+async def test_a_page_matched_two_ways_counts_once(session, client, bundle) -> None:
+    """Two reasons for one page is not two matches.
+
+    `_scoped_pages` unions a text branch and a known-form branch, and they
+    legitimately return the same page: a query can both appear on the page and
+    name the form the document was identified as. Counting rows made
+    `matching_pages` double, so the search row offered "1 more matching page"
+    on a document that had exactly one — and once the viewer steps through that
+    set (D-03), the offer points at a page that does not exist.
+    """
+    from api.db.models import KnownForm
+
+    _user, _library, source_file = bundle
+
+    # "discharge" is on page 47 of this bundle *and* names this form.
+    form = KnownForm(
+        code=f"DD-214-{uuid.uuid4().hex[:4]}",
+        name="Certificate of Release or Discharge from Active Duty",
+        match_rules={},
+        field_extractors={},
+    )
+    session.add(form)
+    await session.flush()
+    document = (
+        await session.execute(
+            sa.select(Document).where(Document.source_file_id == source_file.id)
+        )
+    ).scalars().first()
+    document.known_form_id = form.id
+    await session.commit()
+
+    body = (await client.get("/api/search", params={"q": "discharge"})).json()
+    hit = next(r for r in body["results"] if r["source_file_id"] == str(source_file.id))
+
+    # One page of this file contains the word; the form branch matched the same
+    # document at its first page, which is page 1 and does not contain it.
+    assert hit["matching_pages"] == 2, "pages 1 (form) and 47 (text) — two distinct pages"
+
+    pages = (
+        await client.get(f"/api/files/{source_file.id}/matches", params={"q": "discharge"})
+    ).json()["pages"]
+    assert pages == [47], "the text index is the only thing that matches a page"

@@ -154,6 +154,13 @@ export default function Shell({
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Below `lg` the sidebar is an off-canvas drawer rather than a column. The
+  // shell had no breakpoint anywhere, so a 224px desktop rail was painted on a
+  // 390pt phone and left ~118pt of content — every screen clipped, and the
+  // search field rendered its own query as "ervice" (D-01). Deliberately not a
+  // designed mobile retrieval surface: the vault puts that behind L13/REQ-123.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSED_KEY) === "1",
   );
@@ -235,10 +242,21 @@ export default function Shell({
         Skip to content
       </a>
 
+      {/* The scrim only exists on the drawer breakpoint; above `lg` the sidebar
+          is a column and there is nothing to dismiss. */}
+      {drawerOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setDrawerOpen(false)}
+          className="fixed inset-0 z-30 bg-black/60 lg:hidden"
+        />
+      )}
+
       <aside
-        className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-edge bg-surface/40 transition-[width] duration-150 ${
-          collapsed ? "w-[4.25rem]" : "w-56"
-        }`}
+        className={`fixed inset-y-0 left-0 z-40 flex h-screen w-56 shrink-0 flex-col border-r border-edge bg-surface transition-transform duration-150 lg:sticky lg:top-0 lg:z-auto lg:translate-x-0 lg:bg-surface/40 lg:transition-[width] ${
+          drawerOpen ? "translate-x-0" : "-translate-x-full"
+        } ${collapsed ? "lg:w-[4.25rem]" : "lg:w-56"}`}
       >
         <div className="flex items-center justify-between px-4 py-4">
           <NavLink to="/" aria-label="Bindery home">
@@ -246,7 +264,15 @@ export default function Shell({
           </NavLink>
         </div>
 
-        <nav aria-label="Sections" className="flex-1 overflow-y-auto px-2.5 pb-2">
+        {/* Closing on click rather than on a route change: it is the same
+           moment, it is an event rather than an effect, and it also covers
+           picking the destination you are already on. Above `lg` the
+           drawer is not a drawer and this does nothing. */}
+        <nav
+          aria-label="Sections"
+          onClick={() => setDrawerOpen(false)}
+          className="flex-1 overflow-y-auto px-2.5 pb-2"
+        >
           {visibleGroups(user.is_admin ?? false).map((group) => (
             <div key={group.title} className="mb-4">
               {!collapsed && (
@@ -374,6 +400,30 @@ export default function Shell({
       </aside>
 
       <div className="min-w-0 flex-1">
+        {/* The phone's only route to the sections, and to search. Above `lg`
+            the sidebar carries both and this is not rendered at all. */}
+        <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-edge bg-ink/95 px-3 py-2 backdrop-blur lg:hidden">
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open navigation"
+            aria-expanded={drawerOpen}
+            className="rounded-md border border-field p-2 text-muted"
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+          <NavLink to="/" aria-label="Bindery home" className="min-w-0">
+            <Wordmark collapsed={false} />
+          </NavLink>
+          <button
+            type="button"
+            onClick={onOpenPalette}
+            aria-label="Jump to a page"
+            className="ml-auto rounded-md border border-field p-2 text-muted"
+          >
+            <Search size={16} />
+          </button>
+        </div>
         {notice && (
           <div
             role="status"
@@ -383,7 +433,7 @@ export default function Shell({
             {notice}
           </div>
         )}
-        <main id="content" tabIndex={-1} className="px-6 py-8">
+        <main id="content" tabIndex={-1} className="px-4 py-6 lg:px-6 lg:py-8">
           {children}
         </main>
       </div>

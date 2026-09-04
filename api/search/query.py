@@ -291,14 +291,41 @@ async def search(
         return SearchResponse(query=query, total=0, results=[], facets={}, suggestions=[])
     matches = pages.subquery("matches")
 
-    # One row per document: its best page, and how many of its pages matched.
-    best = sa.select(
+    # One row per *page*, before anything is counted. `_scoped_pages` unions two
+    # branches — a text hit and a known-form hit — and they legitimately produce
+    # the same page twice: "discharge" both appears on the DD-214 and names the
+    # form, which is two reasons for one page, not two matches. Counting rows
+    # therefore inflated `matching_pages`, and the search row told the reader
+    # "1 more matching page" about a document with exactly one. That was
+    # harmless while the count was decoration; it stops being harmless now that
+    # the viewer steps through the set (D-03), because the reader is being
+    # pointed at a page that does not exist.
+    #
+    # Deduplicated by keeping the better-ranked reason, so ranking is unchanged.
+    # Not `count(distinct …) over ()`, which Postgres does not allow.
+    by_page = sa.select(
         matches,
-        sa.func.count().over(partition_by=matches.c.document_id).label("matching_pages"),
         sa.func.row_number()
         .over(
-            partition_by=matches.c.document_id,
-            order_by=(matches.c.rank.desc(), matches.c.page_number),
+            partition_by=(matches.c.document_id, matches.c.page_number),
+            order_by=matches.c.rank.desc(),
+        )
+        .label("page_row_number"),
+    ).subquery("by_page")
+    unique_pages = (
+        sa.select(by_page).where(by_page.c.page_row_number == 1).subquery("unique_pages")
+    )
+
+    # One row per document: its best page, and how many of its pages matched.
+    best = sa.select(
+        unique_pages,
+        sa.func.count()
+        .over(partition_by=unique_pages.c.document_id)
+        .label("matching_pages"),
+        sa.func.row_number()
+        .over(
+            partition_by=unique_pages.c.document_id,
+            order_by=(unique_pages.c.rank.desc(), unique_pages.c.page_number),
         )
         .label("row_number"),
     ).subquery("best")
