@@ -486,10 +486,12 @@ lint error. Cheapest gate first.
   one check here that makes a live network call, and npmjs.org returning 503
   blocked a finished, four-gates-green release from deploying until the two
   cases were told apart. `pip-audit` has no such coupling; it reads the lockfile
-  this repository ships. Before this the only
-  typecheck was `tsc -b` inside `Dockerfile.web`, which runs *after* the tests,
-  so a type error surfaced as an opaque Docker build failure. Everything cheap
-  and database-free belongs here rather than one gate later.
+  this repository ships.
+
+  Everything cheap and database-free belongs in this gate rather than one gate
+  later. Before it existed the only typecheck was `tsc -b` inside
+  `Dockerfile.web`, which runs *after* the tests, so a type error surfaced as an
+  opaque Docker build failure.
 - **unit** — the default pytest run, excluding `live_api` and `slow`.
 - **integration** — `pytest -m slow` in the **worker** image, where the OCR
   toolchain lives. ~30 tests.
