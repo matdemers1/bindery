@@ -1176,6 +1176,17 @@ class OcrPageTextOut(BaseModel):
     characters: int
 
 
+class FileMatchesOut(BaseModel):
+    """Which pages of one file match a query (D-03).
+
+    Page numbers only. The viewer already knows how to render a page and how to
+    label it; what it lacked was the set to step through.
+    """
+
+    query: str
+    pages: list[int]
+
+
 class OcrTextOut(BaseModel):
     source_file_id: uuid.UUID
     original_filename: str | None
@@ -1433,6 +1444,7 @@ __all__ = [
     "FacetOut",
     "FieldProvenanceOut",
     "FieldSourceOut",
+    "FileMatchesOut",
     "FileProgressOut",
     "FileTreeNodeOut",
     "FileTreeOut",

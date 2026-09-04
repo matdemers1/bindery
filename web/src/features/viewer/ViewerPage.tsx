@@ -114,6 +114,52 @@ function Viewer({
       ? document_.document.page_end - document_.document.page_start + 1
       : filePageCount;
 
+  // Every page of the *file* that matches, not just this document's. The whole
+  // point of the product is a term buried in a bundle, and the bundle's other
+  // occurrences are usually in a different constituent document — so this is
+  // deliberately file-scoped and crosses document boundaries (D-03).
+  // Stored with the query it belongs to, and read back only when the two
+  // agree. Keeping a bare number[] meant the previous query's ticks stayed on
+  // screen until the next fetch resolved — pointing at pages that no longer
+  // match, which is the one failure a reader would actually notice.
+  const [fetchedMatches, setFetchedMatches] = useState<{
+    query: string;
+    pages: number[];
+  }>({ query: "", pages: [] });
+  useEffect(() => {
+    const term = query.trim();
+    if (!term || !fileId) return;
+    let live = true;
+    api
+      .fileMatches(fileId, term)
+      .then((r) => live && setFetchedMatches({ query: term, pages: r.pages }))
+      // The page is readable without the match set; a failed fetch must not
+      // replace the document with an error.
+      .catch(() => live && setFetchedMatches({ query: term, pages: [] }));
+    return () => {
+      live = false;
+    };
+  }, [fileId, query]);
+  const matches =
+    query.trim() && fetchedMatches.query === query.trim() ? fetchedMatches.pages : [];
+
+  // Where the current page sits in that set. -1 when the page itself does not
+  // match, which is the ordinary state after stepping with Prev/Next.
+  const matchIndex = matches.indexOf(filePage);
+  const nextMatch = matches.find((p) => p > filePage);
+  const previousMatch = [...matches].reverse().find((p) => p < filePage);
+
+  const goToFilePage = useMemo(
+    () => (page: number) => {
+      const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
+      // Always by file page: a match in another constituent document cannot be
+      // addressed in this document's coordinates, which is exactly why Prev
+      // and Next could never reach it.
+      navigate(`/file/${fileId}/page/${page}${suffix}`, { replace: true });
+    },
+    [fileId, navigate, query],
+  );
+
   const go = useMemo(
     () => (next: number) => {
       const clamped = Math.min(Math.max(next, 1), pageCount);
@@ -193,8 +239,14 @@ function Viewer({
               {isSegment && (
                 <>
                   {" "}
+                  {/* Carry the query across the mode change. Every sibling
+                      link in this file appends the suffix and this one did
+                      not, so stepping up from a document to its file threw
+                      away the highlighting and the match set (D-03). */}
                   <Link
-                    to={`/file/${fileId}/page/${filePage}`}
+                    to={`/file/${fileId}/page/${filePage}${
+                      query ? `?q=${encodeURIComponent(query)}` : ""
+                    }`}
                     className="underline underline-offset-2"
                   >
                     {detail.source_file.original_filename}
@@ -204,7 +256,39 @@ function Viewer({
               {query && <> · highlighting “{query}”</>}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Kept visually apart from Prev/Next, and labelled, because they
+                step different things: Prev/Next walk pages of what you are
+                reading, this walks occurrences of what you searched for —
+                across document boundaries, inside one file. Search could count
+                these and nothing could reach them (D-03). */}
+            {query && matches.length > 0 && (
+              <div className="mr-1 flex items-center gap-1.5 rounded-md border border-field px-2 py-1">
+                <span className="text-xs text-muted">
+                  {matchIndex >= 0
+                    ? `Match ${matchIndex + 1} of ${matches.length}`
+                    : `${matches.length} match${matches.length === 1 ? "" : "es"}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => previousMatch && goToFilePage(previousMatch)}
+                  disabled={previousMatch === undefined}
+                  aria-label="Previous match"
+                  className="rounded px-1 text-sm text-muted transition-colors hover:text-neutral-100 disabled:opacity-30"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => nextMatch && goToFilePage(nextMatch)}
+                  disabled={nextMatch === undefined}
+                  aria-label="Next match"
+                  className="rounded px-1 text-sm text-muted transition-colors hover:text-neutral-100 disabled:opacity-30"
+                >
+                  ↓
+                </button>
+              </div>
+            )}
             <NavButton onClick={() => go(localPage - 1)} disabled={localPage <= 1}>
               ← Prev
             </NavButton>

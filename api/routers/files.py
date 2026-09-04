@@ -11,7 +11,7 @@ import uuid
 from collections import OrderedDict
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,7 @@ from api.db import repository
 from api.db.models import AppUser
 from api.db.session import get_session
 from api.schemas import (
+    FileMatchesOut,
     OcrPageTextOut,
     OcrTextOut,
     PageOut,
@@ -252,6 +253,29 @@ async def file_pdf(
         filename=source_file.original_filename or f"{source_file.sha256[:12]}.pdf",
         headers={"Cache-Control": IMMUTABLE},
     )
+
+
+@router.get("/{source_file_id}/matches", response_model=FileMatchesOut)
+async def file_matches(
+    source_file_id: uuid.UUID,
+    q: str = Query("", description="The same query the results page ran"),
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> FileMatchesOut:
+    """Every page of this file that matches `q`, in page order.
+
+    Search finds the first occurrence and the viewer opens on it; this is what
+    lets the reader reach the second. Without it the results page could count
+    the other matches — “1 more matching page” — and nothing in the product
+    could get to them, which is the differentiator stopping one step short of
+    the thing nobody else does (D-03).
+    """
+    source_file = await repository.get_source_file(session, user.id, source_file_id)
+    if source_file is None:
+        raise _NOT_FOUND
+
+    pages = await repository.matching_pages(session, user.id, source_file_id, q)
+    return FileMatchesOut(query=q, pages=list(pages))
 
 
 @router.get("/{source_file_id}/text", response_model=OcrTextOut)

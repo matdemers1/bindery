@@ -231,6 +231,45 @@ async def list_pages(
     return result.scalars().all()
 
 
+async def matching_pages(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    source_file_id: uuid.UUID,
+    query: str,
+) -> Sequence[int]:
+    """Which pages of one file match a query, in page order.
+
+    The set behind “find next” inside a bundle. It reuses `search`'s own
+    `websearch_to_tsquery` so the ticks on the viewer's rail can never disagree
+    with the results the user clicked through from — two matchers would be two
+    definitions of “matches”, and the one people would notice is the rail
+    pointing at a page that turns out not to contain the word.
+
+    Nothing here needs to special-case the private vault. Sealing a document
+    deletes its rows from `page` outright, so a vaulted range is not absent
+    because this query hides it — it is absent because there is nothing there.
+    The rail therefore renders it as an unlabelled gap, which is exactly what
+    ADR-012 requires: a whole-file view must not disclose that a sealed
+    document exists, nor where it sits.
+    """
+    from api.search.query import _tsquery
+
+    bound = await scope_for(session, user_id)
+    if not bound.visible or not query.strip():
+        return []
+    tsquery = _tsquery(query)
+    result = await session.execute(
+        sa.select(Page.page_number)
+        .where(
+            bound.only(Page),
+            Page.source_file_id == source_file_id,
+            Page.text_tsv.op("@@")(tsquery),
+        )
+        .order_by(Page.page_number)
+    )
+    return [row[0] for row in result.all()]
+
+
 async def list_page_summaries(
     session: AsyncSession, user_id: uuid.UUID, source_file_id: uuid.UUID
 ) -> Sequence[sa.Row]:

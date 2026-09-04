@@ -184,3 +184,61 @@ async def test_trigram_suggests_a_correction_when_nothing_matched(
 async def test_suggestions_are_silent_when_there_are_results(client, bundle) -> None:
     body = (await client.get("/api/search", params={"q": "honda"})).json()
     assert body["suggestions"] == []
+
+
+# --------------------------------------------------------------------------
+# Find-next inside a bundle (D-03)
+# --------------------------------------------------------------------------
+
+
+async def test_the_matching_pages_of_one_file_are_listed_in_page_order(
+    client, bundle
+) -> None:
+    """The set behind “find next”.
+
+    Search finds the first occurrence and the viewer opens on it. Without this
+    the results page could say “1 more matching page” and nothing in the
+    product could reach it — the differentiator stopping one step short of the
+    thing nobody else does.
+    """
+    _user, _library, source_file = bundle
+
+    body = (
+        await client.get(f"/api/files/{source_file.id}/matches", params={"q": "honda"})
+    ).json()
+
+    # Page 12 (insurance declarations) and page 88 (service invoice) both
+    # mention the car; page 47 does not.
+    assert body["pages"] == [12, 88]
+    assert body["query"] == "honda"
+
+
+async def test_the_ticks_agree_with_what_search_matched(client, bundle) -> None:
+    """One matcher, not two.
+
+    A second definition of “matches” would show up as the rail pointing at a
+    page that turns out not to contain the word — the one failure a reader
+    would actually notice.
+    """
+    _user, _library, source_file = bundle
+
+    matches = (
+        await client.get(f"/api/files/{source_file.id}/matches", params={"q": "discharge"})
+    ).json()["pages"]
+    hit = (
+        await client.get(
+            "/api/search",
+            params={"q": "discharge", "source_file_id": str(source_file.id)},
+        )
+    ).json()
+
+    assert matches == [47]
+    assert hit["results"][0]["best_page"]["page_number"] in matches
+
+
+async def test_an_empty_query_matches_nothing_rather_than_everything(
+    client, bundle
+) -> None:
+    _user, _library, source_file = bundle
+    body = (await client.get(f"/api/files/{source_file.id}/matches")).json()
+    assert body["pages"] == []

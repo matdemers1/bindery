@@ -83,6 +83,12 @@ export interface UploadResult {
 
 // --- Search ----------------------------------------------------------------
 
+export interface FileMatches {
+  query: string;
+  /** Every page of the file that matches, in page order (D-03). */
+  pages: number[];
+}
+
 export interface PageHit {
   /** Absolute position in the source file. */
   page_number: number;
@@ -632,6 +638,9 @@ export const api = {
     }),
   undoSegments: (fileId: string) =>
     request<SegmentList>(`/files/${fileId}/segments/undo`, { method: "POST" }),
+  /** Which pages of one file match a query — the set behind “find next”. */
+  fileMatches: (id: string, q: string) =>
+    request<FileMatches>(`/files/${id}/matches?q=${encodeURIComponent(q)}`),
   pageBoxes: (id: string, page: number, signal?: AbortSignal) =>
     request<PageBoxes>(`/files/${id}/pages/${page}/boxes`, { signal }),
 
