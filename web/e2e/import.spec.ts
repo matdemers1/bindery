@@ -39,9 +39,10 @@ test("previous imports say what happened", async ({ signedIn: page }) => {
 
   await rows.first().click();
   // `.first()`: the active run above the history renders the same detail, so
-  // there are two of each of these on the page by design.
-  await expect(page.getByRole("button", { name: /worker log/ }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: /failed/ }).first()).toBeVisible();
+  // there are two of each of these on the page by design. Radios, not buttons:
+  // the filter is one choice out of five, which is what a radiogroup says.
+  await expect(page.getByRole("radio", { name: /worker log/ }).first()).toBeVisible();
+  await expect(page.getByRole("radio", { name: /failed/ }).first()).toBeVisible();
 });
 
 test("into the vault is not offered as a live choice while the vault is shut", async ({
