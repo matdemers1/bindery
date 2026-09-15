@@ -580,11 +580,33 @@ async def test_complete_requires_a_session(archive) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_create_user_on_an_empty_archive_records_the_setup_owner(
+async def test_create_user_without_owner_makes_an_ordinary_account(archive, client) -> None:
+    """CI, scripts and the test stack make their first account this way.
+
+    An account whose first sign-in is a two-factor ceremony is not the account a
+    script asked for: every e2e spec would have landed on the setup screen.
+    """
+    await _issue(archive)
+    await cli._create_user("script@example.test", GOOD_PASSWORD, "Demo", "personal")
+    assert await _setting(archive, first_run.OWNER_USER_ID) is None
+    assert await _state(client) == "complete"
+
+
+async def test_owner_is_refused_once_the_archive_has_accounts(archive) -> None:
+    await cli._create_user("first@example.test", GOOD_PASSWORD, "Demo", "personal")
+    with pytest.raises(SystemExit):
+        await cli._create_user(
+            "second@example.test", GOOD_PASSWORD, "Theirs", "personal", owner=True
+        )
+
+
+async def test_create_user_owner_on_an_empty_archive_records_the_setup_owner(
     archive, client, capsys
 ) -> None:
     await _issue(archive)
-    await cli._create_user("First@Example.test", GOOD_PASSWORD, "Household", "personal")
+    await cli._create_user(
+        "First@Example.test", GOOD_PASSWORD, "Household", "personal", owner=True
+    )
 
     async with archive() as session:
         first = (

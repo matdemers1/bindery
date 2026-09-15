@@ -234,10 +234,14 @@ docker exec bindery-api alembic upgrade head
 # The 14 known forms — DD-214, W-2, deed, title, passport…
 docker exec bindery-api python -m api.cli seed-forms
 
-# There is no self-service registration.
-docker exec -it bindery-api python -m api.cli create-user \
-  --email matthew@demers.dev --library "Household"
+# A fresh install is claimed in the browser with this code (Phase 19).
+docker logs bindery-api 2>&1 | grep 'bindery setup'
 ```
+
+Open the site and follow **Set up this archive**: the code above, the owner's
+account, an authenticator, the recovery codes. That account ends as the
+administrator. `docker exec bindery-api python -m api.cli setup-code` prints a
+fresh code if the first one has expired or scrolled away.
 
 ---
 

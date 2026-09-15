@@ -100,7 +100,9 @@ async def _reprocess(prompt_version: str, dry_run: bool) -> None:
         print(f"queued {queued} re-classification(s) for prompt version {prompt_version}")
 
 
-async def _create_user(email: str, password: str, library_name: str, kind: str) -> None:
+async def _create_user(
+    email: str, password: str, library_name: str, kind: str, *, owner: bool = False
+) -> None:
     from api import first_run
 
     email = email.strip().lower()
@@ -109,6 +111,13 @@ async def _create_user(email: str, password: str, library_name: str, kind: str) 
         # is empty" and the insert below (Phase 19).
         await first_run.lock(session)
         first_account = await first_run.archive_is_empty(session)
+        if owner and not first_account:
+            print(
+                "--owner is for the first account on an empty archive; this one "
+                "already has accounts",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
 
         existing = await session.execute(sa.select(AppUser).where(AppUser.email == email))
         if existing.scalar_one_or_none() is not None:
@@ -137,20 +146,25 @@ async def _create_user(email: str, password: str, library_name: str, kind: str) 
             entity_id=user.id,
             action="create",
             actor_type=ActorType.SYSTEM,
-            after={"email": email, "library": library_name, "setup_owner": first_account},
+            after={"email": email, "library": library_name, "setup_owner": owner},
         )
-        if first_account:
-            # The first account on an empty archive is the setup owner, exactly
-            # as if it had been claimed in the browser: its first sign-in resumes
-            # at the two-factor step and ends with administrator rights. Admin
-            # is *not* granted here — without TOTP, grant_admin would refuse,
-            # and this path must not be the way around REQ-156.
+        if owner:
+            # `--owner` makes this the setup owner, exactly as if the archive had
+            # been claimed in the browser: its first sign-in resumes at the
+            # two-factor step and ends with administrator rights. Admin is *not*
+            # granted here — without TOTP, grant_admin would refuse, and this
+            # path must not be the way around REQ-156.
+            #
+            # Opt-in, not implied by an empty archive: scripts, CI and the test
+            # stack create their first account this way too, and an account
+            # whose first sign-in is a two-factor ceremony is not the account a
+            # script asked for. The browser claim is how an owner sets up.
             await first_run.record_cli_owner(session, user)
         await session.commit()
 
         print(f"created user {email}")
         print(f"created library {library_name} ({library.id}) with role owner")
-        if first_account:
+        if owner:
             print(
                 "this is the first account: sign in and enrol two-factor "
                 "authentication to finish setup and become administrator"
@@ -368,6 +382,11 @@ def main() -> None:
     create.add_argument("--library", default="Personal")
     create.add_argument("--kind", default=LibraryKind.PERSONAL.value,
                         choices=[k.value for k in LibraryKind])
+    create.add_argument(
+        "--owner", action="store_true",
+        help="make this, the first account, the setup owner: its first sign-in "
+             "enrols two-factor and ends as administrator",
+    )
 
     sub.add_parser(
         "setup-code", help="print a fresh setup code while the archive is unclaimed"
@@ -433,7 +452,7 @@ def main() -> None:
         if len(password) < 12:
             print("password must be at least 12 characters", file=sys.stderr)
             raise SystemExit(1)
-        asyncio.run(_create_user(args.email, password, args.library, args.kind))
+        asyncio.run(_create_user(args.email, password, args.library, args.kind, owner=args.owner))
 
 
 if __name__ == "__main__":

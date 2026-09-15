@@ -56,8 +56,17 @@ make build
 make up
 make migrate
 make seed-forms
-make create-user email=you@example.com library=Household
+docker compose --env-file .env -f infra/docker-compose.yml logs api | grep 'bindery setup'
 ```
+
+Then open Bindery in a browser. A fresh install shows **Set up this archive**:
+enter the setup code from that log, choose the owner's email and password,
+enrol an authenticator, and save the recovery codes. That account is the
+administrator. The code works once, expires in a day, and a new one is printed
+with `docker compose … exec api python -m api.cli setup-code`.
+
+The setup code is what stops whoever finds the URL first from owning the
+archive: only someone who can read this host's container logs has it.
 
 Then `make tunnel` to bring up ingress, and reach the stack through Cloudflare at
 `$BINDERY_HOSTNAME`.
@@ -107,7 +116,7 @@ below is the short version.
 | `make lifecycle-check` | audit the offsite bucket's expiry rules by hand (the worker also does it hourly) |
 | `make enqueue-stage stage=segment` | re-run a pipeline stage over every file |
 | `make reprocess prompt=v1` | re-classify documents left on an older prompt version |
-| `make create-user email=… library=…` | there is no self-service registration |
+| `make create-user email=… library=… [owner=1]` | scripted accounts (CI, tests); a fresh install is claimed in the browser instead, and `owner=1` makes a scripted first account finish setup the same way |
 | `make psql` / `make logs` / `make shell` | the usual |
 
 ## Deploying to the ZimaOS host

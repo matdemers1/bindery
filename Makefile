@@ -118,8 +118,8 @@ enqueue-stage:    ## re-run a stage over every file: make enqueue-stage stage=se
 reprocess:        ## re-classify documents left on an older prompt: make reprocess prompt=v1
 	$(COMPOSE) exec api python -m api.cli reprocess --prompt-version "$(prompt)"
 
-create-user:      ## make create-user email=you@example.com library=Household
-	$(COMPOSE) exec api python -m api.cli create-user --email "$(email)" --library "$(library)"
+create-user:      ## make create-user email=you@example.com library=Household [owner=1] — a fresh install is claimed in the browser instead
+	$(COMPOSE) exec api python -m api.cli create-user --email "$(email)" --library "$(library)" $(if $(owner),--owner,)
 
 # Capture runs *inside* the compose network, sharing the web container's network
 # namespace, and there is no host-side alternative: no service publishes a port
