@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 
-import { ApiError, api, type Library, type User } from "./api";
+import { ApiError, api, setupApi, type Library, type SetupState, type User } from "./api";
 import CommandPalette from "./features/palette/CommandPalette";
 import PipelinePage from "./features/pipeline/PipelinePage";
 import AddPage from "./features/add/AddPage";
@@ -36,6 +36,8 @@ const RulesPage = lazy(() => import("./features/rules/RulesPage"));
 const SegmentationPage = lazy(() => import("./features/segmentation/SegmentationPage"));
 const SettingsPage = lazy(() => import("./features/settings/SettingsPage"));
 const TrustPage = lazy(() => import("./features/trust/TrustPage"));
+// Seen once in an archive's life, by one person.
+const SetupFlow = lazy(() => import("./features/entry/SetupFlow"));
 
 type State = { status: "loading" } | { status: "out" } | { status: "in"; user: User };
 
@@ -43,8 +45,14 @@ export default function App() {
   const [state, setState] = useState<State>({ status: "loading" });
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Whether this archive still needs claiming (Phase 19). Read on every refresh,
+  // because claiming and finishing setup both change it. A failure to read it
+  // falls back to the ordinary sign-in, which is right for every archive that
+  // has ever been set up.
+  const [setup, setSetup] = useState<SetupState["state"] | null>(null);
 
   const refresh = useCallback(async () => {
+    setSetup(await setupApi.state().then((s) => s.state, () => "complete" as const));
     try {
       const user = await api.me();
       setState({ status: "in", user });
@@ -100,8 +108,19 @@ export default function App() {
     return <ResetPage />;
   }
 
-  if (state.status === "loading") {
+  if (state.status === "loading" || setup === null) {
     return <Centered>Loading…</Centered>;
+  }
+
+  // A fresh install is claimed in the browser, and an owner who signed out
+  // half-way resumes at the second factor once they sign back in.
+  if ((setup === "unclaimed" && state.status === "out") ||
+      (setup === "needs_second_factor" && state.status === "in")) {
+    return (
+      <Suspense fallback={<Centered>Loading…</Centered>}>
+        <SetupFlow stage={setup === "unclaimed" ? "claim" : "secure"} onChanged={refresh} />
+      </Suspense>
+    );
   }
   if (state.status === "out") {
     return <Login onSignedIn={refresh} />;

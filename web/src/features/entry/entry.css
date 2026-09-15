@@ -1,0 +1,129 @@
+/* The entry screens (Phase 19). Only what utilities cannot say: the paper in
+   the illustration, its arrival, and the link treatment every entry screen
+   shares. */
+
+/* A text link, underlined — recovery is the least findable thing on a sign-in
+   page when it is styled as a caption (audit finding A11Y-11). Used on <a> and
+   on <button>, so it resets the button's own chrome. */
+.entry-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 500;
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.entry-link:hover { color: var(--color-accent-hover); }
+.entry-link--quiet { color: var(--color-fg-muted); }
+.entry-link--quiet:hover { color: var(--color-fg); }
+.entry-link:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--radius-xs);
+}
+
+/* d3-allow: paper — a scanned page is near-white in both themes; drawing it in a theme token would draw something that is not a scan */
+.entry-paper { fill: #e9eaf0; }
+/* d3-allow: printed text on that paper, the grey a scanner renders black ink as */
+.entry-ink { fill: #b9bdcb; }
+
+/* The bundle fans out once on first paint: back pages first, then the lifted
+   page with its match. Backwards fill only, so nothing keeps a transform. */
+.entry-page {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: entry-fan var(--dur-5) var(--ease-spring) backwards;
+  animation-delay: calc(var(--entry-page-i, 0) * 70ms + 120ms);
+}
+.entry-page--lifted { animation-delay: 360ms; }
+@keyframes entry-fan {
+  from { opacity: 0; transform: translateY(14px) rotate(-6deg); }
+}
+.entry-mark {
+  fill: none;
+  stroke-dasharray: 300;
+  animation: entry-mark 700ms var(--ease-out) 720ms backwards;
+}
+@keyframes entry-mark {
+  from { stroke-dashoffset: 300; }
+}
+
+/* Setup progress: three bars that fill as the steps are reached. */
+.entry-step {
+  position: relative;
+  flex: 1;
+  height: var(--space-4);
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-raised);
+}
+.entry-step::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--dur-5) var(--ease-spring);
+}
+.entry-step[data-on]::after { transform: scaleX(1); }
+
+/* The QR code sits on white with its own quiet zone — cameras read contrast,
+   and the dark page behind a transparent code is unscannable. */
+.entry-qr {
+  flex: none;
+  width: 176px;
+  height: 176px;
+  padding: var(--space-8);
+  border-radius: var(--radius-lg);
+  /* d3-allow: a QR code needs a white ground to scan, in both themes */
+  background: #ffffff;
+  animation: entry-qr var(--dur-5) var(--ease-spring) backwards;
+}
+.entry-qr svg { display: block; width: 100%; height: 100%; }
+.entry-qr[data-loading] { background: var(--color-surface-raised); animation: none; }
+@keyframes entry-qr {
+  from { opacity: 0; transform: scale(.92); }
+}
+
+/* Recovery codes arrive one after another, like they are being dealt. */
+.entry-code {
+  animation: entry-deal var(--dur-4) var(--ease-out) backwards;
+  animation-delay: calc(var(--entry-code-i, 0) * 45ms);
+}
+@keyframes entry-deal {
+  from { opacity: 0; transform: translateY(6px); }
+}
+
+/* A link that is the one way on from a finished screen, sized like the
+   buttons beside it on every other entry screen. */
+.entry-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  padding: 0 var(--space-16);
+  border: var(--border-width) solid var(--color-border-field);
+  border-radius: var(--radius-md);
+  color: var(--color-fg);
+  font-size: var(--text-14);
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color var(--motion-hover), border-color var(--motion-hover);
+}
+.entry-button:hover { background: var(--color-surface-hover); }
+.entry-button--primary {
+  border-color: transparent;
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+.entry-button--primary:hover { background: var(--color-accent-hover); }
+.entry-button:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}

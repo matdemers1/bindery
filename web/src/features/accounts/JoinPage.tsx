@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { Alert, Button, FormField, Input, PasswordInput, Skeleton } from "@d3cloud/ui";
 
 import { ApiError, accountsApi } from "../../api";
-import { Logo } from "../../components/brand/Logo";
-import { Button } from "@d3cloud/ui";
+import { EntryHeading, EntryShell } from "../entry/EntryShell";
+import { judgePassword } from "../entry/strength";
 
 function humanBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -33,7 +34,6 @@ export default function JoinPage({ token }: { token: string }) {
   > | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,10 +59,6 @@ export default function JoinPage({ token }: { token: string }) {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (password !== confirm) {
-      setError("Those two passwords are different.");
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
@@ -80,118 +76,99 @@ export default function JoinPage({ token }: { token: string }) {
 
   if (problem) {
     return (
-      <Centered>
-        <Logo size={44} variant="mascot" className="text-fg" />
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight">Bindery</h1>
-        <p className="mt-3 text-sm text-muted">{problem}</p>
-        <p className="mt-4 text-sm text-muted">
-          Ask whoever sent it for a new one — invitations expire, and each works
-          once.
-        </p>
-      </Centered>
+      <EntryShell>
+        {/* The server's own words lead ("that invitation has expired"), in
+            sentence case, because they are the only specific fact here. */}
+        <EntryHeading title="This link can't be used">
+          {problem.charAt(0).toUpperCase() + problem.slice(1)}.
+        </EntryHeading>
+        <Alert tone="info">
+          Invitations work once and expire. Ask whoever sent it for a new one — and
+          if you already joined, your account is still there.
+        </Alert>
+        <a href="/" className="entry-button mt-6">
+          Go to sign in
+        </a>
+      </EntryShell>
     );
   }
 
   if (!invite) {
-    return <Centered>Checking that link…</Centered>;
+    return (
+      <EntryShell wide>
+        <div aria-busy="true" aria-label="Checking that link" className="grid gap-3">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-7 w-56" />
+          <Skeleton className="mt-4 h-16 w-full" />
+        </div>
+      </EntryShell>
+    );
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center p-6">
-      <form
-        onSubmit={submit}
-        className="w-full max-w-md rounded-xl border border-edge bg-surface p-8"
-      >
-        <Logo size={44} variant="mascot" className="text-fg" />
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight">
-          Set up your archive
-        </h1>
-        <p className="mt-1 text-sm text-muted">
-          for <span className="text-fg">{invite.email}</span>
+    <EntryShell wide>
+      <EntryHeading eyebrow="Invitation" title="Join the archive">
+        As <span className="font-medium text-fg">{invite.email}</span>.
+      </EntryHeading>
+
+      <div className="mb-6 grid gap-3 rounded-lg border border-border bg-bg-sunken p-4 text-sm text-fg-muted">
+        <p>
+          Your documents go in{" "}
+          <span className="font-medium text-fg">{invite.library_name}</span>
+          {invite.storage_quota_bytes ? (
+            <>, with {humanBytes(invite.storage_quota_bytes)} of space</>
+          ) : null}
+          .
         </p>
-
-        {invite.note && (
-          <p className="mt-4 rounded-lg border border-edge bg-ink p-3 text-sm text-muted">
-            {invite.note}
-          </p>
-        )}
-
-        <ul className="mt-5 space-y-2 text-sm text-muted">
+        {invite.note ? (
+          <p className="border-l-2 border-border pl-3 text-fg italic">{invite.note}</p>
+        ) : null}
+        <ul className="grid gap-2 border-t border-border pt-3">
           <li>
-            Your documents go in <span className="text-fg">{invite.library_name}</span>,
-            which only you can open.
+            <span className="font-medium text-fg">Only you can open your library.</span>{" "}
+            Whoever runs this server can see how much space you use and whether a
+            file went wrong — not what is in it.
           </li>
           <li>
-            <span className="text-fg">
-              Whoever runs this server cannot read them.
-            </span>{" "}
-            They can see how much space you are using and whether anything went
-            wrong with a file — not what is in it.
+            <span className="font-medium text-fg">Nothing here is ever deleted automatically.</span>
           </li>
-          {invite.storage_quota_bytes && (
-            <li>
-              You have {humanBytes(invite.storage_quota_bytes)} of space. Ask for
-              more if you run out.
-            </li>
-          )}
-          <li>Nothing here is ever deleted automatically.</li>
         </ul>
+      </div>
 
-        <label className="mt-6 mb-4 block text-sm">
-          <span className="mb-1 block text-muted">Your name</span>
-          <input
+      <form onSubmit={submit} className="grid gap-5">
+        <FormField label="Your name" optional>
+          <Input
+            size="lg"
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
             autoComplete="name"
-            placeholder="Optional"
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
           />
-        </label>
+        </FormField>
 
-        <label className="mb-4 block text-sm">
-          <span className="mb-1 block text-muted">Choose a password</span>
-          <input
-            type="password"
+        {/* Hidden, so a password manager saves the new password against the
+            right address rather than against nothing. */}
+        <input type="email" name="username" autoComplete="username" value={invite.email} readOnly hidden />
+
+        <FormField
+          label="Choose a password"
+          error={error ?? undefined}
+          help="At least 12 characters. Four unrelated words beat one clever word."
+        >
+          <PasswordInput
+            size="lg"
             required
             minLength={12}
             autoComplete="new-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
+            strength={judgePassword(password, invite.email)}
           />
-          <span className="mt-1 block text-xs text-muted">
-            At least 12 characters. Four unrelated words beats one clever word.
-          </span>
-        </label>
+        </FormField>
 
-        <label className="mb-6 block text-sm">
-          <span className="mb-1 block text-muted">And again</span>
-          <input
-            type="password"
-            required
-            autoComplete="new-password"
-            value={confirm}
-            onChange={(event) => setConfirm(event.target.value)}
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
-          />
-        </label>
-
-        {error && <p className="mb-4 text-sm text-danger">{error}</p>}
-
-        <Button variant="primary" className="w-full" type="submit" disabled={busy}>
-          {busy ? "Setting up…" : "Create my archive"}
+        <Button variant="primary" size="lg" type="submit" className="w-full" loading={busy}>
+          Join and sign in
         </Button>
       </form>
-    </div>
-  );
-}
-
-function Centered({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex min-h-full items-center justify-center p-6">
-      <div className="w-full max-w-sm rounded-xl border border-edge bg-surface p-8 text-center">
-        {children}
-      </div>
-    </div>
+    </EntryShell>
   );
 }

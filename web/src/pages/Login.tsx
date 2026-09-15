@@ -1,142 +1,215 @@
-import { useId, useState } from "react";
+import { useRef, useState } from "react";
+import { Button, CodeInput, FormField, Input, PasswordInput, type CodeInputStatus } from "@d3cloud/ui";
 
 import { ApiError, api } from "../api";
-import { Logo } from "../components/brand/Logo";
-import { Button } from "@d3cloud/ui";
+import { EntryHeading, EntryShell } from "../features/entry/EntryShell";
+import { retryMessage } from "../features/entry/messages";
 
+type Step = "password" | "code";
+type CodeKind = "totp" | "recovery";
+
+/**
+ * Sign in (Phase 19, REQ-202).
+ *
+ * Two steps, and the second only exists for an account with two-factor on. The
+ * server asks for it only after the password was right, so moving to the code
+ * screen tells an anonymous caller nothing they did not already have.
+ *
+ * The code submits itself when the last box is filled — paste a code, or let
+ * the phone's "from your authenticator" suggestion fill it, and there is nothing
+ * left to press. A rejected code shakes, says so in words, and clears itself
+ * once the shake has finished, so the next attempt starts from an empty row.
+ */
 export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
+  const [step, setStep] = useState<Step>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
-  const [needsCode, setNeedsCode] = useState(false);
+  const [codeKind, setCodeKind] = useState<CodeKind>("totp");
+  const [codeStatus, setCodeStatus] = useState<CodeInputStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // A rejected password and a rate-limit delay are both things a sighted user
-  // reads the moment they appear; without a live region neither is spoken at
-  // all, and the field that has to be retyped says nothing about them.
-  const errorId = useId();
-  const describedBy = error ? errorId : undefined;
+  const clearing = useRef<number | undefined>(undefined);
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
+  async function attempt(withCode?: string) {
     setBusy(true);
     setError(null);
     try {
-      await api.login(email, password, code || undefined);
+      await api.login(email, password, withCode);
+      if (withCode) setCodeStatus("success");
       await onSignedIn();
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 429) {
-        // The throttle names a delay; saying so beats a login that just
-        // stops working.
-        const seconds = caught.retryAfter ?? 60;
-        setError(
-          `Too many attempts. Try again in ${
-            seconds < 90 ? `${seconds} seconds` : `${Math.ceil(seconds / 60)} minutes`
-          }.`,
-        );
+        setError(retryMessage(caught.retryAfter));
+        if (withCode) reject();
       } else if (
         caught instanceof ApiError &&
         caught.status === 401 &&
         caught.message.includes("second factor")
       ) {
-        // Only ever reached once the password was right, so asking for the
-        // code here tells an anonymous caller nothing they did not have.
-        setNeedsCode(true);
-        setError(needsCode ? "That code was not accepted." : null);
+        if (step === "password") {
+          setStep("code");
+        } else {
+          setError(
+            codeKind === "totp"
+              ? "That code was not accepted. Codes change every 30 seconds — try the one showing now."
+              : "That recovery code was not accepted. Each one works once.",
+          );
+          reject();
+        }
+      } else if (caught instanceof ApiError && caught.status === 401) {
+        setError("That email and password do not match an account here.");
       } else {
-        setError(
-          caught instanceof ApiError && caught.status === 401
-            ? "Those credentials were not accepted."
-            : "Could not reach the server.",
-        );
+        setError("Could not reach the server.");
       }
     } finally {
       setBusy(false);
     }
   }
 
-  return (
-    <div className="flex h-full items-center justify-center p-6">
-      <form
-        onSubmit={submit}
-        className="w-full max-w-sm rounded-xl border border-edge bg-surface p-8"
-      >
-        {/* The mascot rather than the plain mark: this is the one screen
-            where nothing has happened yet and a little warmth costs nothing. */}
-        <Logo size={44} variant="mascot" className="text-fg" />
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight">Bindery</h1>
-        <p className="mt-1 mb-6 text-sm text-muted">
-          Accounts are by invitation. If someone sent you a link, open that
-          instead — it will set your password and sign you in.
-        </p>
+  function reject() {
+    setCodeStatus("error");
+    // Cleared after the shake, not during it: the row empties once it has
+    // finished saying no, and focus stays in the field for the next try.
+    window.clearTimeout(clearing.current);
+    clearing.current = window.setTimeout(() => setCode(""), 460);
+  }
 
-        <label className="mb-4 block text-sm">
-          <span className="mb-1 block text-muted">Email</span>
-          <input
+  function changeCode(next: string) {
+    setCode(next);
+    if (codeStatus !== "idle") setCodeStatus("idle");
+  }
+
+  if (step === "code") {
+    const recovery = codeKind === "recovery";
+    return (
+      <EntryShell>
+        <EntryHeading eyebrow="Two-step check" title={recovery ? "Use a recovery code" : "Enter your code"}>
+          {recovery ? (
+            <>One of the codes you saved when you turned on two-factor. Each works once.</>
+          ) : (
+            <>
+              From the authenticator app on your phone, for{" "}
+              <span className="font-medium text-fg">{email}</span>.
+            </>
+          )}
+        </EntryHeading>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void attempt(code);
+          }}
+          // Spacing from the parent: kit components carry no margin by design.
+          className="grid gap-6"
+        >
+          <FormField
+            label={recovery ? "Recovery code" : "Six-digit code"}
+            error={error ?? undefined}
+          >
+            <CodeInput
+              key={codeKind}
+              autoFocus
+              value={code}
+              status={codeStatus}
+              onValueChange={changeCode}
+              // Not disabled while checking: a disabled field drops focus, and
+              // after a rejection the next try should start without a click.
+              onComplete={(full) => {
+                if (!busy) void attempt(full);
+              }}
+              {...(recovery
+                ? { mode: "alphanumeric" as const, length: 10, groups: [5, 5], autoComplete: "off" }
+                : { mode: "numeric" as const, length: 6 })}
+            />
+          </FormField>
+
+          <Button variant="primary" size="lg" type="submit" className="w-full" loading={busy}>
+            Confirm
+          </Button>
+        </form>
+
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5 text-sm">
+          <button
+            type="button"
+            className="entry-link"
+            onClick={() => {
+              setCodeKind(recovery ? "totp" : "recovery");
+              setCode("");
+              setCodeStatus("idle");
+              setError(null);
+            }}
+          >
+            {recovery ? "Use my authenticator instead" : "Lost your phone? Use a recovery code"}
+          </button>
+          <button
+            type="button"
+            className="entry-link entry-link--quiet"
+            onClick={() => {
+              setStep("password");
+              setCode("");
+              setCodeKind("totp");
+              setCodeStatus("idle");
+              setError(null);
+            }}
+          >
+            Start over
+          </button>
+        </div>
+      </EntryShell>
+    );
+  }
+
+  return (
+    <EntryShell>
+      <EntryHeading title="Sign in">Welcome back to the archive.</EntryHeading>
+
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void attempt();
+        }}
+        className="grid gap-5"
+      >
+        <FormField label="Email">
+          <Input
+            size="lg"
             type="email"
             required
             autoComplete="username"
+            autoFocus
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
           />
-        </label>
+        </FormField>
 
-        <label className="mb-6 block text-sm">
-          <span className="mb-1 block text-muted">Password</span>
-          <input
-            type="password"
+        <FormField label="Password" error={error ?? undefined}>
+          <PasswordInput
+            size="lg"
             required
             autoComplete="current-password"
-            aria-invalid={Boolean(error) && !needsCode}
-            aria-describedby={needsCode ? undefined : describedBy}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
           />
-        </label>
+        </FormField>
 
-        {needsCode && (
-          <label className="mb-6 block text-sm">
-            <span className="mb-1 block text-muted">
-              Code from your authenticator
-            </span>
-            <input
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              autoFocus
-              required
-              aria-invalid={Boolean(error)}
-              aria-describedby={describedBy}
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder="123456 — or a recovery code"
-              className="w-full rounded-md border border-field bg-ink px-3 py-2 font-mono tracking-widest outline-none focus:border-accent"
-            />
-          </label>
-        )}
-
-        {error && (
-          <p id={errorId} role="alert" className="mb-4 text-sm text-danger">
-            {error}
-          </p>
-        )}
-
-        <Button variant="primary" className="w-full" type="submit" disabled={busy}>
-          {busy ? "Signing in…" : needsCode ? "Confirm" : "Sign in"}
+        <Button variant="primary" size="lg" type="submit" className="w-full" loading={busy}>
+          Sign in
         </Button>
-
-        {/* The only way back in. There is no email here to send a link to, so
-            recovery is an administrator reading a code out and this form
-            accepting it — and a code with nowhere to be typed is an account
-            lost. A whole-document load: /reset is handled above the router. */}
-        <a
-          href="/reset"
-          className="mt-4 block text-center text-sm text-muted hover:text-fg"
-        >
-          I have a reset code
-        </a>
       </form>
-    </div>
+
+      <div className="mt-6 grid gap-2 border-t border-border pt-5 text-sm leading-relaxed text-fg-muted">
+        <p>
+          Locked out?{" "}
+          {/* A whole-document load: /reset is handled above the router. */}
+          <a href="/reset" className="entry-link">
+            Use a reset code
+          </a>{" "}
+          from whoever runs this archive.
+        </p>
+        <p>New here? Accounts are by invitation — open the link you were sent.</p>
+      </div>
+    </EntryShell>
   );
 }
+

@@ -1543,7 +1543,7 @@ export const accountsApi = {
 
   totpStatus: () => request<{ enabled: boolean; required: boolean }>("/account/totp"),
   totpStart: () =>
-    request<{ secret: string; uri: string }>("/account/totp/start", { method: "POST" }),
+    request<{ secret: string; uri: string; qr_svg: string }>("/account/totp/start", { method: "POST" }),
   totpConfirm: (code: string) =>
     request<string[]>("/account/totp/confirm", {
       method: "POST",
@@ -1627,4 +1627,34 @@ export interface VersionReport {
 
 export const versionApi = {
   report: () => request<VersionReport>("/version"),
+};
+
+// ---------------------------------------------------------------------------
+// First-run setup (Phase 19, REQ-200, REQ-201) — unauthenticated until claimed
+// ---------------------------------------------------------------------------
+
+export interface SetupState {
+  state: "unclaimed" | "needs_second_factor" | "complete";
+}
+
+export interface SetupClaim {
+  /** The printed setup code, in any formatting — dashes and case are ignored. */
+  code: string;
+  email: string;
+  password: string;
+  display_name?: string | null;
+  library_name: string;
+}
+
+export const setupApi = {
+  state: () => request<SetupState>("/setup"),
+  /** Creates the owner's account and signs it in. 400 wrong code · 409 claimed · 422 weak password. */
+  claim: (body: SetupClaim) =>
+    request<User>("/setup/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  /** After two-factor is confirmed: the owner becomes administrator. */
+  complete: () => request<User>("/setup/complete", { method: "POST" }),
 };

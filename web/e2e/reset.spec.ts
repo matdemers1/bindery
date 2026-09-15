@@ -24,8 +24,11 @@ test.describe(() => {
 
     await expect(page.getByRole("heading", { name: /reset code/i })).toBeVisible();
     await expect(page.locator('input[autocomplete="username"]')).toBeVisible();
-    await expect(page.locator('input[autocomplete="one-time-code"]')).toBeVisible();
-    await expect(page.locator('input[autocomplete="new-password"]')).toHaveCount(2);
+    // Twelve boxes drawn over one real field (Phase 19), and one new-password
+    // field with a reveal toggle in place of typing it twice.
+    await expect(page.getByLabel("Reset code")).toBeVisible();
+    await expect(page.locator(".d3-code__slot")).toHaveCount(12);
+    await expect(page.locator('input[autocomplete="new-password"]')).toHaveCount(1);
   });
 
   test("a code that was never issued is refused, and says nothing else", async ({ page }) => {
@@ -33,17 +36,20 @@ test.describe(() => {
     // An address that cannot exist, so the one attempt this spends against the
     // throttle is spent on a key no other test uses.
     await page.fill('input[autocomplete="username"]', `nobody-${Date.now()}@example.test`);
-    await page.fill('input[autocomplete="one-time-code"]', "ZZZZ-ZZZZ-ZZZZ");
-    for (const field of await page.locator('input[autocomplete="new-password"]').all()) {
-      await field.fill("correct-horse-battery-staple");
-    }
+    // Typed as it was read out, dashes and all; the boxes keep the characters.
+    await page.getByLabel("Reset code").fill("ZZZZ-ZZZZ-ZZZZ");
+    await expect(page.getByLabel("Reset code")).toHaveValue("ZZZZZZZZZZZZ");
+    await page.fill('input[autocomplete="new-password"]', "correct-horse-battery-staple");
     await page.click('button[type="submit"]');
 
-    const alert = page.getByRole("alert");
-    await expect(alert).toBeVisible();
+    // The refusal is the code field's own error, wired to it for assistive
+    // technology rather than floating in an alert.
+    const refusal = page.getByText(/code was not accepted/i);
+    await expect(refusal).toBeVisible();
+    await expect(page.getByLabel("Reset code")).toHaveAttribute("aria-invalid", "true");
     // Non-enumerable by design (ADR-008): the refusal must not distinguish "no
     // such account" from "no such code".
-    await expect(alert).not.toContainText(/account/i);
+    await expect(refusal).not.toContainText(/account/i);
     // And the credential stays out of the URL, where history and proxy logs are.
     await expect(page).toHaveURL(/\/reset$/);
   });

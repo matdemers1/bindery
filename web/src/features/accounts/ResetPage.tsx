@@ -1,8 +1,10 @@
-import { useId, useState } from "react";
+import { useState } from "react";
+import { Button, CodeInput, FormField, Input, PasswordInput, type CodeInputStatus } from "@d3cloud/ui";
 
 import { ApiError, accountsApi } from "../../api";
-import { Logo } from "../../components/brand/Logo";
-import { Button } from "@d3cloud/ui";
+import { EntryHeading, EntryShell } from "../entry/EntryShell";
+import { retryMessage } from "../entry/messages";
+import { judgePassword } from "../entry/strength";
 
 /**
  * The other half of an administrator's reset (REQ-136).
@@ -21,48 +23,40 @@ import { Button } from "@d3cloud/ui";
  * by IP, and answers "that code is not valid" to every way of being wrong, so
  * this screen deliberately does not improve on the message: telling somebody
  * *which* half was wrong tells an anonymous caller whether an account exists.
+ *
+ * The code is twelve boxes in three groups of four, as it was read out. The
+ * server ignores the dashes, so what the boxes send is accepted as written.
  */
 export default function ResetPage() {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
+  const [codeStatus, setCodeStatus] = useState<CodeInputStatus>("idle");
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ code?: string; password?: string; form?: string }>({});
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  const errorId = useId();
-  const describedBy = error ? errorId : undefined;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (password !== confirm) {
-      setError("Those two passwords are different.");
-      return;
-    }
     setBusy(true);
-    setError(null);
+    setErrors({});
     try {
       await accountsApi.redeemReset(email, code, password);
       setDone(true);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 429) {
-        const seconds = caught.retryAfter ?? 60;
-        setError(
-          `Too many attempts. Try again in ${
-            seconds < 90 ? `${seconds} seconds` : `${Math.ceil(seconds / 60)} minutes`
-          }.`,
-        );
+        setErrors({ form: retryMessage(caught.retryAfter) });
       } else if (caught instanceof ApiError && caught.status === 422) {
         // The one case where the server's own words are the useful ones: it
         // says what is wrong with the password that was chosen.
-        setError(caught.message);
+        setErrors({ password: caught.message });
       } else if (caught instanceof ApiError && caught.status === 400) {
-        setError(
-          "That code was not accepted. Codes expire after a day and each works " +
-            "once — ask for a new one.",
-        );
+        setErrors({
+          code: "That code was not accepted. Codes expire after a day and each works once — ask for a new one.",
+        });
+        setCodeStatus("error");
       } else {
-        setError("Could not reach the server.");
+        setErrors({ form: "Could not reach the server." });
       }
     } finally {
       setBusy(false);
@@ -71,119 +65,81 @@ export default function ResetPage() {
 
   if (done) {
     return (
-      <div className="flex min-h-full items-center justify-center p-6">
-        <div className="w-full max-w-sm rounded-xl border border-edge bg-surface p-8 text-center">
-          <Logo size={44} variant="mascot" className="text-fg" />
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight">
-            Password changed
-          </h1>
-          <p className="mt-3 text-sm text-muted">
-            Everywhere that was signed in as you has been signed out. Sign in
-            again with the new password.
-          </p>
-          {/* A whole-document load rather than a router navigation: the router
-              lives inside the signed-in tree, which does not exist yet. */}
-          <a
-            href="/"
-            className="mt-6 block w-full rounded-md bg-accent px-3 py-2 font-medium text-ink"
-          >
-            Sign in
-          </a>
-        </div>
-      </div>
+      <EntryShell>
+        <EntryHeading eyebrow="Done" title="Password changed">
+          Everywhere that was signed in as you has been signed out. Sign in again
+          with the new password.
+        </EntryHeading>
+        {/* A whole-document load rather than a router navigation: the router
+            lives inside the signed-in tree, which does not exist yet. */}
+        <a href="/" className="entry-button entry-button--primary">
+          Sign in
+        </a>
+      </EntryShell>
     );
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center p-6">
-      <form
-        onSubmit={submit}
-        className="w-full max-w-sm rounded-xl border border-edge bg-surface p-8"
-      >
-        <Logo size={44} variant="mascot" className="text-fg" />
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight">
-          Use a reset code
-        </h1>
-        <p className="mt-1 mb-6 text-sm text-muted">
-          Whoever administers this archive can issue you one. They never see the
-          password you choose here.
-        </p>
+    <EntryShell>
+      <EntryHeading title="Use a reset code">
+        Whoever runs this archive can issue one from People. They never see the
+        password you choose here.
+      </EntryHeading>
 
-        <label className="mb-4 block text-sm">
-          <span className="mb-1 block text-muted">Email</span>
-          <input
+      <form onSubmit={submit} className="grid gap-5">
+        <FormField label="Email">
+          <Input
+            size="lg"
             type="email"
             required
             autoComplete="username"
+            autoFocus
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            aria-invalid={Boolean(error)}
-            aria-describedby={describedBy}
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
           />
-        </label>
+        </FormField>
 
-        <label className="mb-4 block text-sm">
-          <span className="mb-1 block text-muted">Reset code</span>
-          <input
-            required
-            autoComplete="one-time-code"
-            spellCheck={false}
+        <FormField label="Reset code" error={errors.code} help="Works once, for a day.">
+          <CodeInput
+            mode="alphanumeric"
+            length={12}
+            groups={[4, 4, 4]}
+            autoComplete="off"
             value={code}
-            onChange={(event) => setCode(event.target.value)}
-            aria-invalid={Boolean(error)}
-            aria-describedby={describedBy}
-            placeholder="ABCD-EFGH-JKLM"
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 font-mono uppercase tracking-widest outline-none focus:border-accent"
+            status={codeStatus}
+            onValueChange={(next) => {
+              setCode(next);
+              if (codeStatus !== "idle") setCodeStatus("idle");
+            }}
           />
-        </label>
+        </FormField>
 
-        <label className="mb-4 block text-sm">
-          <span className="mb-1 block text-muted">New password</span>
-          <input
-            type="password"
+        <FormField
+          label="New password"
+          error={errors.password ?? errors.form}
+          help="At least 12 characters. Four unrelated words beat one clever word."
+        >
+          <PasswordInput
+            size="lg"
             required
             minLength={12}
             autoComplete="new-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            aria-invalid={Boolean(error)}
-            aria-describedby={describedBy}
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
+            strength={judgePassword(password, email)}
           />
-          <span className="mt-1 block text-xs text-muted">
-            At least 12 characters. Four unrelated words beats one clever word.
-          </span>
-        </label>
+        </FormField>
 
-        <label className="mb-6 block text-sm">
-          <span className="mb-1 block text-muted">And again</span>
-          <input
-            type="password"
-            required
-            autoComplete="new-password"
-            value={confirm}
-            onChange={(event) => setConfirm(event.target.value)}
-            aria-invalid={Boolean(error)}
-            aria-describedby={describedBy}
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 outline-none focus:border-accent"
-          />
-        </label>
-
-        {error && (
-          <p id={errorId} role="alert" className="mb-4 text-sm text-danger">
-            {error}
-          </p>
-        )}
-
-        <Button variant="primary" className="w-full" type="submit" disabled={busy}>
-          {busy ? "Setting the password…" : "Set my password"}
+        <Button variant="primary" size="lg" type="submit" className="w-full" loading={busy}>
+          Set new password
         </Button>
+      </form>
 
-        <a href="/" className="mt-4 block text-center text-sm text-muted hover:text-fg">
+      <p className="mt-6 border-t border-border pt-5 text-sm">
+        <a href="/" className="entry-link">
           Back to sign in
         </a>
-      </form>
-    </div>
+      </p>
+    </EntryShell>
   );
 }
