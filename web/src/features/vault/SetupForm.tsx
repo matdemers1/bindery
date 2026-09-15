@@ -1,8 +1,9 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { ShieldPlus } from "lucide-react";
 
 import { api, type VaultState } from "../../api";
-import { Button, Alert } from "@d3cloud/ui";
+import { Alert, Button, Checkbox, FormField, Input, PasswordInput } from "@d3cloud/ui";
+import { judgePassword } from "../entry/strength";
 
 /**
  * Creating the vault, once.
@@ -21,7 +22,6 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
   const [error, setError] = useState<string | null>(null);
 
   const mismatch = again.length > 0 && passphrase !== again;
-  const mismatchId = useId();
   const ready =
     understood && passphrase.length >= 12 && passphrase === again && pin.length >= 4;
 
@@ -39,79 +39,58 @@ export default function SetupForm({ onCreated }: { onCreated: (next: VaultState)
   }
 
   return (
-    <form onSubmit={submit} className="max-w-xl space-y-4">
+    <form onSubmit={submit} className="grid max-w-xl gap-5">
       <Alert tone="warning" title="This passphrase cannot be recovered.">
         It is not stored anywhere — only a key wrapped with it is. If you forget
         it and the PIN has been switched off, everything in the vault stays
         encrypted for good. Write it down somewhere physical before you go on.
       </Alert>
 
-      <div>
-        <label htmlFor="setup-passphrase" className="block text-sm text-muted">
-          Vault passphrase
-          <span className="ml-1 text-xs">(at least 12 characters, different from your login)</span>
-        </label>
-        <input
-          id="setup-passphrase"
-          type="password"
+      {/* Typed twice here, unlike an account password: nobody can reset this
+          one, so a typo on creation is a vault nobody can open. */}
+      <FormField
+        label="Vault passphrase"
+        help="At least 12 characters, and different from your login."
+      >
+        <PasswordInput
+          size="lg"
           autoComplete="new-password"
           value={passphrase}
           onChange={(event) => setPassphrase(event.target.value)}
-          className="mt-1 w-full rounded-lg border border-field bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+          strength={judgePassword(passphrase)}
         />
-      </div>
+      </FormField>
 
-      <div>
-        <label htmlFor="setup-again" className="block text-sm text-muted">
-          Type it again
-        </label>
-        <input
-          id="setup-again"
-          type="password"
+      <FormField label="Type it again" error={mismatch ? "These do not match." : undefined}>
+        <PasswordInput
+          size="lg"
           autoComplete="new-password"
-          aria-invalid={mismatch}
-          aria-describedby={mismatch ? mismatchId : undefined}
           value={again}
           onChange={(event) => setAgain(event.target.value)}
-          className="mt-1 w-full rounded-lg border border-field bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
         />
-        {mismatch && (
-          <p id={mismatchId} role="alert" className="mt-1 text-xs text-danger">
-            These do not match.
-          </p>
-        )}
-      </div>
+      </FormField>
 
-      <div>
-        <label htmlFor="setup-pin" className="block text-sm text-muted">
-          PIN <span className="ml-1 text-xs">(for day to day; 4 digits or more)</span>
-        </label>
-        <input
-          id="setup-pin"
+      <FormField
+        label="PIN"
+        help="For day to day; 4 digits or more. Five wrong entries switch the PIN off. Nothing is deleted — the passphrase still opens the vault and you can set a new PIN."
+      >
+        <Input
+          size="lg"
           type="password"
           inputMode="numeric"
           autoComplete="off"
           value={pin}
           onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
           /* d3-allow: a PIN field, spaced so the digits can be counted. Not a type choice. */
-          className="mt-1 w-40 rounded-lg border border-field bg-surface px-3 py-2 font-mono text-lg tracking-[0.4em] outline-none focus:border-accent"
+          className="max-w-48 font-mono tracking-[0.4em]"
         />
-        <p className="mt-1 text-xs text-muted">
-          Five wrong entries switch the PIN off. Nothing is deleted — the
-          passphrase still opens the vault and you can set a new PIN.
-        </p>
-      </div>
+      </FormField>
 
-      <label className="flex items-start gap-2 text-sm text-muted">
-        <input
-          type="checkbox"
-          checked={understood}
-          onChange={(event) => setUnderstood(event.target.checked)}
-          className="mt-0.5"
-        />
-        I have written the passphrase down somewhere I will still have it in ten
-        years.
-      </label>
+      <Checkbox
+        checked={understood}
+        onCheckedChange={(value) => setUnderstood(value === true)}
+        label="I have written the passphrase down somewhere I will still have it in ten years."
+      />
 
       {error && (
         <Alert tone="danger" dynamic>

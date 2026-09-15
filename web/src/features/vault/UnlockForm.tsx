@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { KeyRound, Lock } from "lucide-react";
 
 import { ApiError, api, type VaultState } from "../../api";
-import { Button, Alert } from "@d3cloud/ui";
+import { Alert, Button, FormField, Input, PasswordInput } from "@d3cloud/ui";
 
 /**
  * Opening the vault, by PIN or by passphrase.
@@ -77,38 +77,30 @@ export default function UnlockForm({
   return (
     <form onSubmit={submit} className={compact ? "space-y-2" : "space-y-3"}>
       {usePassphrase ? (
-        <div>
-          <label htmlFor="vault-passphrase" className="block text-sm text-muted">
-            Vault passphrase
-          </label>
-          <input
-            id="vault-passphrase"
-            type="password"
+        <FormField label="Vault passphrase">
+          <PasswordInput
             autoComplete="off"
-            aria-invalid={Boolean(error)}
+            invalid={Boolean(error)}
             aria-describedby={error ? errorId : undefined}
             value={passphrase}
             onChange={(event) => setPassphrase(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-field bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
           />
-        </div>
+        </FormField>
       ) : (
         <div>
-          <label htmlFor="vault-pin" className="block text-sm text-muted">
-            Vault PIN
-          </label>
-          <input
-            id="vault-pin"
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            aria-invalid={Boolean(error)}
-            aria-describedby={describedBy}
-            value={pin}
-            onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
-            /* d3-allow: a PIN field, spaced so the digits can be counted. Not a type choice. */
-            className="mt-1 w-full rounded-lg border border-field bg-surface px-3 py-2 font-mono text-lg tracking-[0.4em] outline-none focus:border-accent"
-          />
+          <FormField label="Vault PIN">
+            <Input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              invalid={Boolean(error)}
+              aria-describedby={describedBy}
+              value={pin}
+              onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
+              /* d3-allow: a PIN field, spaced so the digits can be counted. Not a type choice. */
+              className="font-mono tracking-[0.4em]"
+            />
+          </FormField>
           {state.pin_failures > 0 && (
             <p id={attemptsId} role="status" className="mt-1 text-xs text-warning">
               {remaining} attempt{remaining === 1 ? "" : "s"} left. After that the
