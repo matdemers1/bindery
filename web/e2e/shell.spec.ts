@@ -49,8 +49,10 @@ test.describe(() => {
   await page.fill('input[autocomplete="current-password"]', "definitely-not-the-password");
   await page.click('button[type="submit"]');
   // Non-enumerable by design: the message must not distinguish "no such
-  // account" from "wrong password" (ADR-008).
-  await expect(page.getByText(/were not accepted/i)).toBeVisible();
+  // account" from "wrong password" (ADR-008). One sentence covers both halves.
+  const refusal = page.getByText(/email and password do not match/i);
+  await expect(refusal).toBeVisible();
+  await expect(refusal).not.toContainText(/no such|not found|unknown|wrong password/i);
   await expect(page).toHaveURL(/login/);
   });
 });
