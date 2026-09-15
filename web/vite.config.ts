@@ -73,6 +73,12 @@ export default defineConfig({
     // ambient type list it has and a test global cannot be reached for from
     // application code by accident.
     globals: false,
+    // Both, since vitest 4. `restoreMocks` now only puts `vi.spyOn` originals
+    // back; it used to reset every `vi.fn()` as well, and the tests counting
+    // calls ("asks the server once") were quietly relying on that. Without
+    // `mockReset` the counts carry over from the previous test and a screen
+    // that asked once reads as one that asked five times.
+    mockReset: true,
     restoreMocks: true,
   },
 });
