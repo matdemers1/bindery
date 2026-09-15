@@ -10,7 +10,7 @@ import logging
 
 from fastapi import FastAPI
 
-from api import eventlog, events
+from api import eventlog, events, first_run
 from api.config import get_settings, require_usable_configuration
 from api.db.session import SessionFactory
 from api.routers import accounts as accounts_router
@@ -33,6 +33,7 @@ from api.routers import (
     search,
     segments,
     settings,
+    setup,
     trust,
     upload,
 )
@@ -76,11 +77,19 @@ async def lifespan(_app: FastAPI):
     sweep = asyncio.create_task(
         vault_sweep.run_forever(stopping, SessionFactory), name="vault-sweep"
     )
+    # While the archive has no accounts, print a setup code to stdout (Phase 19).
+    # A task rather than an inline await, like the others: a fresh install
+    # usually boots before its migrations are applied, and that must neither
+    # stop the api starting nor leave it silent until a restart — the task
+    # retries until it has an answer, then ends.
+    setup_code = asyncio.create_task(
+        first_run.announce_on_boot(stopping, SessionFactory), name="setup-code"
+    )
     try:
         yield
     finally:
         stopping.set()
-        for task in (drain, listener, sweep):
+        for task in (drain, listener, sweep, setup_code):
             with contextlib.suppress(asyncio.CancelledError, TimeoutError):
                 await asyncio.wait_for(task, timeout=5)
 
@@ -98,6 +107,7 @@ app.include_router(health.router, prefix="/api")
 app.include_router(badges.router, prefix="/api")
 app.include_router(vault_router.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(setup.router, prefix="/api")
 app.include_router(accounts_router.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")

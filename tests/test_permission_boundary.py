@@ -503,6 +503,10 @@ NOT_LIBRARY_SCOPED = {
     "/api/account": "the caller's own account and its own storage total",
     "/api/version": "build metadata; deliberately unauthenticated (REQ-152)",
     "/api/account/totp": "the caller's own two-factor state",
+    # Unauthenticated and internet-facing (Phase 19). Returns one enum —
+    # unclaimed / needs_second_factor / complete — and no count, address or
+    # name; tests/test_setup.py asserts the body has that one key.
+    "/api/setup": "whether the archive is claimed; one enum, no account or library data",
     # These two ARE cross-account, deliberately, and are covered by
     # test_an_administrator_sees_accounts_and_no_documents below — which is the
     # stronger check, because it asserts what they may *not* contain.

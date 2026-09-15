@@ -13,7 +13,7 @@ none of them, add a banner — a new phase number is not a place.
 
 import uuid
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1382,6 +1382,28 @@ class RedeemResetIn(BaseModel):
     new_password: str
 
 
+class SetupStateOut(BaseModel):
+    """Whether this archive has been claimed — and nothing else (Phase 19).
+
+    Unauthenticated. `unclaimed`, `needs_second_factor` or `complete`. Anyone
+    who can see the setup screen learns the first fact anyway; no count, no
+    address and no name is ever added here.
+    """
+
+    state: Literal["unclaimed", "needs_second_factor", "complete"]
+
+
+class SetupClaimIn(BaseModel):
+    """The printed setup code plus the first account. Code formatting is free:
+    any case, with or without dashes and spaces."""
+
+    code: str
+    email: str
+    password: str
+    display_name: str | None = None
+    library_name: str
+
+
 class AdminAccountOut(BaseModel):
     """One account, as an administrator sees it.
 
@@ -1510,6 +1532,8 @@ __all__ = [
     "SettingsOut",
     "SettingsTestOut",
     "SettingsUpdateIn",
+    "SetupClaimIn",
+    "SetupStateOut",
     "SimilarOut",
     "SourceFileDetailOut",
     "SourceFileOut",

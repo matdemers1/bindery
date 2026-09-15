@@ -101,8 +101,15 @@ async def _reprocess(prompt_version: str, dry_run: bool) -> None:
 
 
 async def _create_user(email: str, password: str, library_name: str, kind: str) -> None:
+    from api import first_run
+
     email = email.strip().lower()
     async with SessionFactory() as session:
+        # Held to commit, so a browser claim cannot land between "the archive
+        # is empty" and the insert below (Phase 19).
+        await first_run.lock(session)
+        first_account = await first_run.archive_is_empty(session)
+
         existing = await session.execute(sa.select(AppUser).where(AppUser.email == email))
         if existing.scalar_one_or_none() is not None:
             print(f"user {email} already exists", file=sys.stderr)
@@ -130,12 +137,47 @@ async def _create_user(email: str, password: str, library_name: str, kind: str) 
             entity_id=user.id,
             action="create",
             actor_type=ActorType.SYSTEM,
-            after={"email": email, "library": library_name},
+            after={"email": email, "library": library_name, "setup_owner": first_account},
         )
+        if first_account:
+            # The first account on an empty archive is the setup owner, exactly
+            # as if it had been claimed in the browser: its first sign-in resumes
+            # at the two-factor step and ends with administrator rights. Admin
+            # is *not* granted here — without TOTP, grant_admin would refuse,
+            # and this path must not be the way around REQ-156.
+            await first_run.record_cli_owner(session, user)
         await session.commit()
 
         print(f"created user {email}")
         print(f"created library {library_name} ({library.id}) with role owner")
+        if first_account:
+            print(
+                "this is the first account: sign in and enrol two-factor "
+                "authentication to finish setup and become administrator"
+            )
+
+
+async def _setup_code() -> int:
+    """Print a fresh setup code while the archive is unclaimed (Phase 19).
+
+    Replaces whichever code was issued before, including the one printed at
+    boot. Exits non-zero once an account exists, so it cannot be mistaken for
+    having done something.
+    """
+    from api import first_run
+
+    async with SessionFactory() as session:
+        code = await first_run.issue_code(session)
+        await session.commit()
+    if code is None:
+        print(
+            "setup is complete: this archive already has an account. Sign in, or "
+            "ask an administrator for a reset code.",
+            file=sys.stderr,
+        )
+        return 1
+    first_run.announce(code)
+    return 0
 
 
 
@@ -327,6 +369,10 @@ def main() -> None:
     create.add_argument("--kind", default=LibraryKind.PERSONAL.value,
                         choices=[k.value for k in LibraryKind])
 
+    sub.add_parser(
+        "setup-code", help="print a fresh setup code while the archive is unclaimed"
+    )
+
     sub.add_parser("seed-forms", help="load api/forms/seed/*.yaml into the registry")
     fetch = sub.add_parser(
         "offsite-fetch", help="download the newest offsite dump for a restore drill"
@@ -368,6 +414,8 @@ def main() -> None:
         raise SystemExit(asyncio.run(_offsite_blobs(args.into, args.sha_file)))
     if args.command == "offsite-vault":
         raise SystemExit(asyncio.run(_offsite_vault(args.into, args.listing_file)))
+    if args.command == "setup-code":
+        raise SystemExit(asyncio.run(_setup_code()))
     if args.command == "lifecycle-check":
         raise SystemExit(asyncio.run(_lifecycle_check()))
     if args.command == "seed-forms":
