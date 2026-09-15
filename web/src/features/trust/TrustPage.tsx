@@ -1,6 +1,6 @@
 import { ShieldCheck } from "lucide-react";
 
-import { useCallback, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { Link } from "react-router";
 
 import { useLiveQuery } from "../../live/LiveProvider";
@@ -23,7 +23,7 @@ import {
   type MirrorResult,
   type OffsiteStatus,
 } from "../../api";
-import { Alert, Button, PageHeader } from "@d3cloud/ui";
+import { Alert, Button, Card as UICard, CardBody, CardTitle, PageHeader } from "@d3cloud/ui";
 
 /**
  * Trust — export, integrity, backup, and the audit log.
@@ -305,12 +305,18 @@ function Card({
   blurb: string;
   children: React.ReactNode;
 }) {
+  // Each card is one check on this page, so it is a section with an h2 under
+  // the PageHeader's h1 — the outline a screen-reader user skims is the list of
+  // checks.
+  const id = useId();
   return (
-    <section className="rounded-md border border-edge bg-surface p-4">
-      <h2 className="text-sm font-semibold">{title}</h2>
-      <p className="mb-3 mt-1 max-w-3xl text-sm text-muted">{blurb}</p>
+    <UICard as="section" padding="sm" aria-labelledby={id}>
+      <CardTitle as="h2" id={id}>
+        {title}
+      </CardTitle>
+      <CardBody className="mb-3 max-w-3xl">{blurb}</CardBody>
       {children}
-    </section>
+    </UICard>
   );
 }
 
