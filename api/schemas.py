@@ -1340,6 +1340,9 @@ class TotpStatusOut(BaseModel):
 class TotpEnrolOut(BaseModel):
     secret: str
     uri: str
+    # The same URI as a QR code, drawn server-side (Phase 19). Contains the
+    # secret, so it travels only in this response, like `secret` does.
+    qr_svg: str
 
 
 class TotpConfirmIn(BaseModel):

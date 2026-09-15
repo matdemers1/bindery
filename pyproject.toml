@@ -37,6 +37,10 @@ dependencies = [
     # secrets and one-time codes in api/auth/ — `secrets` for the randomness,
     # this for the HMAC that turns it into a six-digit code.
     "cryptography",
+    # The QR code on two-factor enrolment. Pure Python, no dependencies of its
+    # own, and it renders SVG — so the code is drawn by the api, the secret
+    # never passes through a third-party script, and the web app gains nothing.
+    "segno",
     # The api needs it too: /api/settings/test-ai validates a key against the
     # live API, and Q&A (REQ-116) is a synchronous request, not a worker stage.
     #

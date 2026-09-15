@@ -226,7 +226,7 @@ async def redeem_reset_code(
     reset = (
         await session.execute(
             sa.select(PasswordResetCode).where(
-                PasswordResetCode.code_hash == _hash((code or "").strip().upper())
+                PasswordResetCode.code_hash == _hash(canonical_reset_code(code))
             )
         )
     ).scalar_one_or_none()
@@ -264,6 +264,26 @@ async def change_password(
 # --------------------------------------------------------------------------
 # TOTP (REQ-138, REQ-156)
 # --------------------------------------------------------------------------
+
+
+def canonical_recovery_code(typed: str | None) -> str:
+    """A recovery code as it was issued: `abcde-fghjk`.
+
+    Separators and case are how a code is *written*, not part of it. The sign-in
+    form draws one box per character and never sends the dash, and a person
+    reading one off paper may type spaces. Hashing whatever arrived verbatim
+    turned each of those into "that code is not right" for a correct code.
+    """
+    kept = "".join(ch for ch in (typed or "").lower() if ch.isalnum())
+    return f"{kept[:5]}-{kept[5:]}" if len(kept) == 10 else kept
+
+
+def canonical_reset_code(typed: str | None) -> str:
+    """A reset code as it was issued: `ABCD-EFGH-JKMN`. Same reasoning as above."""
+    kept = "".join(ch for ch in (typed or "").upper() if ch.isalnum())
+    if len(kept) != 12:
+        return kept
+    return "-".join(kept[i : i + 4] for i in range(0, 12, 4))
 
 
 async def new_recovery_codes(session: AsyncSession, user: AppUser) -> list[str]:
@@ -325,7 +345,7 @@ async def check_second_factor(
         user.totp_last_step = step
         return
 
-    normalised = (code or "").strip().lower()
+    normalised = canonical_recovery_code(code)
     recovery = (
         await session.execute(
             sa.select(RecoveryCode).where(

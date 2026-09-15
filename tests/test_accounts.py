@@ -153,6 +153,24 @@ async def test_a_reset_code_lets_the_holder_choose_their_own_password(
     assert verify_password(user.password_hash, GOOD_PASSWORD)
 
 
+@pytest.mark.parametrize(
+    "rewrite",
+    [lambda c: c.replace("-", ""), lambda c: c.lower(), lambda c: c.replace("-", " ")],
+    ids=["no dashes", "lower case", "spaces"],
+)
+async def test_a_reset_code_is_accepted_however_it_is_written(
+    session, admin, user_factory, rewrite
+) -> None:
+    """The reset form draws twelve boxes; what it sends has no dashes."""
+    user, _ = await user_factory()
+    code = await accounts.issue_reset_code(session, user=user, issued_by=admin)
+    await session.commit()
+
+    await accounts.redeem_reset_code(
+        session, email=user.email, code=rewrite(code), new_password=GOOD_PASSWORD
+    )
+
+
 async def test_no_code_path_lets_an_admin_set_another_password(session) -> None:
     """ADR-009's sharpest edge, asserted rather than described.
 
@@ -333,6 +351,11 @@ async def test_an_account_with_no_second_factor_can_still_enrol(
     user, _ = await signed_in()
     started = await client.post("/api/account/totp/start")
     assert started.status_code == 200, started.text
+    # The QR code is the same URI, drawn: decode-free, but it must be an SVG
+    # that carries modules, on a light ground a camera can read.
+    svg = started.json()["qr_svg"]
+    assert svg.startswith("<svg") and "<path" in svg
+    assert "#ffffff" in svg.lower() or "#fff" in svg.lower()
 
     confirmed = await client.post("/api/account/totp/confirm", json={
         "code": totp._code_for_step(started.json()["secret"], totp.current_step())
@@ -369,6 +392,41 @@ async def test_a_recovery_code_works_once(session, user_factory) -> None:
 
     with pytest.raises(accounts.AccountError):
         await accounts.check_second_factor(session, user=user, code=codes[0])
+
+
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        lambda c: c.replace("-", ""),
+        lambda c: c.upper(),
+        lambda c: " ".join(c.replace("-", "")),
+    ],
+    ids=["no dash", "upper case", "spaced"],
+)
+async def test_a_recovery_code_is_accepted_however_it_is_written(
+    session, user_factory, rewrite
+) -> None:
+    """The sign-in form sends one box per character and never the dash."""
+    user, _ = await user_factory()
+    user.totp_secret = totp.new_secret()
+    codes = await accounts.confirm_totp(
+        session, user=user, code=totp._code_for_step(user.totp_secret, totp.current_step())
+    )
+    await session.commit()
+
+    await accounts.check_second_factor(session, user=user, code=rewrite(codes[0]))
+
+
+async def test_a_mangled_recovery_code_is_still_refused(session, user_factory) -> None:
+    user, _ = await user_factory()
+    user.totp_secret = totp.new_secret()
+    codes = await accounts.confirm_totp(
+        session, user=user, code=totp._code_for_step(user.totp_secret, totp.current_step())
+    )
+    await session.commit()
+
+    with pytest.raises(accounts.AccountError):
+        await accounts.check_second_factor(session, user=user, code=codes[0][:-1])
 
 
 async def test_a_clock_a_step_out_still_works(session, user_factory) -> None:

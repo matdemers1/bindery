@@ -25,6 +25,8 @@ import struct
 import time
 from urllib.parse import quote
 
+import segno
+
 DIGITS = 6
 STEP_SECONDS = 30
 # How many 30-second steps either side of now are accepted. One is the usual
@@ -86,3 +88,15 @@ def verify(secret: str, code: str, *, after_step: int | None = None) -> int | No
         if hmac.compare_digest(_code_for_step(secret, step), code):
             return step
     return None
+
+
+def qr_svg(uri: str) -> str:
+    """The provisioning URI as an inline SVG, dark modules on white.
+
+    White rather than transparent: authenticator cameras read contrast, and a
+    dark theme behind a transparent code is a code nobody can scan. Scaled by
+    its viewBox, so the page decides how large it is drawn.
+    """
+    return segno.make(uri, error="m").svg_inline(
+        scale=1, border=2, dark="#101117", light="#ffffff", omitsize=True
+    )

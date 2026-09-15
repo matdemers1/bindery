@@ -145,9 +145,8 @@ async def totp_start(
     user.totp_confirmed_at = None
     user.totp_last_step = None
     await session.commit()
-    return TotpEnrolOut(
-        secret=secret, uri=totp.provisioning_uri(secret, email=user.email)
-    )
+    uri = totp.provisioning_uri(secret, email=user.email)
+    return TotpEnrolOut(secret=secret, uri=uri, qr_svg=totp.qr_svg(uri))
 
 
 @router.post("/account/totp/confirm", response_model=list[str])
