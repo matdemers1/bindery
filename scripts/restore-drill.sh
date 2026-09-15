@@ -136,13 +136,17 @@ docker run -d --name "$CONTAINER" \
   -p "127.0.0.1:${DRILL_PORT}:5432" \
   "$PG_IMAGE" >/dev/null
 
+# Ask over TCP, not the socket. The image's entrypoint first runs a temporary
+# server for initdb that listens on the socket only, then stops it and starts
+# the real one. A socket check answers "ready" to the temporary server, and the
+# next command lands in the gap while it shuts down — which failed CI at random.
 printf '  waiting for the empty database'
 for _ in $(seq 1 60); do
-  if docker exec "$CONTAINER" pg_isready -U bindery -q 2>/dev/null; then break; fi
+  if docker exec "$CONTAINER" pg_isready -h 127.0.0.1 -U bindery -q 2>/dev/null; then break; fi
   printf '.'; sleep 1
 done
 echo
-docker exec "$CONTAINER" pg_isready -U bindery -q || { red "database never became ready"; exit 1; }
+docker exec "$CONTAINER" pg_isready -h 127.0.0.1 -U bindery -q || { red "database never became ready"; exit 1; }
 
 # The extensions must exist before the dump's tables that use them. The live
 # stack creates these in postgres-init; a bare postgres:16 image does not.
