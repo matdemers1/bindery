@@ -153,6 +153,7 @@ function LibraryCard({
               <Select
                 aria-label={`Role for ${member.display_name ?? member.email}`}
                 size="sm"
+                className="w-36"
                 value={member.role}
                 onValueChange={(value) => onChange(member.email, value)}
                 options={ROLES.map((r) => ({ value: r, label: r }))}
@@ -183,6 +184,7 @@ function LibraryCard({
           />
           <Select
             aria-label="Role for the person you are adding"
+            className="w-36"
             value={role}
             onValueChange={setRole}
             // Least access first: the choice someone makes without reading

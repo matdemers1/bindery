@@ -52,7 +52,7 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader icon={<SettingsIcon size={20} strokeWidth={1.8} />} title="Settings"
+      <PageHeader icon={<SettingsIcon size={20} strokeWidth={1.8} />} title="Settings" className="mb-6"
         description={
           <>
           Configuration you can change without a restart.

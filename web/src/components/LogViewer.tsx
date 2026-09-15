@@ -104,6 +104,7 @@ export default function LogViewer({
         <Select
           id="log-level"
           size="sm"
+          className="w-48"
           value={level}
           onValueChange={setLevel}
           options={[

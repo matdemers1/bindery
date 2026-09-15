@@ -59,7 +59,7 @@ export default function RulesPage({ libraries }: { libraries: Library[] }) {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <PageHeader icon={<Workflow size={20} strokeWidth={1.8} />} title="Rules"
+      <PageHeader icon={<Workflow size={20} strokeWidth={1.8} />} title="Rules" className="mb-6"
         description={
           <>
           Deterministic overrides. A rule you wrote outranks the classifier, and its

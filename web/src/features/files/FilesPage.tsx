@@ -327,6 +327,7 @@ function MoveControl({
         <Select
           aria-label="Move this file to another library"
           size="sm"
+          className="w-48"
           value={target}
           onValueChange={(value) => {
             setTarget(value);

@@ -185,7 +185,7 @@ export default function AskPage({
               }
             }}
             placeholder="Ask anything about your documents…"
-            className="w-full resize-none rounded-2xl border border-field bg-surface py-4 pl-5 pr-14 text-16 outline-none transition-colors focus:border-accent"
+            className="w-full resize-none rounded-2xl border border-field bg-surface py-4 pl-5 pr-14 text-16 transition-colors focus:border-accent"
           />
           <button
             type="submit"

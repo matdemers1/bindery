@@ -39,7 +39,7 @@ export default function OrganisePage({ libraries }: { libraries: { id: string }[
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader icon={<Tags size={20} strokeWidth={1.8} />} title="Organise"
+      <PageHeader icon={<Tags size={20} strokeWidth={1.8} />} title="Organise" className="mb-6"
         description={
           <>
           The vocabulary the archive files things under. Near-duplicates here are what
@@ -259,6 +259,7 @@ function Assets({ libraryId }: { libraryId?: string }) {
       >
         <UISelect
           aria-label="Kind of thing"
+          className="w-36"
           value={kind}
           onValueChange={setKind}
           options={["vehicle", "property", "policy", "account", "person", "other"].map((k) => ({

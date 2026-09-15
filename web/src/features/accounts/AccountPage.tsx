@@ -3,7 +3,7 @@ import { KeyRound, ShieldCheck, HardDrive, Copy, Check } from "lucide-react";
 
 import { ApiError, type Account, accountsApi } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Alert, Button, CodeInput, Input, PageHeader } from "@d3cloud/ui";
+import { Alert, Button, CodeInput, FormField, PageHeader, PasswordInput } from "@d3cloud/ui";
 
 function humanBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -238,25 +238,25 @@ function ChangePassword() {
         for changing it.
       </p>
       <form onSubmit={submit} className="mt-3 space-y-3">
-        <Input
-          type="password"
-          required
-          aria-label="Your current password"
-          autoComplete="current-password"
-          placeholder="Current password"
-          value={current}
-          onChange={(event) => setCurrent(event.target.value)}
-        />
-        <Input
-          type="password"
-          required
-          minLength={12}
-          aria-label="Your new password"
-          autoComplete="new-password"
-          placeholder="New password — at least 12 characters"
-          value={next}
-          onChange={(event) => setNext(event.target.value)}
-        />
+        {/* Labelled, not placeholder-only: two password fields that go blank
+            on the first keystroke leave nothing saying which one is which. */}
+        <FormField label="Current password">
+          <PasswordInput
+            required
+            autoComplete="current-password"
+            value={current}
+            onChange={(event) => setCurrent(event.target.value)}
+          />
+        </FormField>
+        <FormField label="New password" help="At least 12 characters.">
+          <PasswordInput
+            required
+            minLength={12}
+            autoComplete="new-password"
+            value={next}
+            onChange={(event) => setNext(event.target.value)}
+          />
+        </FormField>
         {error && <p className="text-sm text-danger">{error}</p>}
         {done && <p className="text-sm text-success">Changed.</p>}
         <Button variant="primary" type="submit">

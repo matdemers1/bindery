@@ -94,7 +94,7 @@ export default function HelpPage() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader icon={<BookOpen size={20} strokeWidth={1.8} />} title="Guides"
+      <PageHeader icon={<BookOpen size={20} strokeWidth={1.8} />} title="Guides" className="mb-6"
         description={
           <>
           How each screen works, and what the archive promises. Everything here is

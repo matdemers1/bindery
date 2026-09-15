@@ -206,6 +206,7 @@ export default function ArchivePage() {
             />
             <Select
               aria-label="Sort order"
+              className="w-40"
               value={filters.sort}
               onValueChange={(value) => update((next) => next.set("sort", value))}
               options={[
@@ -215,7 +216,7 @@ export default function ArchivePage() {
                 { value: "title", label: "Title" },
               ]}
             />
-            {active && (
+            {Boolean(active) && (
               <Button onClick={() => setParams(new URLSearchParams({ group: groupBy }), { replace: true })}>
                 Clear
               </Button>

@@ -245,6 +245,7 @@ export default function AddPage({
                 <Select
                   id="target-library"
                   size="sm"
+                  className="w-44"
                   value={libraryId}
                   onValueChange={setChosen}
                   options={libraries.map((library) => ({ value: library.id, label: library.name }))}

@@ -212,7 +212,7 @@ export default function EditPanel({
               value={correspondentId}
               disabled={!!newCorrespondent.trim()}
               onChange={(event) => setCorrespondentId(event.target.value)}
-              className="min-w-40 rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-40"
+              className="min-w-40 rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm focus:border-accent disabled:opacity-40"
             >
               <option value="">— none —</option>
               {correspondents.map((person) => (
@@ -240,7 +240,7 @@ export default function EditPanel({
               value={typeId}
               disabled={!!newType.trim()}
               onChange={(event) => setTypeId(event.target.value)}
-              className="min-w-40 rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-40"
+              className="min-w-40 rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm focus:border-accent disabled:opacity-40"
             >
               <option value="">— none —</option>
               {types.map((kind) => (
@@ -316,7 +316,7 @@ export default function EditPanel({
             }
           }}
           placeholder="Find a tag, or type a new name…"
-          className="mt-2 w-full rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+          className="mt-2 w-full rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm focus:border-accent"
         />
         <p role="status" aria-live="polite" className="sr-only">
           {suggestionNote}

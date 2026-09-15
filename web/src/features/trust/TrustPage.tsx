@@ -540,6 +540,7 @@ function AuditPanel() {
         <Field label="Who">
           <Select
             aria-label="Who"
+            className="w-40"
             value={actorType}
             onValueChange={setActorType}
             options={[
