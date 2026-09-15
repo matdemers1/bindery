@@ -3,9 +3,8 @@ import { useNavigate } from "react-router";
 import { ShieldCheck } from "lucide-react";
 
 import { ApiError, api, type VaultState } from "../../api";
-import Modal from "../../components/Modal";
 import UnlockForm from "./UnlockForm";
-import { Button, Alert } from "@d3cloud/ui";
+import { Alert, Button, Modal } from "@d3cloud/ui";
 
 /**
  * "Move to vault", from wherever you are looking at the thing.
@@ -83,16 +82,24 @@ export default function MoveToVault({
         Move to vault
       </button>
 
-      {open && state && (
+      {state && (
         <Modal
-          label={heading}
-          onClose={() => setOpen(false)}
-          className="w-full max-w-md space-y-3 rounded-xl border border-edge bg-surface p-5"
+          open={open}
+          onOpenChange={setOpen}
+          title={heading}
+          footer={
+            state.exists && state.unlocked ? (
+              <>
+                <Button onClick={() => setOpen(false)}>Cancel</Button>
+                <Button variant="primary" onClick={() => void confirm()} disabled={busy}>
+                  {busy ? "Moving…" : "Move to vault"}
+                </Button>
+              </>
+            ) : undefined
+          }
         >
-          <h2 className="text-sm font-medium">{heading}</h2>
-
           {!state.exists ? (
-            <>
+            <div className="space-y-3">
               <p className="text-sm text-muted">
                 There is no vault on this account yet. Setting one up takes a
                 passphrase and a PIN.
@@ -100,16 +107,16 @@ export default function MoveToVault({
               <Button variant="primary" onClick={() => navigate("/vault")}>
                 Set up the vault
               </Button>
-            </>
+            </div>
           ) : !state.unlocked ? (
-            <>
+            <div className="space-y-3">
               <p className="text-sm text-muted">
                 The vault is locked. Open it to move something in.
               </p>
               <UnlockForm state={state} onUnlocked={setState} compact />
-            </>
+            </div>
           ) : (
-            <>
+            <div className="space-y-3">
               <ul className="space-y-1 text-sm text-muted">
                 <li>· The original is encrypted and the plaintext copy deleted.</li>
                 <li>· It leaves search, Ask, the archive, and every count.</li>
@@ -127,15 +134,7 @@ export default function MoveToVault({
                   {error}
                 </Alert>
               )}
-              <div className="flex items-center gap-2">
-                <Button variant="primary" onClick={() => void confirm()} disabled={busy}>
-                  {busy ? "Moving…" : "Move to vault"}
-                </Button>
-                <Button onClick={() => setOpen(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </>
+            </div>
           )}
         </Modal>
       )}

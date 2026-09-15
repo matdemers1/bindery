@@ -60,7 +60,13 @@ export default function Modal({
   // innermost one has to own the keystroke. Bubbling would close the dialog
   // nobody asked to close, and wrap Tab against the wrong list of stops. Focus
   // is trapped inside, so every keystroke starts in here anyway.
+  //
+  // Only for keys pressed in this panel's own DOM. React bubbles through the
+  // component tree, so a portalled dialog rendered from inside this one — the
+  // library Modal for "Move to vault" inside the photo lightbox — delivers its
+  // keys here too, and Escape closed the lightbox along with the confirmation.
   function onKeyDown(event: React.KeyboardEvent) {
+    if (!panel.current?.contains(event.target as Node)) return;
     if (event.key !== "Escape" && event.key !== "Tab") return;
     event.stopPropagation();
     if (event.key === "Escape") return onClose();
