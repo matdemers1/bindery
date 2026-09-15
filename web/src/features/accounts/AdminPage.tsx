@@ -170,7 +170,7 @@ function Row({
         {code && (
           <Alert tone="warning" className="mt-2">
             Read this out. It works once and expires in a day. They enter it
-            on the sign-in page, under <em>I have a reset code</em>.
+            on the sign-in page, under <em>Use a reset code</em>.
             <div className="mt-1 flex items-center gap-2">
               <code className="font-mono text-sm">{code}</code>
               <IconButton
