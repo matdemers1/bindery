@@ -17,7 +17,7 @@ import {
   type UnifyProposal,
   type TimelineEntry,
 } from "../../api";
-import { Alert, Button, PageHeader, SegmentedControl } from "@d3cloud/ui";
+import { Alert, Button, EmptyState, PageHeader, SegmentedControl, Skeleton } from "@d3cloud/ui";
 
 /**
  * Organise (Phase 5) — correspondents, assets, and taxonomy health.
@@ -178,7 +178,9 @@ function Correspondents() {
       />
 
       {rows.length === 0 ? (
-        <Empty>No correspondents yet. They appear as documents are classified.</Empty>
+        <EmptyState kind="empty" heading="No correspondents yet">
+          They appear as documents are classified.
+        </EmptyState>
       ) : (
         <ul className="divide-y divide-edge rounded-lg border border-edge">
           {rows.map((row) => (
@@ -277,11 +279,11 @@ function Assets({ libraryId }: { libraryId?: string }) {
       </form>
 
       {rows.length === 0 ? (
-        <Empty>
-          No things yet. An asset is what documents are <em>about</em> — a car, the
-          house, a policy — and it's what makes "everything about the Honda" a
-          single view instead of a search.
-        </Empty>
+        <EmptyState kind="empty" heading="No things yet">
+          An asset is what documents are <em>about</em> — a car, the house, a policy —
+          and it's what makes "everything about the Honda" a single view instead of a
+          search.
+        </EmptyState>
       ) : (
         <ul className="space-y-2">
           {rows.map((asset) => (
@@ -354,7 +356,17 @@ function Taxonomy() {
   // this panel reloads it.
   useLiveQuery([], load);
 
-  if (!health) return <Empty>Loading…</Empty>;
+  // This was <Empty>Loading…</Empty> — a loading state wearing an empty state's
+  // clothes, and "Loading…" alone is on the system's banned list. The shape of
+  // what is coming is known: three figures and the panels under them.
+  if (!health) {
+    return (
+      <div className="space-y-4" aria-busy="true" aria-label="Loading taxonomy health">
+        <Skeleton variant="block" height={88} />
+        <Skeleton variant="block" height={160} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -433,11 +445,6 @@ function Taxonomy() {
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="rounded-lg border border-edge p-8 text-center text-sm text-muted">{children}</p>
-  );
-}
 
 
 /**

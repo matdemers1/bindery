@@ -1,7 +1,6 @@
-import type { ReactNode } from "react";
-
 import { ApiError } from "../api";
-import { Alert, Button } from "@d3cloud/ui";
+import { Alert, Button, EmptyState, Link as TextLink } from "@d3cloud/ui";
+import { Link as RouterLink } from "react-router";
 
 /**
  * The four states every screen owes the reader (T-8.7).
@@ -15,47 +14,19 @@ import { Alert, Button } from "@d3cloud/ui";
  * bug — it is the boundary working — and it should read that way rather than as
  * a failure the reader caused.
  */
-export function Loading({ label = "Loading…" }: { label?: string }) {
-  return (
-    <p role="status" aria-live="polite" className="py-6 text-sm text-muted">
-      {label}
-    </p>
-  );
-}
-
-export function Skeleton({ rows = 3 }: { rows?: number }) {
-  return (
-    <ul className="space-y-3" aria-hidden>
-      {Array.from({ length: rows }, (_, n) => (
-        <li key={n} className="h-20 animate-pulse rounded-lg border border-edge bg-surface" />
-      ))}
-    </ul>
-  );
-}
-
-export function Empty({ title, children }: { title: string; children?: ReactNode }) {
-  return (
-    <div className="rounded-lg border border-edge bg-surface p-6">
-      <p className="text-sm font-medium">{title}</p>
-      {children && <div className="mt-1 max-w-2xl text-sm text-muted">{children}</div>}
-    </div>
-  );
-}
-
 export function Denied({ what = "this" }: { what?: string }) {
   return (
-    <div className="rounded-lg border border-edge bg-surface p-6">
-      <p className="text-sm font-medium">Not yours to see</p>
-      <p className="mt-1 max-w-2xl text-sm text-muted">
-        You do not have access to {what}. In Bindery access is per library, not per
-        document, so this means you are not a member of the library it is in — ask
-        an owner to add you on the{" "}
-        <a href="/libraries" className="underline underline-offset-2">
-          Libraries
-        </a>{" "}
-        screen.
-      </p>
-    </div>
+    <EmptyState kind="no-access" heading="Not yours to see">
+      You do not have access to {what}. In Bindery access is per library, not per
+      document, so this means you are not a member of the library it is in — ask
+      an owner to add you on the{" "}
+      {/* A router link now. The plain <a href> this replaces reloaded the whole
+          app to reach a page that is already part of it. */}
+      <TextLink asChild variant="inline">
+        <RouterLink to="/libraries">Libraries</RouterLink>
+      </TextLink>{" "}
+      screen.
+    </EmptyState>
   );
 }
 

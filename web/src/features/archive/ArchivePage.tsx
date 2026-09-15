@@ -6,7 +6,7 @@ import { Library as LibraryIcon } from "lucide-react";
 import { ApiError, api, type Archive, type ArchiveEntry, type BulkResult, type Tree } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
 import { SourceChip } from "../why/WhyPanel";
-import { Button, SegmentedControl } from "@d3cloud/ui";
+import { Button, EmptyState, SegmentedControl, Skeleton } from "@d3cloud/ui";
 
 /**
  * The archive browser (screen 2).
@@ -247,13 +247,13 @@ export default function ArchivePage() {
           )}
 
           {loading && !archive ? (
-            <ul className="space-y-2">
+            <div className="space-y-2" aria-busy="true" aria-label="Loading the archive">
               {[0, 1, 2, 3].map((n) => (
-                <li key={n} className="h-20 animate-pulse rounded-lg border border-edge bg-surface" />
+                <Skeleton key={n} variant="block" height={80} />
               ))}
-            </ul>
+            </div>
           ) : archive && archive.entries.length === 0 ? (
-            <Empty filtered={Boolean(active)} />
+            <ArchiveEmpty filtered={Boolean(active)} />
           ) : (
             <>
               <p className="mb-2 text-xs text-muted">
@@ -428,20 +428,15 @@ function BulkBar({
   );
 }
 
-function Empty({ filtered }: { filtered: boolean }) {
-  return (
-    <div className="rounded-lg border border-edge p-10 text-center">
-      {filtered ? (
-        <p className="text-muted">Nothing matches those filters.</p>
-      ) : (
-        <>
-          <p className="text-lg">Nothing here yet.</p>
-          <p className="mt-2 text-sm text-muted">
-            Drop files anywhere on the page, or scan into the watched folder. They
-            appear here once they've been OCR'd.
-          </p>
-        </>
-      )}
-    </div>
+function ArchiveEmpty({ filtered }: { filtered: boolean }) {
+  // Filters that match nothing are not an empty archive: "no-results" tells the
+  // reader the documents still exist and the filters are what to change.
+  return filtered ? (
+    <EmptyState kind="no-results" heading="Nothing matches those filters" />
+  ) : (
+    <EmptyState kind="empty" heading="Nothing here yet">
+      Drop files anywhere on the page, or scan into the watched folder. They
+      appear here once they've been OCR'd.
+    </EmptyState>
   );
 }

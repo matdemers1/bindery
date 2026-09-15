@@ -12,12 +12,12 @@ import {
 } from "../../api";
 import { matchesTerm, queryTerms } from "../../lib/highlight";
 import { pageParts } from "../../lib/pages";
-import { Empty, ErrorState } from "../../components/States";
+import { ErrorState } from "../../components/States";
 import { isInteractiveTarget, isTypingTarget, shortcutsEnabled } from "../../lib/keyboard";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 import MoveToVault from "../vault/MoveToVault";
-import { Button } from "@d3cloud/ui";
+import { Button, EmptyState, Link as TextLink } from "@d3cloud/ui";
 
 /**
  * Renders a page range as if it were a standalone document (ADR-001), while
@@ -196,27 +196,30 @@ function Viewer({
     return (
       <div className="mx-auto max-w-2xl py-12">
         {missing ? (
-          <Empty title="Not here">
+          /* kind="no-access" for both a missing and an unreadable file. The API
+             answers 404 either way on purpose (ADR-005), and "you cannot see
+             this" is the one statement true in both cases — the attribute says
+             nothing the page does not already render identically. */
+          <EmptyState kind="no-access" heading="Not here">
             <p>
               This {mode === "document" ? "document" : "file"} either does not
               exist or is in a library you are not a member of. Bindery cannot
               tell you which — saying so would confirm whether it exists.
             </p>
-            <p className="mt-3 flex flex-wrap gap-3">
+            <p className="flex flex-wrap gap-3">
               <Link
                 to="/search"
                 className="rounded-md border border-field px-3 py-1.5 text-sm text-fg"
               >
                 Search the archive
               </Link>
-              <Link
-                to="/libraries"
-                className="self-center text-sm text-accent underline underline-offset-2"
-              >
-                Check which libraries you are in
-              </Link>
+              <TextLink asChild variant="inline">
+                <Link to="/libraries" className="self-center text-sm">
+                  Check which libraries you are in
+                </Link>
+              </TextLink>
             </p>
-          </Empty>
+          </EmptyState>
         ) : (
           <ErrorState error={error} onRetry={() => {
               // Clear the error too, or the branch keeps rendering

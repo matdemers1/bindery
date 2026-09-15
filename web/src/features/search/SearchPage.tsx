@@ -9,6 +9,7 @@ import { rememberFoundSomething } from "../firstrun/onboarding";
 import Snippet from "../../components/Snippet";
 import VaultSearchPanel from "../vault/VaultSearchPanel";
 import { ErrorState } from "../../components/States";
+import { Skeleton } from "@d3cloud/ui";
 
 // Every piece of search state lives in the URL (REQ-028), so a result is a link
 // you can send someone, and the back button behaves.
@@ -171,7 +172,7 @@ export default function SearchPage({
           <ErrorState error={error} onRetry={() => update((next) => next.set("q", query))} />
         </div>
       ) : loading && !response ? (
-        <Skeleton />
+        <ResultsSkeleton />
       ) : response ? (
         <Results
           response={response}
@@ -213,13 +214,13 @@ function Kbd({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Skeleton() {
+function ResultsSkeleton() {
   return (
     // Three grey rectangles say nothing a screen reader can use, and the
     // status region above has already said "searching".
     <ul aria-hidden className="mt-8 space-y-3">
       {[0, 1, 2].map((n) => (
-        <li key={n} className="h-24 animate-pulse rounded-lg border border-edge bg-surface" />
+        <li key={n}><Skeleton variant="block" height={96} /></li>
       ))}
     </ul>
   );
