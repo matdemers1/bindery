@@ -64,7 +64,7 @@ worker = [
     # renumbered or reworded them would not fail a build, it would silently
     # reclassify a failed scan as a success — in a pipeline whose invariant 8 is
     # that nothing fails silently.
-    "ocrmypdf>=17,<18",
+    "ocrmypdf>=17.11.0,<18",
     "pypdf",
     "pillow",
     # HEIC/HEIF from an iPhone camera roll (REQ-006).
