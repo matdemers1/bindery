@@ -558,6 +558,10 @@ async def test_complete_is_refused_once_an_administrator_exists(archive, client)
         )
         await session.commit()
 
+    # An administrator exists, so setup is over even with an owner still recorded.
+    assert await _setting(archive, first_run.OWNER_USER_ID) == claimed.json()["id"]
+    assert await _state(client) == "complete"
+
     refused = await client.post("/api/setup/complete")
     assert refused.status_code == 409, refused.text
     assert "already complete" in refused.json()["detail"]
