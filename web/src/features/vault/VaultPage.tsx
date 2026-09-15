@@ -16,7 +16,7 @@ import SetupForm from "./SetupForm";
 import VaultGrid from "./VaultGrid";
 import VaultVideos from "./VaultVideos";
 import UnlockForm from "./UnlockForm";
-import { Alert, Button, Input, PageHeader, TabPanel, Tabs } from "@d3cloud/ui";
+import { Alert, Button, Input, Link as TextLink, PageHeader, TabPanel, Tabs } from "@d3cloud/ui";
 
 /**
  * The private vault.
@@ -302,9 +302,9 @@ export default function VaultPage() {
 
           <p className="text-xs text-muted">
             Vaulted documents keep their place in{" "}
-            <Link to="/trust" className="underline underline-offset-2">
+            <TextLink asChild variant="inline"><Link to="/trust">
               backups and offsite copies
-            </Link>{" "}
+            </Link></TextLink>{" "}
             as ciphertext. A restore brings them back still encrypted, and still
             needing this passphrase.
           </p>

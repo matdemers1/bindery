@@ -17,7 +17,7 @@ import {
   type UnifyProposal,
   type TimelineEntry,
 } from "../../api";
-import { Alert, Button, EmptyState, Input, PageHeader, SegmentedControl, Select as UISelect, Skeleton } from "@d3cloud/ui";
+import { Alert, Button, EmptyState, Input, Link as TextLink, PageHeader, SegmentedControl, Select as UISelect, Skeleton } from "@d3cloud/ui";
 
 /**
  * Organise (Phase 5) — correspondents, assets, and taxonomy health.
@@ -422,13 +422,13 @@ function Taxonomy() {
           <ul className="space-y-2 text-sm">
             {duplicates.map((pair) => (
               <li key={pair.id} className="flex flex-wrap items-center gap-2">
-                <Link to={`/document/${pair.document_a_id}/page/1`} className="underline underline-offset-2">
+                <TextLink asChild variant="inline"><Link to={`/document/${pair.document_a_id}/page/1`}>
                   {pair.a_title ?? "(untitled)"}
-                </Link>
+                </Link></TextLink>
                 <span className="text-muted">and</span>
-                <Link to={`/document/${pair.document_b_id}/page/1`} className="underline underline-offset-2">
+                <TextLink asChild variant="inline"><Link to={`/document/${pair.document_b_id}/page/1`}>
                   {pair.b_title ?? "(untitled)"}
-                </Link>
+                </Link></TextLink>
                 <span className="text-xs text-muted">
                   {Math.round(pair.similarity * 100)}% alike
                 </span>

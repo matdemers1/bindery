@@ -9,7 +9,7 @@ import { rememberFoundSomething } from "../firstrun/onboarding";
 import Snippet from "../../components/Snippet";
 import VaultSearchPanel from "../vault/VaultSearchPanel";
 import { ErrorState } from "../../components/States";
-import { Input, Skeleton } from "@d3cloud/ui";
+import { Input, Link as TextLink, Skeleton } from "@d3cloud/ui";
 
 // Every piece of search state lives in the URL (REQ-028), so a result is a link
 // you can send someone, and the back button behaves.
@@ -193,9 +193,9 @@ function EmptyPrompt() {
       <p className="text-lg">Search finds the page, not just the file.</p>
       <p className="mt-2 text-sm">
         Press <Kbd>⌘</Kbd> <Kbd>K</Kbd> from anywhere to jump straight to a page, or{" "}
-        <Link to="/" className="underline underline-offset-2">
+        <TextLink asChild variant="inline"><Link to="/">
           ask a question
-        </Link>{" "}
+        </Link></TextLink>{" "}
         instead.
       </p>
     </div>

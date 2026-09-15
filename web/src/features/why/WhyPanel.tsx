@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { ApiError, api, type WhyPanel as WhyPanelData } from "../../api";
 import OcrTextPanel from "../../components/OcrText";
 import SourceBadge from "../edit/SourceBadge";
-import { Alert, Button } from "@d3cloud/ui";
+import { Alert, Button, Link as TextLink } from "@d3cloud/ui";
 
 /**
  * Why every AI-written field says what it says (REQ-063).
@@ -168,12 +168,11 @@ export default function WhyPanel({
                     {row.page_number !== null && (
                       <p className="mt-1 text-xs text-muted">
                         {fileId ? (
-                          <Link
-                            to={`/file/${fileId}/page/${row.page_number}`}
-                            className="underline underline-offset-2"
-                          >
-                            page {row.page_number} of the file
-                          </Link>
+                          <TextLink asChild variant="inline">
+                            <Link to={`/file/${fileId}/page/${row.page_number}`}>
+                              page {row.page_number} of the file
+                            </Link>
+                          </TextLink>
                         ) : (
                           <>page {row.page_number} of the file</>
                         )}

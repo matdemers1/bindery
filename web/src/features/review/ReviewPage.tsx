@@ -14,7 +14,7 @@ import { isInteractiveTarget, isTypingTarget, shortcutsEnabled } from "../../lib
 import { useLiveQuery } from "../../live/LiveProvider";
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
-import { Button } from "@d3cloud/ui";
+import { Button, Link as TextLink } from "@d3cloud/ui";
 
 /**
  * Keyboard triage (T-3.10): preview left, provenance right.
@@ -138,9 +138,9 @@ export default function ReviewPage() {
           <p className="mt-4 text-sm text-muted">
             {waiting} document{waiting === 1 ? " has" : "s have"} not been through AI
             review, so {waiting === 1 ? "it is" : "they are"} not in this queue.{" "}
-            <Link to="/pipeline" className="text-accent underline underline-offset-2">
+            <TextLink asChild variant="inline"><Link to="/pipeline">
               See why on Pipeline
-            </Link>
+            </Link></TextLink>
             .
           </p>
         ) : (

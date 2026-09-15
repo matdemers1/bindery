@@ -287,14 +287,15 @@ function Viewer({
                       link in this file appends the suffix and this one did
                       not, so stepping up from a document to its file threw
                       away the highlighting and the match set (D-03). */}
-                  <Link
-                    to={`/file/${fileId}/page/${filePage}${
-                      query ? `?q=${encodeURIComponent(query)}` : ""
-                    }`}
-                    className="underline underline-offset-2"
-                  >
-                    {detail.source_file.original_filename}
-                  </Link>
+                  <TextLink asChild variant="inline">
+                    <Link
+                      to={`/file/${fileId}/page/${filePage}${
+                        query ? `?q=${encodeURIComponent(query)}` : ""
+                      }`}
+                    >
+                      {detail.source_file.original_filename}
+                    </Link>
+                  </TextLink>
                 </>
               )}
               {query && <> · highlighting “{query}”</>}
@@ -467,9 +468,9 @@ function PageCanvas({
     return (
       <div className="rounded-lg border border-edge bg-surface p-10 text-center text-sm text-muted">
         This page hasn’t been rendered yet.{" "}
-        <a href={fileUrl.pdf(fileId)} className="text-accent underline underline-offset-2">
+        <TextLink href={fileUrl.pdf(fileId)} variant="inline">
           Open the PDF instead
-        </a>
+        </TextLink>
         .
       </div>
     );

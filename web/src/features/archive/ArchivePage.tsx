@@ -6,7 +6,7 @@ import { Library as LibraryIcon } from "lucide-react";
 import { ApiError, api, type Archive, type ArchiveEntry, type BulkResult, type Tree } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
 import { SourceChip } from "../why/WhyPanel";
-import { Button, Checkbox, EmptyState, Input, SegmentedControl, Select, Skeleton } from "@d3cloud/ui";
+import { Button, Checkbox, EmptyState, Input, Link as TextLink, SegmentedControl, Select, Skeleton } from "@d3cloud/ui";
 
 /**
  * The archive browser (screen 2).
@@ -109,9 +109,9 @@ export default function ArchivePage() {
             {stats.needs_review > 0 && (
               <>
                 {" · "}
-                <Link to="/review" className="text-accent underline underline-offset-2">
+                <TextLink asChild variant="inline"><Link to="/review">
                   {stats.needs_review} awaiting review
-                </Link>
+                </Link></TextLink>
               </>
             )}
             {/* A separate count, because it is a separate queue. Adding the two
@@ -121,9 +121,9 @@ export default function ArchivePage() {
             {stats.backlog_pending > 0 && (
               <>
                 {" · "}
-                <Link to="/pipeline" className="underline underline-offset-2">
+                <TextLink asChild variant="inline"><Link to="/pipeline">
                   {stats.backlog_pending} imported, unreviewed
-                </Link>
+                </Link></TextLink>
               </>
             )}
             {stats.unclassified > 0 && (
@@ -132,9 +132,9 @@ export default function ArchivePage() {
                 {/* A link now that there is somewhere for it to go. It was a
                     dead end next to a live one, which reads as "nothing you
                     can do about this". */}
-                <Link to="/pipeline" className="text-accent underline underline-offset-2">
+                <TextLink asChild variant="inline"><Link to="/pipeline">
                   {stats.unclassified} not yet classified
-                </Link>
+                </Link></TextLink>
               </>
             )}
           </p>

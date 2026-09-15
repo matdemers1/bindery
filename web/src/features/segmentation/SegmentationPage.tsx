@@ -279,9 +279,9 @@ export default function SegmentationPage() {
       <p className="mt-8 text-xs text-muted">
         Click a seam to start a new document there. Nothing is written until you save,
         and every save can be undone —{" "}
-        <Link to={`/file/${fileId}/page/1`} className="underline underline-offset-2">
+        <TextLink asChild variant="inline"><Link to={`/file/${fileId}/page/1`}>
           view the whole file
-        </Link>
+        </Link></TextLink>
         .
       </p>
     </div>

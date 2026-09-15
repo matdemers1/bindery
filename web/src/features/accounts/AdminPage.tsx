@@ -4,7 +4,7 @@ import { Users, UserPlus, Copy, Check, Lock, Ban, RotateCcw, ShieldCheck } from 
 
 import { ApiError, type AdminAccount, type AdminInvitation, accountsApi } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Alert, Button, IconButton, Input, PageHeader } from "@d3cloud/ui";
+import { Alert, Button, IconButton, Input, Link as TextLink, PageHeader } from "@d3cloud/ui";
 
 const GB = 1024 ** 3;
 
@@ -76,9 +76,9 @@ export default function AdminPage() {
           account that existed before this shipped was made an administrator by
           the migration — it had to be, or nobody could reach this screen. Set it
           up on{" "}
-          <Link to="/account" className="underline">
+          <TextLink asChild variant="inline"><Link to="/account">
             your account
-          </Link>
+          </Link></TextLink>
           . This account can issue a password reset for every other one.
         </Alert>
       )}

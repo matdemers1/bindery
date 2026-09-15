@@ -5,7 +5,7 @@ import { Link, useSearchParams } from "react-router";
 
 import { ApiError, api, type FileTreeNode, type LibraryDetail, type MovePlan } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Badge, Button, PageHeader, Select } from "@d3cloud/ui";
+import { Badge, Button, Link as TextLink, PageHeader, Select } from "@d3cloud/ui";
 
 /**
  * The folder tree, in the app.
@@ -108,7 +108,7 @@ export default function FilesPage() {
       ) : tree.length === 0 ? (
         <p className="rounded-md border border-edge bg-surface p-6 text-sm text-muted">
           Nothing here yet. Documents appear once they have been filed — until then
-          they are on the <Link className="underline" to="/review">Review</Link> screen.
+          they are on the <TextLink asChild variant="inline"><Link to="/review">Review</Link></TextLink> screen.
         </p>
       ) : (
         <ul className="divide-y divide-edge rounded-md border border-edge">

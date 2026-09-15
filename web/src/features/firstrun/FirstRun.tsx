@@ -3,7 +3,7 @@ import { Link } from "react-router";
 
 import { ApiError, api, type Library, type PipelineStatus } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Button } from "@d3cloud/ui";
+import { Button, Link as TextLink } from "@d3cloud/ui";
 
 /**
  * First run (T-8.6, REQ-119).
@@ -139,9 +139,9 @@ export default function FirstRun({
                   status.in_flight.length === 1 ? "" : "s"
                 } in flight.`
               : "Reading the pages. This takes a few seconds per page."}{" "}
-            <Link to="/pipeline" className="underline underline-offset-2">
+            <TextLink asChild variant="inline"><Link to="/pipeline">
               Watch it in detail
-            </Link>
+            </Link></TextLink>
             , or just search for a word you know is in the document.
           </p>
         </div>
@@ -150,9 +150,9 @@ export default function FirstRun({
       <p className="mt-6 text-xs text-muted">
         Nothing in Bindery is ever deleted — corrections supersede, they do not erase.
         Whatever you put in, you can take back out: the{" "}
-        <Link to="/trust" className="underline underline-offset-2">
+        <TextLink asChild variant="inline"><Link to="/trust">
           full export
-        </Link>{" "}
+        </Link></TextLink>{" "}
         is a folder of your originals plus a page you open in a browser, and it works
         with Bindery switched off.
       </p>

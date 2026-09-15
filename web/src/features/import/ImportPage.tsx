@@ -24,7 +24,7 @@ import {
 } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
 import UnlockForm from "../vault/UnlockForm";
-import { Button, Checkbox, Input, PageHeader, SegmentedControl } from "@d3cloud/ui";
+import { Button, Checkbox, Input, Link as TextLink, PageHeader, SegmentedControl } from "@d3cloud/ui";
 
 /**
  * Import (T-4.1 to T-4.5; redesigned in Phase 18, REQ-196, REQ-197).
@@ -286,9 +286,9 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
 
       <p className="text-xs text-muted">
         Everything imported here is flagged as backlog and stays out of your daily{" "}
-        <Link to="/review" className="underline underline-offset-2">
+        <TextLink asChild variant="inline"><Link to="/review">
           review queue
-        </Link>
+        </Link></TextLink>
         . It is searchable immediately either way.
       </p>
     </div>
@@ -426,7 +426,7 @@ function VaultProgress({ run }: { run: ImportSession }) {
       {run.awaiting_vault > 0 && !run.vault_unlocked && (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
           <Lock size={12} /> Your vault is locked. {run.awaiting_vault} file{run.awaiting_vault === 1 ? " is" : "s are"} finished and waiting —
-          <Link to="/vault" className="underline underline-offset-2">unlock it</Link> and they seal within a few seconds.
+          <TextLink asChild variant="inline"><Link to="/vault">unlock it</Link></TextLink> and they seal within a few seconds.
         </p>
       )}
       {run.awaiting_vault > 0 && run.vault_unlocked && (
