@@ -11,7 +11,7 @@ import { ApiError, api, type FileProgress, type Library } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
 import LogViewer from "../../components/LogViewer";
 import PipelineFlow, { FileRow } from "./PipelineFlow";
-import { Alert, Button, PageHeader } from "@d3cloud/ui";
+import { Alert, Button, PageHeader, Select } from "@d3cloud/ui";
 
 /**
  * Adding files.
@@ -242,18 +242,13 @@ export default function AddPage({
                 <label htmlFor="target-library" className="text-xs text-muted">
                   Into
                 </label>
-                <select
+                <Select
                   id="target-library"
+                  size="sm"
                   value={libraryId}
-                  onChange={(event) => setChosen(event.target.value)}
-                  className="rounded border border-field bg-ink px-2 py-1 text-xs"
-                >
-                  {libraries.map((library) => (
-                    <option key={library.id} value={library.id}>
-                      {library.name}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setChosen}
+                  options={libraries.map((library) => ({ value: library.id, label: library.name }))}
+                />
               </>
             )}
 

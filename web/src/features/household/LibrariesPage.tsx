@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 
 import { ApiError, api, type LibraryDetail } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Alert, Button, PageHeader } from "@d3cloud/ui";
+import { Alert, Button, PageHeader, Select } from "@d3cloud/ui";
 
 /**
  * Libraries — who is in the household, and what they may do (T-7.7).
@@ -23,6 +23,8 @@ const ROLE_BLURBS: Record<string, string> = {
   contributor: "Can read and change documents, but not membership.",
   reader: "Can read. Cannot change anything.",
 };
+
+const ROLES = ["owner", "contributor", "reader"] as const;
 
 export default function LibrariesPage() {
   const [libraries, setLibraries] = useState<LibraryDetail[]>([]);
@@ -148,16 +150,13 @@ function LibraryCard({
           <li key={member.user_id} className="flex items-center gap-3 py-2 text-sm">
             <span className="flex-1">{member.display_name ?? member.email}</span>
             {canManage ? (
-              <select
+              <Select
                 aria-label={`Role for ${member.display_name ?? member.email}`}
+                size="sm"
                 value={member.role}
-                onChange={(event) => onChange(member.email, event.target.value)}
-                className="rounded border border-field bg-ink px-2 py-1 text-xs"
-              >
-                <option value="owner">owner</option>
-                <option value="contributor">contributor</option>
-                <option value="reader">reader</option>
-              </select>
+                onValueChange={(value) => onChange(member.email, value)}
+                options={ROLES.map((r) => ({ value: r, label: r }))}
+              />
             ) : (
               <span className="text-xs text-muted">{member.role}</span>
             )}
@@ -182,16 +181,14 @@ function LibraryCard({
             placeholder="Add someone by email"
             className="w-64 rounded border border-field bg-ink px-2 py-1.5 text-sm"
           />
-          <select
+          <Select
             aria-label="Role for the person you are adding"
             value={role}
-            onChange={(event) => setRole(event.target.value)}
-            className="rounded border border-field bg-ink px-2 py-1.5 text-sm"
-          >
-            <option value="reader">reader</option>
-            <option value="contributor">contributor</option>
-            <option value="owner">owner</option>
-          </select>
+            onValueChange={setRole}
+            // Least access first: the choice someone makes without reading
+            // should be the safe one.
+            options={[...ROLES].reverse().map((r) => ({ value: r, label: r }))}
+          />
           <Button type="submit" disabled={!email.trim()}>
             Add
           </Button>

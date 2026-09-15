@@ -58,7 +58,7 @@ describe("control boundaries", () => {
     const all = Object.values(sources).flatMap(openingTags);
     expect(Object.keys(sources).length).toBeGreaterThan(30);
     expect(all.length).toBeGreaterThan(40);
-    expect(all.filter((t) => t.includes("border-field")).length).toBeGreaterThan(15);
+    expect(all.filter((t) => t.includes("border-field")).length).toBeGreaterThan(10);
   });
 
   it("never draws a button or select outline with the divider token", () => {

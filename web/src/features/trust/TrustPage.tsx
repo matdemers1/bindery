@@ -23,7 +23,7 @@ import {
   type MirrorResult,
   type OffsiteStatus,
 } from "../../api";
-import { Alert, Button, Card as UICard, CardBody, CardTitle, PageHeader } from "@d3cloud/ui";
+import { Alert, Button, Card as UICard, CardBody, CardTitle, PageHeader, Select } from "@d3cloud/ui";
 
 /**
  * Trust — export, integrity, backup, and the audit log.
@@ -538,17 +538,18 @@ function AuditPanel() {
 
       <div className="flex flex-wrap items-end gap-2">
         <Field label="Who">
-          <select
+          <Select
+            aria-label="Who"
             value={actorType}
-            onChange={(event) => setActorType(event.target.value)}
-            className="rounded border border-field bg-ink px-2 py-1.5 text-sm"
-          >
-            <option value="">Anyone</option>
-            <option value="human">You</option>
-            <option value="ai">Claude</option>
-            <option value="rule">A rule</option>
-            <option value="system">The system</option>
-          </select>
+            onValueChange={setActorType}
+            options={[
+              { value: "", label: "Anyone" },
+              { value: "human", label: "You" },
+              { value: "ai", label: "Claude" },
+              { value: "rule", label: "A rule" },
+              { value: "system", label: "The system" },
+            ]}
+          />
         </Field>
         <Field label="Document">
           <input

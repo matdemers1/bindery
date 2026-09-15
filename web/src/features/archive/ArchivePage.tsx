@@ -6,7 +6,7 @@ import { Library as LibraryIcon } from "lucide-react";
 import { ApiError, api, type Archive, type ArchiveEntry, type BulkResult, type Tree } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
 import { SourceChip } from "../why/WhyPanel";
-import { Button, EmptyState, SegmentedControl, Skeleton } from "@d3cloud/ui";
+import { Button, EmptyState, SegmentedControl, Select, Skeleton } from "@d3cloud/ui";
 
 /**
  * The archive browser (screen 2).
@@ -204,17 +204,17 @@ export default function ArchivePage() {
               placeholder="Filter by title or filename…"
               className="min-w-0 flex-1 rounded-md border border-field bg-surface px-3 py-1.5 text-sm outline-none focus:border-accent"
             />
-            <select
+            <Select
               aria-label="Sort order"
               value={filters.sort}
-              onChange={(event) => update((next) => next.set("sort", event.target.value))}
-              className="rounded-md border border-field bg-surface px-2 py-1.5 text-sm"
-            >
-              <option value="newest">Newest in</option>
-              <option value="oldest">Oldest in</option>
-              <option value="date">Document date</option>
-              <option value="title">Title</option>
-            </select>
+              onValueChange={(value) => update((next) => next.set("sort", value))}
+              options={[
+                { value: "newest", label: "Newest in" },
+                { value: "oldest", label: "Oldest in" },
+                { value: "date", label: "Document date" },
+                { value: "title", label: "Title" },
+              ]}
+            />
             {active && (
               <Button onClick={() => setParams(new URLSearchParams({ group: groupBy }), { replace: true })}>
                 Clear

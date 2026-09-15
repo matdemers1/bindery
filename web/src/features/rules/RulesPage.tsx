@@ -3,7 +3,7 @@ import { Workflow } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api, type Library, type RuleDryRun, type RuleRecord } from "../../api";
-import { Button, PageHeader } from "@d3cloud/ui";
+import { Button, PageHeader, Select } from "@d3cloud/ui";
 
 /**
  * The rules editor (T-3.13, REQ-061).
@@ -210,30 +210,18 @@ function NewRuleForm({
           placeholder="Name — e.g. GEICO is vehicle insurance"
           className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent sm:col-span-2"
         />
-        <select
+        <Select
           aria-label="Field to match"
           value={field}
-          onChange={(event) => setField(event.target.value)}
-          className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm"
-        >
-          {FIELDS.map((option) => (
-            <option key={option} value={option}>
-              {option.replace(/_/g, " ")}
-            </option>
-          ))}
-        </select>
-        <select
+          onValueChange={setField}
+          options={FIELDS.map((option) => ({ value: option, label: option.replace(/_/g, " ") }))}
+        />
+        <Select
           aria-label="How to match it"
           value={operator}
-          onChange={(event) => setOperator(event.target.value)}
-          className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm"
-        >
-          {OPERATORS.map((option) => (
-            <option key={option} value={option}>
-              {option.replace(/_/g, " ")}
-            </option>
-          ))}
-        </select>
+          onValueChange={setOperator}
+          options={OPERATORS.map((option) => ({ value: option, label: option.replace(/_/g, " ") }))}
+        />
         <input
           required
           aria-label="Value to match"

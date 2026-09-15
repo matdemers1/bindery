@@ -17,7 +17,7 @@ import {
   type UnifyProposal,
   type TimelineEntry,
 } from "../../api";
-import { Alert, Button, EmptyState, PageHeader, SegmentedControl, Skeleton } from "@d3cloud/ui";
+import { Alert, Button, EmptyState, PageHeader, SegmentedControl, Select as UISelect, Skeleton } from "@d3cloud/ui";
 
 /**
  * Organise (Phase 5) — correspondents, assets, and taxonomy health.
@@ -256,16 +256,15 @@ function Assets({ libraryId }: { libraryId?: string }) {
         }}
         className="flex flex-wrap gap-2 rounded-lg border border-edge bg-surface p-4"
       >
-        <select
+        <UISelect
           aria-label="Kind of thing"
           value={kind}
-          onChange={(event) => setKind(event.target.value)}
-          className="rounded-md border border-field bg-ink px-2 py-1.5 text-sm"
-        >
-          {["vehicle", "property", "policy", "account", "person", "other"].map((k) => (
-            <option key={k} value={k}>{k}</option>
-          ))}
-        </select>
+          onValueChange={setKind}
+          options={["vehicle", "property", "policy", "account", "person", "other"].map((k) => ({
+            value: k,
+            label: k,
+          }))}
+        />
         <input
           aria-label="What this thing is called"
           value={name}

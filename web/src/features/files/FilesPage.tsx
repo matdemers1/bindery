@@ -5,7 +5,7 @@ import { Link, useSearchParams } from "react-router";
 
 import { ApiError, api, type FileTreeNode, type LibraryDetail, type MovePlan } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Badge, Button, PageHeader } from "@d3cloud/ui";
+import { Badge, Button, PageHeader, Select } from "@d3cloud/ui";
 
 /**
  * The folder tree, in the app.
@@ -324,22 +324,21 @@ function MoveControl({
   return (
     <div className="mt-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
-        <select
+        <Select
           aria-label="Move this file to another library"
+          size="sm"
           value={target}
-          onChange={(event) => {
-            setTarget(event.target.value);
+          onValueChange={(value) => {
+            setTarget(value);
             setPlan(null);
           }}
-          className="rounded border border-field bg-ink px-1.5 py-1"
-        >
-          <option value="">Move to…</option>
-          {destinations.map((library) => (
-            <option key={library.id} value={library.id}>
-              {library.name}
-            </option>
-          ))}
-        </select>
+          // "Move to…" stays a real option, as it was in the native select:
+          // choosing it again is how a half-started move is abandoned.
+          options={[
+            { value: "", label: "Move to…" },
+            ...destinations.map((library) => ({ value: library.id, label: library.name })),
+          ]}
+        />
         {target && !plan && (
           <Button size="sm" disabled={busy} onClick={() => void run(() => api.previewMove(sourceFileId, target))}>
             {busy ? "Checking…" : "Preview"}

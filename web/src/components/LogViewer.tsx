@@ -10,7 +10,7 @@ import {
 
 import { ApiError, api, type LogEntry } from "../api";
 import { useLiveQuery } from "../live/LiveProvider";
-import { Alert, Button, IconButton } from "@d3cloud/ui";
+import { Alert, Button, IconButton, Select } from "@d3cloud/ui";
 
 /**
  * The log, on screen.
@@ -101,16 +101,17 @@ export default function LogViewer({
         <label className="sr-only" htmlFor="log-level">
           Minimum level
         </label>
-        <select
+        <Select
           id="log-level"
+          size="sm"
           value={level}
-          onChange={(event) => setLevel(event.target.value)}
-          className="rounded border border-field bg-ink px-2 py-1 text-xs"
-        >
-          <option value="">Everything</option>
-          <option value="warning">Warnings and errors</option>
-          <option value="error">Errors only</option>
-        </select>
+          onValueChange={setLevel}
+          options={[
+            { value: "", label: "Everything" },
+            { value: "warning", label: "Warnings and errors" },
+            { value: "error", label: "Errors only" },
+          ]}
+        />
 
         <label className="sr-only" htmlFor="log-search">
           Filter messages
