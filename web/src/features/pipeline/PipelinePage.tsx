@@ -3,11 +3,10 @@ import { Activity, Check, Loader, RotateCw, ScrollText } from "lucide-react";
 
 import { api, type FileProgress, type Job, type PipelineStatus } from "../../api";
 import LogViewer from "../../components/LogViewer";
-import PageHeader from "../../components/PageHeader";
 import PendingReviewPanel from "../../components/PendingReview";
 import { useLiveQuery } from "../../live/LiveProvider";
 import PipelineFlow, { FileRow } from "../add/PipelineFlow";
-import { Button } from "@d3cloud/ui";
+import { Button, PageHeader } from "@d3cloud/ui";
 
 /**
  * The pipeline, as a pipeline.
@@ -80,9 +79,13 @@ export default function PipelinePage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
-      <PageHeader icon={Activity} title="Pipeline">
-        Where every file is, and anything that needs you.
-      </PageHeader>
+      <PageHeader icon={<Activity size={20} strokeWidth={1.8} />} title="Pipeline"
+        description={
+          <>
+          Where every file is, and anything that needs you.
+          </>
+        }
+      />
 
       <PendingReviewPanel />
 

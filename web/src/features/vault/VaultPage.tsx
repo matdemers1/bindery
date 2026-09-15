@@ -12,12 +12,11 @@ import {
 } from "lucide-react";
 
 import { api, fileUrl, type VaultItem, type VaultSearchResults, type VaultState } from "../../api";
-import PageHeader from "../../components/PageHeader";
 import SetupForm from "./SetupForm";
 import VaultGrid from "./VaultGrid";
 import VaultVideos from "./VaultVideos";
 import UnlockForm from "./UnlockForm";
-import { Alert, Button, TabPanel, Tabs } from "@d3cloud/ui";
+import { Alert, Button, PageHeader, TabPanel, Tabs } from "@d3cloud/ui";
 
 /**
  * The private vault.
@@ -117,11 +116,15 @@ export default function VaultPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <PageHeader icon={ShieldCheck} title="Vault">
-        A second lock, with its own passphrase. What is in here is encrypted on
-        disk, kept out of search, Ask, the archive and every count, and can only
-        be read while this screen is open.
-      </PageHeader>
+      <PageHeader icon={<ShieldCheck size={20} strokeWidth={1.8} />} title="Vault"
+        description={
+          <>
+          A second lock, with its own passphrase. What is in here is encrypted on
+          disk, kept out of search, Ask, the archive and every count, and can only
+          be read while this screen is open.
+          </>
+        }
+      />
 
       {!state.exists && <SetupForm onCreated={load} />}
 

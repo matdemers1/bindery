@@ -1,10 +1,9 @@
 import { Workflow } from "lucide-react";
 
-import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api, type Library, type RuleDryRun, type RuleRecord } from "../../api";
-import { Button } from "@d3cloud/ui";
+import { Button, PageHeader } from "@d3cloud/ui";
 
 /**
  * The rules editor (T-3.13, REQ-061).
@@ -60,10 +59,14 @@ export default function RulesPage({ libraries }: { libraries: Library[] }) {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <PageHeader icon={Workflow} title="Rules">
-        Deterministic overrides. A rule you wrote outranks the classifier, and its
-        effects are recorded as yours rather than the model&apos;s.
-      </PageHeader>
+      <PageHeader icon={<Workflow size={20} strokeWidth={1.8} />} title="Rules"
+        description={
+          <>
+          Deterministic overrides. A rule you wrote outranks the classifier, and its
+          effects are recorded as yours rather than the model&apos;s.
+          </>
+        }
+      />
 
       {notice && <p className="mb-4 text-sm text-accent">{notice}</p>}
 

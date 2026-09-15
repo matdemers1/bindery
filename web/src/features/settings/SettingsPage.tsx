@@ -1,13 +1,12 @@
 import { Settings as SettingsIcon } from "lucide-react";
 
-import PageHeader from "../../components/PageHeader";
 import { useCallback, useEffect, useId, useState } from "react";
 
 import LogViewer from "../../components/LogViewer";
 import { setShortcutsEnabled, shortcutsEnabled } from "../../lib/keyboard";
 import PendingReviewPanel from "../../components/PendingReview";
 import { ApiError, api, type ApiTokenRecord, type IssuedApiToken, type OffsiteTest, type Settings, type SettingsTest } from "../../api";
-import { Button, Alert } from "@d3cloud/ui";
+import { Alert, Button, PageHeader } from "@d3cloud/ui";
 
 /**
  * Settings (screen 19).
@@ -53,9 +52,13 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader icon={SettingsIcon} title="Settings">
-        Configuration you can change without a restart.
-      </PageHeader>
+      <PageHeader icon={<SettingsIcon size={20} strokeWidth={1.8} />} title="Settings"
+        description={
+          <>
+          Configuration you can change without a restart.
+          </>
+        }
+      />
 
       <section className="rounded-lg border border-edge bg-surface p-5">
         <h2 className="text-base font-medium">Classification</h2>

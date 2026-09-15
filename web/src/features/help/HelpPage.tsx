@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { BookOpen, ChevronRight, HelpCircle, Sparkles } from "lucide-react";
+import { PageHeader } from "@d3cloud/ui";
 
-import PageHeader from "../../components/PageHeader";
 
 type Callout = { kind: "note" | "warning"; text: string };
 type Section = { heading: string; body: string[]; callout?: Callout };
@@ -94,10 +94,14 @@ export default function HelpPage() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader icon={BookOpen} title="Guides">
-        How each screen works, and what the archive promises. Everything here is
-        served from this machine — no part of it needs a network.
-      </PageHeader>
+      <PageHeader icon={<BookOpen size={20} strokeWidth={1.8} />} title="Guides"
+        description={
+          <>
+          How each screen works, and what the archive promises. Everything here is
+          served from this machine — no part of it needs a network.
+          </>
+        }
+      />
 
       <div className="mt-4 flex flex-col gap-6 md:flex-row">
         <nav className="md:w-56 md:shrink-0" aria-label="Guides">

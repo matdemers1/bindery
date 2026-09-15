@@ -4,11 +4,10 @@ import { Eye, Film, Images, Search, Sparkles } from "lucide-react";
 
 import { api, type Photo, fileUrl } from "../../api";
 import Modal from "../../components/Modal";
-import PageHeader from "../../components/PageHeader";
 import { useLiveQuery } from "../../live/LiveProvider";
 import MetadataPanel, { formatDuration } from "../media/MetadataPanel";
 import MoveToVault from "../vault/MoveToVault";
-import { Alert, Button, TabPanel, Tabs } from "@d3cloud/ui";
+import { Alert, Button, PageHeader, TabPanel, Tabs } from "@d3cloud/ui";
 
 type Kind = "image" | "video";
 
@@ -156,11 +155,15 @@ export default function PhotosPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
-      <PageHeader icon={Images} title="Photos">
-        Every image and video in the archive. A scan of a form belongs in Archive;
-        this is for the things you recognise by looking — and, for videos, by
-        when and how long.
-      </PageHeader>
+      <PageHeader icon={<Images size={20} strokeWidth={1.8} />} title="Photos"
+        description={
+          <>
+          Every image and video in the archive. A scan of a form belongs in Archive;
+          this is for the things you recognise by looking — and, for videos, by
+          when and how long.
+          </>
+        }
+      />
 
       {/* Was a hand-rolled tablist: `role="tab"` on both buttons with no arrow
           keys and both in the tab order — a tablist a keyboard cannot drive.

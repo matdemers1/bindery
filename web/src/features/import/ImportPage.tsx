@@ -22,10 +22,9 @@ import {
   type Library,
   type VaultState,
 } from "../../api";
-import PageHeader from "../../components/PageHeader";
 import { useLiveQuery } from "../../live/LiveProvider";
 import UnlockForm from "../vault/UnlockForm";
-import { Button, SegmentedControl } from "@d3cloud/ui";
+import { Button, PageHeader, SegmentedControl } from "@d3cloud/ui";
 
 /**
  * Import (T-4.1 to T-4.5; redesigned in Phase 18, REQ-196, REQ-197).
@@ -170,10 +169,14 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <PageHeader icon={ImportIcon} title="Import">
-        Bring a folder of files into the archive. Nothing is read in until you have
-        seen what was found and what it would cost.
-      </PageHeader>
+      <PageHeader icon={<ImportIcon size={20} strokeWidth={1.8} />} title="Import"
+        description={
+          <>
+          Bring a folder of files into the archive. Nothing is read in until you have
+          seen what was found and what it would cost.
+          </>
+        }
+      />
 
       {/* ---- 1. Where ------------------------------------------------------ */}
       <section className="space-y-3 rounded-xl border border-edge bg-surface p-4">

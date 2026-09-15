@@ -3,9 +3,8 @@ import { Link } from "react-router";
 import { Users, UserPlus, Copy, Check, Lock, Ban, RotateCcw, ShieldCheck } from "lucide-react";
 
 import { ApiError, type AdminAccount, type AdminInvitation, accountsApi } from "../../api";
-import PageHeader from "../../components/PageHeader";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Alert, Button, IconButton } from "@d3cloud/ui";
+import { Alert, Button, IconButton, PageHeader } from "@d3cloud/ui";
 
 const GB = 1024 ** 3;
 
@@ -58,11 +57,15 @@ export default function AdminPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
-      <PageHeader icon={Users} title="People">
-        Accounts, invitations and storage. Nothing on this screen can show you
-        what is inside anyone's documents — including yours, which live in the
-        archive like everyone else's.
-      </PageHeader>
+      <PageHeader icon={<Users size={20} strokeWidth={1.8} />} title="People"
+        description={
+          <>
+          Accounts, invitations and storage. Nothing on this screen can show you
+          what is inside anyone's documents — including yours, which live in the
+          archive like everyone else's.
+          </>
+        }
+      />
 
       {accounts.some((a) => a.is_admin && !a.totp_enabled) && (
         <Alert

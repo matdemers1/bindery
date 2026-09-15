@@ -1,11 +1,10 @@
 import { Users } from "lucide-react";
 
-import PageHeader from "../../components/PageHeader";
 import { useCallback, useState } from "react";
 
 import { ApiError, api, type LibraryDetail } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Button, Alert } from "@d3cloud/ui";
+import { Alert, Button, PageHeader } from "@d3cloud/ui";
 
 /**
  * Libraries — who is in the household, and what they may do (T-7.7).
@@ -57,12 +56,16 @@ export default function LibrariesPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
-      <PageHeader icon={Users} title="Libraries">
-        A library is the boundary: someone either has a membership in one and sees
-        everything in it, or has no membership and sees nothing in it. There is no
-        per-document sharing, because nobody can hold a per-document sharing model in
-        their head and still be sure of the answer.
-      </PageHeader>
+      <PageHeader icon={<Users size={20} strokeWidth={1.8} />} title="Libraries"
+        description={
+          <>
+          A library is the boundary: someone either has a membership in one and sees
+          everything in it, or has no membership and sees nothing in it. There is no
+          per-document sharing, because nobody can hold a per-document sharing model in
+          their head and still be sure of the answer.
+          </>
+        }
+      />
 
       {error && (
         <Alert tone="danger" dynamic>

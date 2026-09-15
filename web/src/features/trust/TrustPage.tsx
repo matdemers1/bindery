@@ -1,6 +1,5 @@
 import { ShieldCheck } from "lucide-react";
 
-import PageHeader from "../../components/PageHeader";
 import { useCallback, useState } from "react";
 import { Link } from "react-router";
 
@@ -24,7 +23,7 @@ import {
   type MirrorResult,
   type OffsiteStatus,
 } from "../../api";
-import { Button, Alert } from "@d3cloud/ui";
+import { Alert, Button, PageHeader } from "@d3cloud/ui";
 
 /**
  * Trust — export, integrity, backup, and the audit log.
@@ -45,10 +44,14 @@ export default function TrustPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <PageHeader icon={ShieldCheck} title="Trust">
-        Could you get your documents back? These are the ways to find out rather than
-        assume.
-      </PageHeader>
+      <PageHeader icon={<ShieldCheck size={20} strokeWidth={1.8} />} title="Trust"
+        description={
+          <>
+          Could you get your documents back? These are the ways to find out rather than
+          assume.
+          </>
+        }
+      />
 
       <nav className="flex gap-1 border-b border-edge">
         {(

@@ -1,12 +1,11 @@
 import { FileText, Folder, FolderTree, Layers, ShieldCheck } from "lucide-react";
 
-import PageHeader from "../../components/PageHeader";
 import { useCallback, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { ApiError, api, type FileTreeNode, type LibraryDetail, type MovePlan } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Badge, Button } from "@d3cloud/ui";
+import { Badge, Button, PageHeader } from "@d3cloud/ui";
 
 /**
  * The folder tree, in the app.
@@ -78,10 +77,14 @@ export default function FilesPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <PageHeader icon={FolderTree} title="Files">
-        The archive as a folder tree — the same one the mirror writes to disk and the
-        export ships. Every row says how the file arrived and what it is tagged with.
-      </PageHeader>
+      <PageHeader icon={<FolderTree size={20} strokeWidth={1.8} />} title="Files"
+        description={
+          <>
+          The archive as a folder tree — the same one the mirror writes to disk and the
+          export ships. Every row says how the file arrived and what it is tagged with.
+          </>
+        }
+      />
 
       <nav className="flex flex-wrap items-center gap-1 text-sm">
         <Crumb onClick={() => go("")} active={segments.length === 0}>

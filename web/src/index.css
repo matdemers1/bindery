@@ -26,7 +26,7 @@
 @theme inline {
   --color-ink: var(--color-bg);
   --color-edge: var(--color-border);
-  --color-muted: var(--color-text-muted);
+  --color-muted: var(--color-fg-muted);
   --color-field: var(--color-border-field);
 
   /* --------------------------------------------------------------------------
@@ -75,7 +75,7 @@ body,
 
 body {
   background: var(--color-bg);
-  color: var(--color-text);
+  color: var(--color-fg);
 }
 
 /* Anything the user is expected to click is at least 24px tall even at the

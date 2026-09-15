@@ -2,9 +2,8 @@ import { useCallback, useState } from "react";
 import { KeyRound, ShieldCheck, HardDrive, Copy, Check } from "lucide-react";
 
 import { ApiError, type Account, accountsApi } from "../../api";
-import PageHeader from "../../components/PageHeader";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Alert, Button } from "@d3cloud/ui";
+import { Alert, Button, PageHeader } from "@d3cloud/ui";
 
 function humanBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -29,9 +28,13 @@ export default function AccountPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
-      <PageHeader icon={KeyRound} title="Your account">
-        {account.email}
-      </PageHeader>
+      <PageHeader icon={<KeyRound size={20} strokeWidth={1.8} />} title="Your account"
+        description={
+          <>
+          {account.email}
+          </>
+        }
+      />
 
       <Storage account={account} />
       <TwoFactor account={account} onChanged={load} />

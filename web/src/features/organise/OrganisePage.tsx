@@ -1,6 +1,5 @@
 import { Tags } from "lucide-react";
 
-import PageHeader from "../../components/PageHeader";
 import { useCallback, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
@@ -18,7 +17,7 @@ import {
   type UnifyProposal,
   type TimelineEntry,
 } from "../../api";
-import { Alert, Button, SegmentedControl } from "@d3cloud/ui";
+import { Alert, Button, PageHeader, SegmentedControl } from "@d3cloud/ui";
 
 /**
  * Organise (Phase 5) — correspondents, assets, and taxonomy health.
@@ -40,10 +39,14 @@ export default function OrganisePage({ libraries }: { libraries: { id: string }[
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader icon={Tags} title="Organise">
-        The vocabulary the archive files things under. Near-duplicates here are what
-        make documents unfindable under the name you&apos;d actually reach for.
-      </PageHeader>
+      <PageHeader icon={<Tags size={20} strokeWidth={1.8} />} title="Organise"
+        description={
+          <>
+          The vocabulary the archive files things under. Near-duplicates here are what
+          make documents unfindable under the name you&apos;d actually reach for.
+          </>
+        }
+      />
 
       {/* Manual activation: each view mounts a component that fetches, so
           arrowing across would load all three. */}

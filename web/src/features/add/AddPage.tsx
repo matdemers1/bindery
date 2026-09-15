@@ -10,9 +10,8 @@ import {
 import { ApiError, api, type FileProgress, type Library } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
 import LogViewer from "../../components/LogViewer";
-import PageHeader from "../../components/PageHeader";
 import PipelineFlow, { FileRow } from "./PipelineFlow";
-import { Button, Alert } from "@d3cloud/ui";
+import { Alert, Button, PageHeader } from "@d3cloud/ui";
 
 /**
  * Adding files.
@@ -138,11 +137,15 @@ export default function AddPage({
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
-      <PageHeader icon={UploadCloud} title="Add files">
-        Drop anything in — a PDF, a photo of a receipt, a whole scanner batch. You can
-        look over what you picked before it goes anywhere, and watch what happens to it
-        afterwards.
-      </PageHeader>
+      <PageHeader icon={<UploadCloud size={20} strokeWidth={1.8} />} title="Add files"
+        description={
+          <>
+          Drop anything in — a PDF, a photo of a receipt, a whole scanner batch. You can
+          look over what you picked before it goes anywhere, and watch what happens to it
+          afterwards.
+          </>
+        }
+      />
 
       {error && (
         <Alert tone="danger" dynamic>
