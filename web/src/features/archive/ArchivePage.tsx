@@ -6,7 +6,7 @@ import { Library as LibraryIcon } from "lucide-react";
 import { ApiError, api, type Archive, type ArchiveEntry, type BulkResult, type Tree } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
 import { SourceChip } from "../why/WhyPanel";
-import { Button, EmptyState, SegmentedControl, Select, Skeleton } from "@d3cloud/ui";
+import { Button, Checkbox, EmptyState, Input, SegmentedControl, Select, Skeleton } from "@d3cloud/ui";
 
 /**
  * The archive browser (screen 2).
@@ -192,7 +192,7 @@ export default function ArchivePage() {
             <label htmlFor="archive-filter" className="sr-only">
               Filter by title or filename
             </label>
-            <input
+            <Input
               id="archive-filter"
               defaultValue={filters.q}
               onKeyDown={(event) => {
@@ -202,7 +202,7 @@ export default function ArchivePage() {
                 }
               }}
               placeholder="Filter by title or filename…"
-              className="min-w-0 flex-1 rounded-md border border-field bg-surface px-3 py-1.5 text-sm outline-none focus:border-accent"
+              className="min-w-0 flex-1"
             />
             <Select
               aria-label="Sort order"
@@ -306,12 +306,14 @@ function Row({
         selected ? "border-accent" : "border-edge hover:border-accent/60"
       }`}
     >
-      <input
-        type="checkbox"
+      {/* The row's title is the link beside it, so the box is named rather
+          than labelled: a visible "Select" on every row is noise. */}
+      <Checkbox
         checked={selected}
-        onChange={onToggle}
+        onCheckedChange={onToggle}
         aria-label={`Select ${entry.title ?? entry.original_filename ?? "document"}`}
-        className="mt-1 shrink-0 accent-accent"
+        label={null}
+        className="mt-1 shrink-0"
       />
       <Link to={`/document/${entry.document_id}/page/1`} className="flex min-w-0 flex-1 gap-3">
         <PageThumb
@@ -397,7 +399,7 @@ function BulkBar({
         <span className="text-sm">
           {selected.size} selected
         </span>
-        <input
+        <Input
           aria-label="Tags to add, comma separated"
           value={tags}
           onChange={(event) => {
@@ -405,7 +407,7 @@ function BulkBar({
             setPreview(null);
           }}
           placeholder="Add tags, comma separated"
-          className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="min-w-0 flex-1"
         />
         <Button onClick={async () => { setBusy(true); try { setPreview(await api.bulkPreview([...selected], actions())); } finally { setBusy(false); } }} disabled={busy || !tags.trim()}>
           Preview

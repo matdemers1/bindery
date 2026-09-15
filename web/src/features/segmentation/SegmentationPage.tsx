@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, api, type SegmentList, type SourceFileDetail } from "../../api";
 import { ErrorState } from "../../components/States";
-import { Button, EmptyState, Link as TextLink } from "@d3cloud/ui";
+import { Button, EmptyState, Input, Link as TextLink } from "@d3cloud/ui";
 
 /**
  * The manual segmentation editor (REQ-036).
@@ -233,7 +233,7 @@ export default function SegmentationPage() {
                   ? `page ${segment.start}`
                   : `pages ${segment.start}–${segment.end}`}
               </span>
-              <input
+              <Input
                 aria-label={
                   segment.start === segment.end
                     ? `Title for the document on page ${segment.start}`
@@ -244,7 +244,7 @@ export default function SegmentationPage() {
                   setTitles((current) => ({ ...current, [segment.start]: event.target.value }))
                 }
                 placeholder={`Document ${index + 1} — untitled`}
-                className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
+                className="min-w-0 flex-1"
               />
               {saved.segments.find(
                 (existing) => existing.page_start === segment.start && existing.known_form_id,

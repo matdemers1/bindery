@@ -3,7 +3,7 @@ import { Workflow } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api, type Library, type RuleDryRun, type RuleRecord } from "../../api";
-import { Button, PageHeader, Select } from "@d3cloud/ui";
+import { Button, Input, PageHeader, Select } from "@d3cloud/ui";
 
 /**
  * The rules editor (T-3.13, REQ-061).
@@ -202,13 +202,13 @@ function NewRuleForm({
     >
       <p className="mb-3 text-xs tracking-wide text-muted uppercase">New rule</p>
       <div className="grid gap-2 sm:grid-cols-2">
-        <input
+        <Input
           required
           aria-label="Name for this rule"
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="Name — e.g. GEICO is vehicle insurance"
-          className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent sm:col-span-2"
+          className="sm:col-span-2"
         />
         <Select
           aria-label="Field to match"
@@ -222,21 +222,19 @@ function NewRuleForm({
           onValueChange={setOperator}
           options={OPERATORS.map((option) => ({ value: option, label: option.replace(/_/g, " ") }))}
         />
-        <input
+        <Input
           required
           aria-label="Value to match"
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="Value — e.g. GEICO"
-          className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
         />
-        <input
+        <Input
           required
           aria-label="Tags to add, comma separated"
           value={tags}
           onChange={(event) => setTags(event.target.value)}
           placeholder="Add tags, comma separated"
-          className="rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
         />
       </div>
       <Button className="mt-3" type="submit">

@@ -3,7 +3,7 @@ import { KeyRound, ShieldCheck, HardDrive, Copy, Check } from "lucide-react";
 
 import { ApiError, type Account, accountsApi } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Alert, Button, PageHeader } from "@d3cloud/ui";
+import { Alert, Button, CodeInput, Input, PageHeader } from "@d3cloud/ui";
 
 function humanBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -167,15 +167,13 @@ function TwoFactor({ account, onChanged }: { account: Account; onChanged: () => 
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
           </div>
-          <input
+          <CodeInput
             aria-label="Code from your authenticator"
-            inputMode="numeric"
             autoComplete="one-time-code"
             required
             value={code}
-            onChange={(event) => setCode(event.target.value)}
-            placeholder="123456"
-            className="mt-3 w-full rounded-md border border-field bg-ink px-3 py-2 font-mono tracking-widest outline-none focus:border-accent"
+            onValueChange={setCode}
+            className="mt-3"
           />
           {error && <p className="mt-2 text-sm text-danger">{error}</p>}
           <Button variant="primary" className="mt-3" type="submit">
@@ -240,7 +238,7 @@ function ChangePassword() {
         for changing it.
       </p>
       <form onSubmit={submit} className="mt-3 space-y-3">
-        <input
+        <Input
           type="password"
           required
           aria-label="Your current password"
@@ -248,9 +246,8 @@ function ChangePassword() {
           placeholder="Current password"
           value={current}
           onChange={(event) => setCurrent(event.target.value)}
-          className="w-full rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
         />
-        <input
+        <Input
           type="password"
           required
           minLength={12}
@@ -259,7 +256,6 @@ function ChangePassword() {
           placeholder="New password — at least 12 characters"
           value={next}
           onChange={(event) => setNext(event.target.value)}
-          className="w-full rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
         />
         {error && <p className="text-sm text-danger">{error}</p>}
         {done && <p className="text-sm text-success">Changed.</p>}

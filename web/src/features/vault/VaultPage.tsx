@@ -16,7 +16,7 @@ import SetupForm from "./SetupForm";
 import VaultGrid from "./VaultGrid";
 import VaultVideos from "./VaultVideos";
 import UnlockForm from "./UnlockForm";
-import { Alert, Button, PageHeader, TabPanel, Tabs } from "@d3cloud/ui";
+import { Alert, Button, Input, PageHeader, TabPanel, Tabs } from "@d3cloud/ui";
 
 /**
  * The private vault.
@@ -163,23 +163,18 @@ export default function VaultPage() {
                 : ""}
           </p>
 
-          <form onSubmit={runSearch} className="relative">
-            <Search
-              size={15}
-              aria-hidden
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
-            />
+          <form onSubmit={runSearch}>
             <label htmlFor="vault-search" className="sr-only">
               Search the vault
             </label>
-            <input
+            <Input
               id="vault-search"
-              aria-invalid={Boolean(error)}
+              leading={<Search size={15} />}
+              invalid={Boolean(error)}
               aria-describedby={error ? "vault-search-error" : undefined}
               value={q}
               onChange={(event) => setQ(event.target.value)}
               placeholder="Search inside the vault…"
-              className="w-full rounded-lg border border-field bg-surface py-2 pl-9 pr-3 text-sm outline-none focus:border-accent"
             />
           </form>
 

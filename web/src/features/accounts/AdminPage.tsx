@@ -4,7 +4,7 @@ import { Users, UserPlus, Copy, Check, Lock, Ban, RotateCcw, ShieldCheck } from 
 
 import { ApiError, type AdminAccount, type AdminInvitation, accountsApi } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Alert, Button, IconButton, PageHeader } from "@d3cloud/ui";
+import { Alert, Button, IconButton, Input, PageHeader } from "@d3cloud/ui";
 
 const GB = 1024 ** 3;
 
@@ -223,13 +223,14 @@ function Row({
             <label htmlFor={quotaFieldId} className="sr-only">
               Storage quota in GB for {account.email}
             </label>
-            <input
+            <Input
+              size="sm"
               id={quotaFieldId}
               value={quotaGb}
               onChange={(event) => setQuotaGb(event.target.value)}
               inputMode="decimal"
               placeholder="no limit"
-              className="w-20 rounded border border-field bg-ink px-1.5 py-0.5 text-xs outline-none focus:border-accent"
+              className="w-20"
             />
             <span className="text-xs text-muted">GB</span>
             <Button size="sm" type="submit">
@@ -341,39 +342,35 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
       </p>
 
       <form onSubmit={submit} className="mt-3 grid gap-3 sm:grid-cols-2">
-        <input
+        <Input
           type="email"
           required
           aria-label="Their email address"
           placeholder="their@email.address"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className="rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
         />
-        <input
+        <Input
           required
           aria-label="What their library is called"
           placeholder="What their library is called"
           value={libraryName}
           onChange={(event) => setLibraryName(event.target.value)}
-          className="rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
         />
         <label className="text-sm">
           <span className="mb-1 block text-xs text-muted">Space, in GB (blank for no limit)</span>
-          <input
+          <Input
             inputMode="decimal"
             value={quotaGb}
             onChange={(event) => setQuotaGb(event.target.value)}
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
           />
         </label>
         <label className="text-sm">
           <span className="mb-1 block text-xs text-muted">A note they will see</span>
-          <input
+          <Input
             value={note}
             onChange={(event) => setNote(event.target.value)}
             placeholder="Optional"
-            className="w-full rounded-md border border-field bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
           />
         </label>
         <div className="sm:col-span-2">

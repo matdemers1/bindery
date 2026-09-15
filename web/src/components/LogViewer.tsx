@@ -10,7 +10,7 @@ import {
 
 import { ApiError, api, type LogEntry } from "../api";
 import { useLiveQuery } from "../live/LiveProvider";
-import { Alert, Button, IconButton, Select } from "@d3cloud/ui";
+import { Alert, Button, IconButton, Input, Select } from "@d3cloud/ui";
 
 /**
  * The log, on screen.
@@ -116,12 +116,13 @@ export default function LogViewer({
         <label className="sr-only" htmlFor="log-search">
           Filter messages
         </label>
-        <input
+        <Input
+          size="sm"
           id="log-search"
           value={q}
           onChange={(event) => setQ(event.target.value)}
           placeholder="Filter…"
-          className="w-40 rounded border border-field bg-ink px-2 py-1 text-xs"
+          className="w-40"
         />
 
         <IconButton

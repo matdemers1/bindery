@@ -6,7 +6,7 @@ import LogViewer from "../../components/LogViewer";
 import { setShortcutsEnabled, shortcutsEnabled } from "../../lib/keyboard";
 import PendingReviewPanel from "../../components/PendingReview";
 import { ApiError, api, type ApiTokenRecord, type IssuedApiToken, type OffsiteTest, type Settings, type SettingsTest } from "../../api";
-import { Alert, Button, PageHeader } from "@d3cloud/ui";
+import { Alert, Button, Checkbox, Input, PageHeader } from "@d3cloud/ui";
 
 /**
  * Settings (screen 19).
@@ -92,7 +92,7 @@ export default function SettingsPage() {
           <label htmlFor="claude-api-key" className="sr-only">
             Claude API key
           </label>
-          <input
+          <Input
             id="claude-api-key"
             type="password"
             value={key}
@@ -100,7 +100,7 @@ export default function SettingsPage() {
             placeholder="sk-ant-…"
             autoComplete="off"
             spellCheck={false}
-            className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent"
+            className="min-w-0 flex-1 font-mono"
           />
           <Button variant="primary" type="submit" disabled={busy || !key.trim()}>
             {busy ? "Saving…" : "Save and test"}
@@ -331,13 +331,13 @@ function NotificationSettings({
         <label htmlFor="webhook" className="sr-only">
           Webhook URL
         </label>
-        <input
+        <Input
           id="webhook"
           type="url"
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           placeholder="https://ntfy.sh/your-topic"
-          className="w-96 max-w-full rounded border border-field bg-ink px-2 py-1.5 text-sm"
+          className="w-96 max-w-full"
         />
         <Button variant="primary" type="submit" disabled={busy || !url.trim()}>
           Save
@@ -393,19 +393,15 @@ function Keyboard() {
         They already stand aside while you are typing and while a correction is
         open. Turn them off if a stray keystroke, or dictation, can reach the page.
       </p>
-      <label htmlFor={id} className="flex items-center gap-2 text-sm">
-        <input
-          id={id}
-          type="checkbox"
-          checked={on}
-          className="size-4 rounded border-field"
-          onChange={(event) => {
-            setOn(event.target.checked);
-            setShortcutsEnabled(event.target.checked);
-          }}
-        />
-        Single-key shortcuts
-      </label>
+      <Checkbox
+        id={id}
+        checked={on}
+        onCheckedChange={(checked) => {
+          setOn(checked === true);
+          setShortcutsEnabled(checked === true);
+        }}
+        label="Single-key shortcuts"
+      />
       <p className="mt-2 text-xs text-muted">
         Stored in this browser, not on your account.
       </p>
@@ -486,8 +482,6 @@ function OffsiteReplication({
   // 1.32:1 — no channel reaches 3:1, so the inputs had no perceivable
   // boundary (WCAG 1.4.11). `field` is the token the rest of the app's
   // controls moved to; this local string was the one place that missed it.
-  const field = "w-full rounded-md border border-field bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent";
-
   return (
     <section className="mt-6 rounded-lg border border-edge bg-surface p-5">
       <h2 className="text-base font-medium">Offsite replication</h2>
@@ -554,13 +548,13 @@ function OffsiteReplication({
       <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={save}>
         <label className="text-sm">
           <span className="mb-1 block text-muted">Access key ID</span>
-          <input
+          <Input
             value={keyId}
             onChange={(event) => setKeyId(event.target.value)}
             placeholder="AKIA…"
             autoComplete="off"
             spellCheck={false}
-            className={field}
+            className="font-mono"
           />
         </label>
         <label className="text-sm">
@@ -570,36 +564,36 @@ function OffsiteReplication({
               <span className="text-xs">— leave blank to keep the stored one</span>
             )}
           </span>
-          <input
+          <Input
             type="password"
             value={secret}
             onChange={(event) => setSecret(event.target.value)}
             placeholder={settings.aws_secret_configured ? "••••••••" : "40 characters"}
             autoComplete="off"
             spellCheck={false}
-            className={field}
+            className="font-mono"
           />
         </label>
         <label className="text-sm">
           <span className="mb-1 block text-muted">Bucket</span>
-          <input
+          <Input
             value={bucket}
             onChange={(event) => setBucket(event.target.value)}
             placeholder="bindery-offsite-…"
             autoComplete="off"
             spellCheck={false}
-            className={field}
+            className="font-mono"
           />
         </label>
         <label className="text-sm">
           <span className="mb-1 block text-muted">Region</span>
-          <input
+          <Input
             value={region}
             onChange={(event) => setRegion(event.target.value)}
             placeholder="us-east-1"
             autoComplete="off"
             spellCheck={false}
-            className={field}
+            className="font-mono"
           />
         </label>
         <label className="text-sm sm:col-span-2">
@@ -609,13 +603,13 @@ function OffsiteReplication({
               — write this down somewhere that is not this server. A restore needs it.
             </span>
           </span>
-          <input
+          <Input
             value={kms}
             onChange={(event) => setKms(event.target.value)}
             placeholder="alias/bindery-offsite, or the key UUID"
             autoComplete="off"
             spellCheck={false}
-            className={field}
+            className="font-mono"
           />
         </label>
 
@@ -699,30 +693,28 @@ function ApiTokens() {
       >
         <label className="flex flex-col gap-1">
           <span className="text-xs text-muted">Name</span>
-          <input
+          <Input
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Brother scanner"
-            className="w-56 rounded border border-field bg-ink px-2 py-1.5 text-sm"
+            className="w-56"
           />
         </label>
         <fieldset className="flex flex-wrap gap-3">
           <legend className="sr-only">Scopes</legend>
           {Object.entries(SCOPE_LABELS).map(([scope, label]) => (
-            <label key={scope} className="flex items-center gap-1.5 text-sm">
-              <input
-                type="checkbox"
-                checked={scopes.includes(scope)}
-                onChange={(event) =>
-                  setScopes((current) =>
-                    event.target.checked
-                      ? [...current, scope]
-                      : current.filter((s) => s !== scope),
-                  )
-                }
-              />
-              {label}
-            </label>
+            <Checkbox
+              key={scope}
+              checked={scopes.includes(scope)}
+              onCheckedChange={(checked) =>
+                setScopes((current) =>
+                  checked === true
+                    ? [...current, scope]
+                    : current.filter((s) => s !== scope),
+                )
+              }
+              label={label}
+            />
           ))}
         </fieldset>
         <Button variant="primary" type="submit" disabled={!name.trim() || scopes.length === 0}>

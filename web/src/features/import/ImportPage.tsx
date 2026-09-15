@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
   AlertTriangle,
@@ -24,7 +24,7 @@ import {
 } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
 import UnlockForm from "../vault/UnlockForm";
-import { Button, PageHeader, SegmentedControl } from "@d3cloud/ui";
+import { Button, Checkbox, Input, PageHeader, SegmentedControl } from "@d3cloud/ui";
 
 /**
  * Import (T-4.1 to T-4.5; redesigned in Phase 18, REQ-196, REQ-197).
@@ -60,6 +60,7 @@ const STATE_LABEL: Record<string, string> = {
 };
 
 export default function ImportPage({ libraries }: { libraries: Library[] }) {
+  const vaultHintId = useId();
   const [sessions, setSessions] = useState<ImportSession[]>([]);
   const [active, setActive] = useState<ImportSession | null>(null);
   const [inbox, setInbox] = useState<string | null>(null);
@@ -194,12 +195,12 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
             }}
             className="flex min-w-0 flex-1 gap-2"
           >
-            <input
+            <Input
               aria-label="A folder the worker can see"
               value={path}
               onChange={(event) => setPath(event.target.value)}
               placeholder={`…or a folder the worker can see, e.g. ${inbox ?? "/data/inbox"}/2019`}
-              className="min-w-0 flex-1 rounded-lg border border-field bg-ink px-3 py-2 font-mono text-sm outline-none focus:border-accent"
+              className="min-w-0 flex-1 font-mono"
             />
             <Button
               type="submit"
@@ -213,17 +214,15 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
         </div>
 
         {/* Into the vault. Only offered as a real choice when it can be honoured. */}
-        <label
-          className={`flex items-start gap-2 text-sm ${vaultReady ? "" : "text-muted"}`}
-        >
-          <input
-            type="checkbox"
+        <div className="text-sm">
+          <Checkbox
             // Optimistic: reflects the click at once rather than after the
             // round-trip, or the box appears not to respond for a beat.
             checked={(touched ? toVault : active ? active.to_vault : toVault) && vaultReady}
             disabled={!vaultReady}
-            onChange={(event) => {
-              const wanted = event.target.checked;
+            aria-describedby={vaultHintId}
+            onCheckedChange={(checked) => {
+              const wanted = checked === true;
               setTouched(true);
               setToVault(wanted);
               // Persisted the moment it is ticked, on the import that is on
@@ -238,21 +237,20 @@ export default function ImportPage({ libraries }: { libraries: Library[] }) {
                     : "This import will stay in the ordinary archive.");
               }
             }}
-            className="mt-0.5"
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <ShieldCheck size={14} /> Straight into the vault
+              </span>
+            }
           />
-          <span>
-            <span className="flex items-center gap-1.5">
-              <ShieldCheck size={14} /> Straight into the vault
-            </span>
-            <span className="block text-xs text-muted">
-              {vault?.exists === false
-                ? "You have no vault yet — set one up under Vault first."
-                : vaultReady
-                  ? "Every file is encrypted and taken out of the archive the moment its processing finishes, while your vault is open."
-                  : "Your vault is locked. Unlock it to import into it — files are sealed as they finish, and that needs the vault open."}
-            </span>
-          </span>
-        </label>
+          <p id={vaultHintId} className="ml-6 text-xs text-muted">
+            {vault?.exists === false
+              ? "You have no vault yet — set one up under Vault first."
+              : vaultReady
+                ? "Every file is encrypted and taken out of the archive the moment its processing finishes, while your vault is open."
+                : "Your vault is locked. Unlock it to import into it — files are sealed as they finish, and that needs the vault open."}
+          </p>
+        </div>
         {vault?.exists && !vault.unlocked && (
           <div className="max-w-sm">
             <UnlockForm state={vault} onUnlocked={setVault} compact />

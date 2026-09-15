@@ -7,7 +7,7 @@ import Modal from "../../components/Modal";
 import { useLiveQuery } from "../../live/LiveProvider";
 import MetadataPanel, { formatDuration } from "../media/MetadataPanel";
 import MoveToVault from "../vault/MoveToVault";
-import { Alert, Button, PageHeader, TabPanel, Tabs } from "@d3cloud/ui";
+import { Alert, Button, Input, PageHeader, TabPanel, Tabs } from "@d3cloud/ui";
 
 type Kind = "image" | "video";
 
@@ -186,21 +186,16 @@ export default function PhotosPage() {
         ]}
       >
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-56 flex-1">
-          <Search
-            size={15}
-            aria-hidden
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
-          />
+        <div className="min-w-56 flex-1">
           <label htmlFor="photo-search" className="sr-only">
             Filter {kind === "image" ? "photos" : "videos"}
           </label>
-          <input
+          <Input
             id="photo-search"
+            leading={<Search size={15} />}
             value={q}
             onChange={(event) => setQ(event.target.value)}
             placeholder="Filter by title, description or filename…"
-            className="w-full rounded-lg border border-field bg-surface py-2 pl-9 pr-3 text-sm outline-none focus:border-accent"
           />
         </div>
         {kind === "image" && (

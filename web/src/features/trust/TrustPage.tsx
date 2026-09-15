@@ -23,7 +23,7 @@ import {
   type MirrorResult,
   type OffsiteStatus,
 } from "../../api";
-import { Alert, Button, Card as UICard, CardBody, CardTitle, PageHeader, Select } from "@d3cloud/ui";
+import { Alert, Button, Card as UICard, CardBody, CardTitle, Input, PageHeader, Select } from "@d3cloud/ui";
 
 /**
  * Trust — export, integrity, backup, and the audit log.
@@ -207,13 +207,13 @@ function ResiliencePanel() {
           whole point is that it leaves the house."
       >
         <div className="flex flex-wrap items-center gap-2">
-          <input
+          <Input
             type="password"
             aria-label="Passphrase for the go-bag"
             value={passphrase}
             onChange={(event) => setPassphrase(event.target.value)}
             placeholder="Passphrase (12+ characters)"
-            className="w-72 rounded border border-field bg-ink px-2 py-1.5 text-sm"
+            className="w-72"
           />
           <Action
             busy={busy === "gobag"}
@@ -552,19 +552,20 @@ function AuditPanel() {
           />
         </Field>
         <Field label="Document">
-          <input
+          <Input
+            size="sm"
             value={entityId}
             onChange={(event) => setEntityId(event.target.value.trim())}
             placeholder="document id"
-            className="w-72 rounded border border-field bg-ink px-2 py-1.5 font-mono text-xs"
+            className="w-72 font-mono"
           />
         </Field>
         <Field label="Since">
-          <input
+          <Input
             type="date"
             value={since}
             onChange={(event) => setSince(event.target.value)}
-            className="rounded border border-field bg-ink px-2 py-1.5 text-sm"
+            className="w-44"
           />
         </Field>
       </div>

@@ -79,11 +79,11 @@ body {
 }
 
 /* Anything the user is expected to click is at least 24px tall even at the
-   smallest text size. The library's own controls already clear this; the rule
-   stays until the last hand-rolled button is gone. */
-button,
-[role="button"],
-select {
+   smallest text size. The rule stays until the last hand-rolled button is gone.
+   Library controls are excluded: they size themselves, and some are buttons
+   underneath that must stay small — a Checkbox box is a 17px <button>, and this
+   rule made it 17 by 25. */
+:where(button, [role="button"], select):not([class*="d3-"]) {
   min-height: 1.75rem;
 }
 

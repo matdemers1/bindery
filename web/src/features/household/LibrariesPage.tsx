@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 
 import { ApiError, api, type LibraryDetail } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Alert, Button, PageHeader, Select } from "@d3cloud/ui";
+import { Alert, Button, Input, PageHeader, Select } from "@d3cloud/ui";
 
 /**
  * Libraries — who is in the household, and what they may do (T-7.7).
@@ -107,12 +107,12 @@ export default function LibrariesPage() {
             );
           }}
         >
-          <input
+          <Input
             aria-label="Name for the new library"
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
             placeholder="Library name"
-            className="w-64 rounded border border-field bg-ink px-2 py-1.5 text-sm"
+            className="w-64"
           />
           <Button variant="primary" type="submit" disabled={!newName.trim()}>
             Create
@@ -174,12 +174,12 @@ function LibraryCard({
             setEmail("");
           }}
         >
-          <input
+          <Input
             aria-label="Email address of the person to add"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="Add someone by email"
-            className="w-64 rounded border border-field bg-ink px-2 py-1.5 text-sm"
+            className="w-64"
           />
           <Select
             aria-label="Role for the person you are adding"

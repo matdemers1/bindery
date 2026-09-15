@@ -9,7 +9,7 @@ import { rememberFoundSomething } from "../firstrun/onboarding";
 import Snippet from "../../components/Snippet";
 import VaultSearchPanel from "../vault/VaultSearchPanel";
 import { ErrorState } from "../../components/States";
-import { Skeleton } from "@d3cloud/ui";
+import { Input, Skeleton } from "@d3cloud/ui";
 
 // Every piece of search state lives in the URL (REQ-028), so a result is a link
 // you can send someone, and the back button behaves.
@@ -138,25 +138,21 @@ export default function SearchPage({
           update((next) => (draft.trim() ? next.set("q", draft) : next.delete("q")));
         }}
       >
-        <div className="relative">
-          <SearchIcon
-            size={18}
-            aria-hidden
-            className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"
-          />
+        <div>
           {/* A placeholder is a hint, not a name: it is gone the moment a
               character is typed, and the <h1> above names the page rather than
               the control. */}
           <label htmlFor="search-query" className="sr-only">
             Search every page in the archive
           </label>
-          <input
+          <Input
             id="search-query"
+            size="lg"
             autoFocus
+            leading={<SearchIcon size={18} />}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Search every page in the archive…"
-            className="w-full rounded-xl border border-field bg-surface py-3 pl-12 pr-4 text-lg outline-none transition-colors focus:border-accent"
           />
         </div>
       </form>

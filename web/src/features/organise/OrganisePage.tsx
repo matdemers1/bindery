@@ -17,7 +17,7 @@ import {
   type UnifyProposal,
   type TimelineEntry,
 } from "../../api";
-import { Alert, Button, EmptyState, PageHeader, SegmentedControl, Select as UISelect, Skeleton } from "@d3cloud/ui";
+import { Alert, Button, EmptyState, Input, PageHeader, SegmentedControl, Select as UISelect, Skeleton } from "@d3cloud/ui";
 
 /**
  * Organise (Phase 5) — correspondents, assets, and taxonomy health.
@@ -218,12 +218,13 @@ function AliasForm({ correspondentId, onAdded }: { correspondentId: string; onAd
         onAdded();
       }}
     >
-      <input
+      <Input
+        size="sm"
         aria-label="Another spelling of this name"
         value={alias}
         onChange={(event) => setAlias(event.target.value)}
         placeholder="Add another spelling…"
-        className="min-w-0 flex-1 rounded border border-field bg-ink px-2 py-1 text-xs outline-none focus:border-accent"
+        className="min-w-0 flex-1"
       />
       <Button size="sm" type="submit">
         Add
@@ -265,12 +266,12 @@ function Assets({ libraryId }: { libraryId?: string }) {
             label: k,
           }))}
         />
-        <input
+        <Input
           aria-label="What this thing is called"
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="2020 Honda Accord"
-          className="min-w-0 flex-1 rounded-md border border-field bg-ink px-3 py-1.5 text-sm outline-none focus:border-accent"
+          className="min-w-0 flex-1"
         />
         <Button type="submit">
           Add

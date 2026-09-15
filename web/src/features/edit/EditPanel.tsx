@@ -10,7 +10,7 @@ import {
 import { useLiveQuery } from "../../live/LiveProvider";
 import MetadataPanel from "../media/MetadataPanel";
 import SourceBadge from "./SourceBadge";
-import { Button, Alert } from "@d3cloud/ui";
+import { Alert, Button, Input, Textarea } from "@d3cloud/ui";
 
 /**
  * Correcting a document (REQ-188 to REQ-190).
@@ -183,24 +183,23 @@ export default function EditPanel({
     <div className="space-y-4 rounded-xl border border-edge bg-surface p-4">
       <Field label="Title" source={sources.get("title")}>
         {(id) => (
-          <input
+          <Input
             id={id}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Untitled"
-            className="w-full rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
           />
         )}
       </Field>
 
       <Field label="Date" source={sources.get("document_date")}>
         {(id) => (
-          <input
+          <Input
             id={id}
             type="date"
             value={documentDate}
             onChange={(event) => setDocumentDate(event.target.value)}
-            className="rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+            className="w-44"
           />
         )}
       </Field>
@@ -222,12 +221,12 @@ export default function EditPanel({
                 </option>
               ))}
             </select>
-            <input
+            <Input
               aria-label="Create a new correspondent"
               value={newCorrespondent}
               onChange={(event) => setNewCorrespondent(event.target.value)}
               placeholder="or create a new one…"
-              className="min-w-40 flex-1 rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+              className="min-w-40 flex-1"
             />
           </div>
         )}
@@ -250,12 +249,12 @@ export default function EditPanel({
                 </option>
               ))}
             </select>
-            <input
+            <Input
               aria-label="Create a new document type"
               value={newType}
               onChange={(event) => setNewType(event.target.value)}
               placeholder="or create a new one…"
-              className="min-w-40 flex-1 rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
+              className="min-w-40 flex-1"
             />
           </div>
         )}
@@ -369,12 +368,11 @@ export default function EditPanel({
 
       <Field label="Summary" source={sources.get("summary")}>
         {(id) => (
-          <textarea
+          <Textarea
             id={id}
             value={summary}
             onChange={(event) => setSummary(event.target.value)}
             rows={3}
-            className="w-full rounded-lg border border-field bg-ink/40 px-3 py-2 text-sm outline-none focus:border-accent"
           />
         )}
       </Field>
