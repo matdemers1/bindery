@@ -29,7 +29,7 @@ import { api, type Library, type User } from "../api";
 import VersionBadge from "./VersionBadge";
 import { useLiveQuery } from "../live/LiveProvider";
 import { Wordmark } from "./brand/Logo";
-import { Button } from "@d3cloud/ui";
+import { Button, Tooltip } from "@d3cloud/ui";
 
 /**
  * The application shell.
@@ -359,43 +359,46 @@ export default function Shell({
               collapsed ? "flex-col" : "justify-between"
             }`}
           >
-            <button
-              onClick={() => setAccountOpen((open) => !open)}
-              title={user.email}
-              aria-expanded={accountOpen}
-              aria-label="Account and setup"
-              className={`flex min-w-0 items-center gap-2 rounded p-1.5 text-sm ${
-                accountOpen ? "text-fg" : "text-muted hover:text-fg"
-              }`}
-            >
-              <UserCircle size={16} className="shrink-0" />
-              {!collapsed && (
-                <>
-                  <span className="truncate">{user.email.split("@")[0]}</span>
-                  <ChevronUp
-                    size={14}
-                    className={`shrink-0 transition-transform ${accountOpen ? "" : "rotate-180"}`}
-                  />
-                </>
-              )}
-            </button>
+            <Tooltip content={user.email}>
+              <button
+                onClick={() => setAccountOpen((open) => !open)}
+                aria-expanded={accountOpen}
+                aria-label="Account and setup"
+                className={`flex min-w-0 items-center gap-2 rounded p-1.5 text-sm ${
+                  accountOpen ? "text-fg" : "text-muted hover:text-fg"
+                }`}
+              >
+                <UserCircle size={16} className="shrink-0" />
+                {!collapsed && (
+                  <>
+                    <span className="truncate">{user.email.split("@")[0]}</span>
+                    <ChevronUp
+                      size={14}
+                      className={`shrink-0 transition-transform ${accountOpen ? "" : "rotate-180"}`}
+                    />
+                  </>
+                )}
+              </button>
+            </Tooltip>
             <div className={`flex items-center gap-1 ${collapsed ? "flex-col" : ""}`}>
-              <button
-                onClick={() => setCollapsed((value) => !value)}
-                title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                className="rounded p-1.5 text-muted hover:text-fg"
-              >
-                {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-              </button>
-              <button
-                onClick={onSignedOut}
-                title={`Sign out (${user.email})`}
-                aria-label="Sign out"
-                className="rounded p-1.5 text-muted hover:text-fg"
-              >
-                <LogOut size={16} />
-              </button>
+              <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+                <button
+                  onClick={() => setCollapsed((value) => !value)}
+                  aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  className="rounded p-1.5 text-muted hover:text-fg"
+                >
+                  {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+                </button>
+              </Tooltip>
+              <Tooltip content={`Sign out (${user.email})`}>
+                <button
+                  onClick={onSignedOut}
+                  aria-label="Sign out"
+                  className="rounded p-1.5 text-muted hover:text-fg"
+                >
+                  <LogOut size={16} />
+                </button>
+              </Tooltip>
             </div>
           </div>
         </div>

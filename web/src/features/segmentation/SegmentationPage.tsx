@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, api, type SegmentList, type SourceFileDetail } from "../../api";
 import { ErrorState } from "../../components/States";
-import { Button, EmptyState, Input, Link as TextLink } from "@d3cloud/ui";
+import { Button, EmptyState, Input, Link as TextLink, Tooltip } from "@d3cloud/ui";
 
 /**
  * The manual segmentation editor (REQ-036).
@@ -322,19 +322,20 @@ function SplitHandle({
   // at all by someone who is not using a mouse — and `title` never appears on
   // touch, so it was also the only name this had.
   return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      aria-label={label}
-      title={label}
-      className="group flex w-6 shrink-0 justify-center self-stretch"
-    >
-      <span
-        aria-hidden
-        className={`w-2 rounded-full transition-colors ${
-          active ? "bg-accent" : "bg-field group-hover:bg-muted"
-        }`}
-      />
-    </button>
+    <Tooltip content={label}>
+      <button
+        onClick={onClick}
+        aria-pressed={active}
+        aria-label={label}
+        className="group flex w-6 shrink-0 justify-center self-stretch"
+      >
+        <span
+          aria-hidden
+          className={`w-2 rounded-full transition-colors ${
+            active ? "bg-accent" : "bg-field group-hover:bg-muted"
+          }`}
+        />
+      </button>
+    </Tooltip>
   );
 }

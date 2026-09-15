@@ -249,6 +249,7 @@ export default function WhyPanel({
 function Confidence({ value }: { value: number }) {
   return (
     <span className="flex items-center gap-1.5 text-xs text-muted" title="Model confidence">
+      <span className="sr-only">Model confidence</span>
       <span className="block h-1 w-10 overflow-hidden rounded-full bg-edge">
         <span
           className="block h-full rounded-full bg-muted"
@@ -279,6 +280,9 @@ export function SourceChip({
   return (
     <span title={label} className={`rounded-full border px-2 py-0.5 text-xs ${style}`}>
       {children}
+      {/* REQ-064 was kept only in colour and a hover title, so a screen reader
+          read a classifier's guess exactly like a value you set. */}
+      <span className="sr-only">, {label}</span>
     </span>
   );
 }

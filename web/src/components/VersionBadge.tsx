@@ -44,7 +44,7 @@ export default function VersionBadge({ collapsed }: { collapsed: boolean }) {
   if (collapsed) {
     return worrying ? (
       <div className="flex justify-center py-1" title="Versions disagree">
-        <AlertTriangle size={14} className="text-warning" />
+        <AlertTriangle size={14} className="text-warning" role="img" aria-label="Versions disagree" />
       </div>
     ) : null;
   }

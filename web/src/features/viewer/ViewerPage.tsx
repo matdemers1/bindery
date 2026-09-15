@@ -17,7 +17,7 @@ import { isInteractiveTarget, isTypingTarget, shortcutsEnabled } from "../../lib
 import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 import MoveToVault from "../vault/MoveToVault";
-import { Button, EmptyState, Link as TextLink } from "@d3cloud/ui";
+import { Button, EmptyState, Link as TextLink, Tooltip } from "@d3cloud/ui";
 
 /**
  * Renders a page range as if it were a standalone document (ADR-001), while
@@ -260,12 +260,12 @@ function Viewer({
             <h1 className="flex items-center gap-2 truncate text-lg font-medium">
               {title}
               {document_?.known_form && (
-                <span
+                <abbr
                   title={document_.known_form.name}
-                  className="shrink-0 rounded-full border border-accent/50 px-2 py-0.5 text-xs font-normal text-accent"
+                  className="shrink-0 rounded-full border border-accent/50 px-2 py-0.5 text-xs font-normal text-accent no-underline"
                 >
                   {document_.known_form.code}
-                </span>
+                </abbr>
               )}
             </h1>
             <p className="text-sm text-muted">
@@ -350,21 +350,24 @@ function Viewer({
             {/* Documents only: the vault holds a document, not a whole bundle,
                 because a bundle is usually one vaultable page among fifty. */}
             {mode === "document" && <MoveToVault documentId={routeId} title={title} />}
-            <a
-              href={
-                mode === "document" ? fileUrl.documentPdf(routeId) : fileUrl.pdf(routeId)
-              }
-              target="_blank"
-              rel="noreferrer"
-              title={
+            <Tooltip
+              content={
                 mode === "document"
                   ? "Just this document's pages, as a standalone PDF"
                   : "The whole file"
               }
-              className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted hover:border-accent/60"
             >
-              {mode === "document" && isSegment ? "Export PDF" : "Open PDF"}
-            </a>
+              <a
+                href={
+                  mode === "document" ? fileUrl.documentPdf(routeId) : fileUrl.pdf(routeId)
+                }
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md border border-edge px-3 py-1.5 text-sm text-muted hover:border-accent/60"
+              >
+                {mode === "document" && isSegment ? "Export PDF" : "Open PDF"}
+              </a>
+            </Tooltip>
           </div>
         </header>
 

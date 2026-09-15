@@ -326,12 +326,12 @@ function Results({
                       {result.title ?? result.original_filename ?? "(untitled)"}
                     </span>
                     {result.known_form_code && (
-                      <span
+                      <abbr
                         title={result.known_form_name ?? undefined}
-                        className="shrink-0 rounded-full border border-accent/50 px-2 py-0.5 text-xs text-accent"
+                        className="shrink-0 rounded-full border border-accent/50 px-2 py-0.5 text-xs text-accent no-underline"
                       >
                         {result.known_form_code}
-                      </span>
+                      </abbr>
                     )}
                   </p>
                   <p className="mt-0.5 text-xs text-muted">

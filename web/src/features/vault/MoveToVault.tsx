@@ -4,7 +4,7 @@ import { ShieldCheck } from "lucide-react";
 
 import { ApiError, api, type VaultState } from "../../api";
 import UnlockForm from "./UnlockForm";
-import { Alert, Button, Modal } from "@d3cloud/ui";
+import { Alert, Button, Modal, Tooltip } from "@d3cloud/ui";
 
 /**
  * "Move to vault", from wherever you are looking at the thing.
@@ -69,18 +69,19 @@ export default function MoveToVault({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => void begin()}
-        title="Encrypt this behind the vault passphrase and take it out of search"
-        className={
-          className ??
-          "flex items-center gap-1.5 rounded-md border border-field px-3 py-1.5 text-sm text-muted hover:border-accent/60"
-        }
-      >
-        <ShieldCheck size={14} />
-        Move to vault
-      </button>
+      <Tooltip content="Encrypt this behind the vault passphrase and take it out of search">
+        <button
+          type="button"
+          onClick={() => void begin()}
+          className={
+            className ??
+            "flex items-center gap-1.5 rounded-md border border-field px-3 py-1.5 text-sm text-muted hover:border-accent/60"
+          }
+        >
+          <ShieldCheck size={14} />
+          Move to vault
+        </button>
+      </Tooltip>
 
       {state && (
         <Modal

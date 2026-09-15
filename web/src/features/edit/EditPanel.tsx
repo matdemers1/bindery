@@ -10,7 +10,7 @@ import {
 import { useLiveQuery } from "../../live/LiveProvider";
 import MetadataPanel from "../media/MetadataPanel";
 import SourceBadge from "./SourceBadge";
-import { Alert, Button, Input, Textarea } from "@d3cloud/ui";
+import { Alert, Button, Input, Textarea, Tooltip } from "@d3cloud/ui";
 
 /**
  * Correcting a document (REQ-188 to REQ-190).
@@ -394,15 +394,16 @@ export default function EditPanel({
             Cancel
           </Button>
         )}
-        <button
-          type="button"
-          onClick={() => void undo()}
-          disabled={busy}
-          title="Walk back the last change to this document"
-          className="ml-auto flex items-center gap-1.5 text-xs text-muted underline underline-offset-2 hover:text-fg disabled:opacity-40"
-        >
-          <Undo2 size={12} /> Undo last change
-        </button>
+        <Tooltip content="Walk back the last change to this document">
+          <button
+            type="button"
+            onClick={() => void undo()}
+            disabled={busy}
+            className="ml-auto flex items-center gap-1.5 text-xs text-muted underline underline-offset-2 hover:text-fg disabled:opacity-40"
+          >
+            <Undo2 size={12} /> Undo last change
+          </button>
+        </Tooltip>
       </div>
 
       {detail.media && (
