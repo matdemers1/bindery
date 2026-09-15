@@ -83,12 +83,12 @@ docker compose --env-file .env -f infra/docker-compose.yml --profile test \
 host, because ZimaOS's read-only root and split `HOME` break SSH keys and
 private registry pulls in ways that look like unrelated problems.
 
-**Built: phases 0–11 and 13–18** — retrieval, bundles and known forms,
+**Built: phases 0–11 and 13–19** — retrieval, bundles and known forms,
 classification with provenance and the gate, backlog import, entities,
 trust/export/resilience, household and libraries, ask/health/hardening, the
 first-real-corpus consolidation, accounts and administration, documentation and
 versioning, offsite replication, signal and navigation, the build gate, the
-private vault, corrections, and media/metadata/inbox. **Planned next: Phase 12**
+private vault, corrections, media/metadata/inbox, and the front door (first-run setup and the entry screens). **Planned next: Phase 12**
 (later features). The per-phase truth is
 `D3 Cloud Vault/Bindery/Scope of Work.md` — this line is a pointer, not a second
 copy, because the copy is what went eleven phases stale.
@@ -513,6 +513,28 @@ harness.
 
 `infra/zimaos/bindery.zimaos.yaml` is the CasaOS custom-app manifest. It must
 never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
+
+## The front door and first-run setup (Phase 19)
+
+`api/first_run.py`, `api/routers/setup.py`, `web/src/features/entry/`.
+
+- **A fresh install is claimed in the browser with a setup code.** It is
+  printed at api start while `app_user` is empty (`[bindery setup]` lines) and
+  by `python -m api.cli setup-code`. It goes to **stdout, never `logging`**:
+  `eventlog` persists every log record to a table the diagnostics screen reads.
+  At rest it is an HMAC keyed on `JWT_SECRET`, expires in a day, and is cleared
+  at claim. The tunnel makes a fresh instance internet-facing; without the code,
+  whoever found the URL first would own the archive.
+- **Claim → Secure → recovery codes → administrator.** Admin is granted by
+  `accounts.grant_admin`, which refuses without TOTP (REQ-156). Setup goes
+  through that rule, never around it. `setup_owner_user_id` makes an abandoned
+  setup resume at Secure on the next sign-in.
+- **`create-user` makes an ordinary account unless given `--owner`.** Implying
+  owner from an empty archive sent CI's e2e account to the setup screen.
+- **Codes are canonicalised before hashing.** `CodeInput` never sends dashes,
+  and people type spaces; `canonical_recovery_code` and `canonical_reset_code`
+  restore the issued form. Do not compare codes as typed.
+- **Kit components carry no margin.** Space entry layouts from the parent grid.
 
 ## Media, metadata and the inbox (Phase 18)
 
