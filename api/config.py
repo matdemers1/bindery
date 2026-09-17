@@ -42,6 +42,18 @@ class Settings(BaseSettings):
     offsite_region: str = "us-east-1"
     offsite_kms_key_id: str = ""
 
+    # Sign in with D3 Auth (Phase 20). Same pattern: Settings is the source of
+    # truth and the environment is the fallback, so a host can be configured
+    # either way. `off` until an operator says otherwise — a self-hosted archive
+    # should not mention a provider nobody has set up.
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    sso_mode: str = "off"
+    # What is registered at the provider, matched there character for character. Derived from
+    # the request when unset, which is right behind one hostname and wrong behind two.
+    oidc_redirect_uri: str = ""
+
     @property
     def blob_root(self) -> Path:
         """Content-addressed originals. Write-once; never modified (invariant 1)."""

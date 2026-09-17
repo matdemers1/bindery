@@ -22,6 +22,7 @@ from api.db.models.known_form import KnownForm
 from api.db.models.library import Library
 from api.db.models.media import MediaMetadata
 from api.db.models.membership import Membership
+from api.db.models.oidc import OidcIdentity, OidcLogoutEvent
 from api.db.models.offsite_object import OffsiteObject
 from api.db.models.offsite_run import OffsiteRun
 from api.db.models.page import Page
@@ -64,6 +65,8 @@ __all__ = [
     "LoginAttempt",
     "MediaMetadata",
     "Membership",
+    "OidcIdentity",
+    "OidcLogoutEvent",
     "OffsiteObject",
     "OffsiteRun",
     "Page",

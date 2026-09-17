@@ -1337,6 +1337,28 @@ class TotpStatusOut(BaseModel):
     required: bool
 
 
+class OidcStatusOut(BaseModel):
+    """What the sign-in screen needs to decide whether to offer SSO (REQ-209).
+
+    Unauthenticated, so it says as little as it can: the mode, whether the provider answers,
+    and — only when SSO is actually configured — which provider it is.
+    """
+
+    mode: str
+    ready: bool
+    issuer: str | None = None
+
+
+class OidcLinkOut(BaseModel):
+    """The state of the *Connect D3 Auth* card for the signed-in account."""
+
+    mode: str
+    issuer: str | None = None
+    linked: bool
+    preferred_username: str | None = None
+    linked_at: datetime | None = None
+
+
 class TotpEnrolOut(BaseModel):
     secret: str
     uri: str
@@ -1545,6 +1567,8 @@ __all__ = [
     "TaxonomyHealthOut",
     "TaxonomyOptionOut",
     "TotpConfirmIn",
+    "OidcLinkOut",
+    "OidcStatusOut",
     "TotpEnrolOut",
     "TotpStatusOut",
     "TreeGroupOut",

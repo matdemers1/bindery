@@ -47,8 +47,20 @@ OFFSITE_REGION = "offsite_region"
 # it would be unreachable at exactly the moment it is needed.
 OFFSITE_KMS_KEY_ID = "offsite_kms_key_id"
 
+# Sign in with D3 Auth (Phase 20, REQ-203). Configured rather than compiled in:
+# an operator turns SSO on without redeploying, and an archive whose operator
+# never does is never told about a provider they have not heard of.
+#
+# `SSO_MODE` is `off`, `optional` or `required`. The client secret is a secret;
+# the issuer and the client id are not — both are printed on the provider's own
+# connection sheet and appear in every authorization URL.
+OIDC_ISSUER = "oidc_issuer"
+OIDC_CLIENT_ID = "oidc_client_id"
+OIDC_CLIENT_SECRET = "oidc_client_secret"
+SSO_MODE = "sso_mode"
+
 SECRET_KEYS = frozenset(
-    {ANTHROPIC_API_KEY, NOTIFY_WEBHOOK_URL, AWS_SECRET_ACCESS_KEY}
+    {ANTHROPIC_API_KEY, NOTIFY_WEBHOOK_URL, AWS_SECRET_ACCESS_KEY, OIDC_CLIENT_SECRET}
 )
 WRITABLE = frozenset(
     {
@@ -61,6 +73,10 @@ WRITABLE = frozenset(
         OFFSITE_BUCKET,
         OFFSITE_REGION,
         OFFSITE_KMS_KEY_ID,
+        OIDC_ISSUER,
+        OIDC_CLIENT_ID,
+        OIDC_CLIENT_SECRET,
+        SSO_MODE,
     }
 )
 
@@ -102,6 +118,10 @@ async def get(session: AsyncSession, key: str) -> str | None:
         OFFSITE_BUCKET: environment.offsite_bucket,
         OFFSITE_REGION: environment.offsite_region,
         OFFSITE_KMS_KEY_ID: environment.offsite_kms_key_id,
+        OIDC_ISSUER: environment.oidc_issuer,
+        OIDC_CLIENT_ID: environment.oidc_client_id,
+        OIDC_CLIENT_SECRET: environment.oidc_client_secret,
+        SSO_MODE: environment.sso_mode,
     }.get(key) or None
 
 

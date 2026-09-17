@@ -14,6 +14,7 @@ from api import eventlog, events, first_run
 from api.config import get_settings, require_usable_configuration
 from api.db.session import SessionFactory
 from api.routers import accounts as accounts_router
+from api.routers import oidc as oidc_router
 from api.routers import (
     auth,
     badges,
@@ -107,6 +108,7 @@ app.include_router(health.router, prefix="/api")
 app.include_router(badges.router, prefix="/api")
 app.include_router(vault_router.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(oidc_router.router, prefix="/api")
 app.include_router(setup.router, prefix="/api")
 app.include_router(accounts_router.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")

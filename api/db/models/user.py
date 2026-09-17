@@ -196,6 +196,13 @@ class RefreshToken(Base):
     issued_at: Mapped[datetime] = created_at()
     expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+
+    # The provider session this Bindery session came from, when it came from a
+    # sign-in through D3 Auth (Phase 20). A back-channel logout names a `sid`,
+    # and this is what turns that into "these rows" — without it the only
+    # honest answer to "end that session" is "end all of this person's", which
+    # signs them out of the laptop because they signed out on the phone.
+    oidc_sid: Mapped[str | None] = mapped_column(sa.Text, index=True)
     # Set when this token was rotated, forming the chain reuse detection walks.
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), sa.ForeignKey("refresh_token.id")
