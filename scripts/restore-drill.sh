@@ -52,7 +52,10 @@ SEARCH_SQL="${SEARCH_TERM//\'/\'\'}"
 CONTAINER="bindery-restore-drill"
 DRILL_PORT="${DRILL_PORT:-55432}"
 DRILL_PASSWORD="drill-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-PG_IMAGE="${PG_IMAGE:-postgres:16-alpine}"
+# The image the stack itself runs (infra/docker-compose.yml). The default used to be
+# postgres:16-alpine, which has no pgvector, so the drill refused on every host until
+# somebody knew to set this — a rehearsal nobody can start is not a rehearsal.
+PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:pg16}"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }

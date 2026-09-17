@@ -59,6 +59,10 @@ scripts/restore-drill.sh /data/backups/20260828-031500 "rating decision"
 The drill can fail, and that is the entire point. A drill that always passes is
 a ceremony.
 
+It stands up `pgvector/pgvector:pg16` — the image the stack runs — because the dump
+restores into a schema with `vector` columns. `PG_IMAGE=` overrides it for a host that
+keeps its own build.
+
 > **Run it after every schema migration and at least quarterly.** The failure
 > mode it catches — a backup that restores cleanly but is missing blobs, or a
 > dump that no longer matches the code — is invisible until the day you need it.
