@@ -230,7 +230,7 @@ async def test_an_identity_belongs_to_one_account_and_an_account_to_one_identity
         )
 
 
-async def test_unlinking_leaves_the_account_and_its_documents_alone(session, user_factory) -> None:
+async def test_disconnecting_leaves_the_account_and_its_documents_alone(session, user_factory) -> None:
     user, _ = await user_factory()
     await oidc.link(
         session, user=user, issuer=ISSUER, subject=a_subject(),
@@ -238,11 +238,11 @@ async def test_unlinking_leaves_the_account_and_its_documents_alone(session, use
     )
     await session.commit()
 
-    assert await oidc.unlink(session, user=user) is True
+    assert await oidc.disconnect(session, user=user) is True
     await session.commit()
     assert await oidc.identity_of(session, user=user) is None
     assert await session.get(AppUser, user.id) is not None
-    assert await oidc.unlink(session, user=user) is False, "unlinking twice is not an error"
+    assert await oidc.disconnect(session, user=user) is False, "disconnecting twice is not an error"
 
 
 # ---------------------------------------------------------------------------

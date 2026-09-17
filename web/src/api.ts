@@ -1688,8 +1688,8 @@ export const oidcPaths = {
 export const oidcApi = {
   status: () => request<OidcStatus>("/auth/oidc/status"),
   link: () => request<OidcLink>("/auth/oidc/link"),
-  unlink: (password: string) =>
-    request<void>("/auth/oidc/unlink", {
+  disconnect: (password: string) =>
+    request<void>("/auth/oidc/disconnect", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ password }).toString(),

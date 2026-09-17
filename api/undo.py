@@ -95,6 +95,17 @@ REGISTRY: dict[str, Undoable] = {
 NOT_UNDOABLE: dict[str, str] = {
     # Records of something that happened, with no state to put back.
     "login": "a sign-in is an event, not a change; there is nothing to restore.",
+    "logout": "ending a session is an event; signing in again is how it comes back, "
+              "and restoring a revoked session would be the opposite of the point.",
+    "oidc_linked": "connecting D3 Auth is reversed by disconnecting it in Settings, "
+                   "which asks for the local password — not by an undo button that "
+                   "would not.",
+    "oidc_unlinked": "disconnecting is reversed by connecting again, which needs the "
+                     "provider to say who you are; the link row is tombstoned either way.",
+    "admin_granted": "administrator rights are granted and withdrawn where they are "
+                     "managed — People here, or the grant at the provider — and a "
+                     "one-click undo of a permission change is how permissions drift.",
+    "admin_revoked": "the same in the other direction.",
     "ingest": "originals are immutable and never deleted (invariant 1 and 3), "
               "so an arrival cannot be taken back.",
     "scan": "a backlog scan reads a folder and writes only its own inventory; "

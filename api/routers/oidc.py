@@ -362,8 +362,8 @@ async def oidc_link_state(
     )
 
 
-@router.post("/unlink", status_code=status.HTTP_204_NO_CONTENT)
-async def oidc_unlink(
+@router.post("/disconnect", status_code=status.HTTP_204_NO_CONTENT)
+async def oidc_disconnect(
     password: str = Form(...),
     session: AsyncSession = Depends(get_session),
     user: AppUser = Depends(current_user),
@@ -375,7 +375,7 @@ async def oidc_unlink(
     """
     if not await verify_password_async(user.password_hash, password):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "that password is not right")
-    if not await oidc.unlink(session, user=user):
+    if not await oidc.disconnect(session, user=user):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "this account is not connected")
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

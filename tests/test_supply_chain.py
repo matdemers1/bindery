@@ -65,16 +65,35 @@ def _declared() -> list[Requirement]:
 
 
 def test_every_declared_dependency_is_pinned_by_the_lock() -> None:
+    """Every declared dependency resolves to one known version — by the lock, or by its URL.
+
+    A requirement written as a direct reference is already pinned harder than a version line:
+    `d3auth-client` names a commit of the provider's repository and pip records its hash. It is
+    deliberately *not* in the lock, because pip refuses to resolve a direct reference that also
+    appears as a constraint.
+    """
     pinned = _locked()
     missing = [
         requirement.name
         for requirement in _declared()
-        if canonicalize_name(requirement.name) not in pinned
+        if canonicalize_name(requirement.name) not in pinned and requirement.url is None
     ]
     assert not missing, (
         "declared in pyproject.toml but absent from requirements.lock, so it "
         "installs at whatever version PyPI serves that minute: "
         f"{', '.join(sorted(missing))}. Run `make lock`."
+    )
+
+    # And a direct reference has to name something immutable: a branch or a tag can be moved
+    # under us, a commit cannot.
+    floating = [
+        requirement.name
+        for requirement in _declared()
+        if requirement.url and not re.search(r"/(archive|releases/download)/[0-9a-f]{40}\.", requirement.url)
+    ]
+    assert not floating, (
+        "pinned by URL to something that can move; name a commit instead: "
+        f"{', '.join(sorted(floating))}"
     )
 
 

@@ -17,20 +17,34 @@ class OidcIdentity(Base):
     costume of convenience. The consumer contract says the same thing, and both
     SDKs deliberately expose no way to look anybody up by email.
 
-    One link per account, one account per link. The uniqueness is declared twice
-    because the two directions fail differently: a second identity on one
-    account would make "who is signed in" ambiguous, and one identity on two
-    accounts would make a revoke at the provider end the wrong session.
+    One live link per account, one account per live link. The uniqueness is declared twice
+    because the two directions fail differently: a second identity on one account would make
+    "who is signed in" ambiguous, and one identity on two accounts would make a revoke at the
+    provider end the wrong session.
     """
 
     __tablename__ = "oidc_identity"
+    # Partial, because a disconnected link is history rather than an absence: the row stays
+    # (invariant 3 — nothing here deletes), and the pair is free again for a new one.
     __table_args__ = (
-        sa.UniqueConstraint("issuer", "subject", name="uq_oidc_identity_issuer_subject"),
+        sa.Index(
+            "uq_oidc_identity_live",
+            "issuer",
+            "subject",
+            unique=True,
+            postgresql_where=sa.text("unlinked_at IS NULL"),
+        ),
+        sa.Index(
+            "uq_oidc_identity_user_live",
+            "user_id",
+            unique=True,
+            postgresql_where=sa.text("unlinked_at IS NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), sa.ForeignKey("app_user.id"), nullable=False, unique=True
+        UUID(as_uuid=True), sa.ForeignKey("app_user.id"), nullable=False
     )
     issuer: Mapped[str] = mapped_column(sa.Text, nullable=False)
     subject: Mapped[str] = mapped_column(sa.Text, nullable=False)
@@ -53,6 +67,11 @@ class OidcIdentity(Base):
 
     linked_at: Mapped[datetime] = created_at()
     last_seen_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+
+    # Disconnecting sets this rather than removing the row, the same shape as
+    # `document_tag.removed_at` and `field_source.released_at`. Two questions look alike and are
+    # not: "is this account connected" and "was it ever".
+    unlinked_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
 
 
 class OidcLogoutEvent(Base):

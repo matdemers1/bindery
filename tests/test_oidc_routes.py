@@ -68,6 +68,19 @@ class FakeProvider:
         )
 
 
+@pytest.fixture(autouse=True)
+def own_address(client):
+    """Each test signs in from its own address.
+
+    The callback spends the same per-address budget as the password form — a provider is not a
+    way around the rate limit — so tests sharing one address would spend each other's, and the
+    ones that run later would see 429s that have nothing to do with them.
+    """
+    client.headers["cf-connecting-ip"] = f"198.51.100.{uuid.uuid4().int % 250 + 1}"
+    yield
+    client.headers.pop("cf-connecting-ip", None)
+
+
 @pytest.fixture
 def provider(monkeypatch) -> FakeProvider:
     """Installs a stand-in `d3auth_client`, since the real one is imported where it is used."""
@@ -309,7 +322,7 @@ async def test_a_link_attaches_the_identity_without_changing_who_is_signed_in(
     assert (await client.get("/api/auth/me")).json()["email"] == user.email
 
 
-async def test_unlinking_needs_the_local_password(client, session, signed_in, provider) -> None:
+async def test_disconnecting_needs_the_local_password(client, session, signed_in, provider) -> None:
     await configure(session)
     user, _ = await signed_in()
     await oidc.link(
@@ -318,11 +331,11 @@ async def test_unlinking_needs_the_local_password(client, session, signed_in, pr
     )
     await session.commit()
 
-    refused = await client.post("/api/auth/oidc/unlink", data={"password": "not the password"})
+    refused = await client.post("/api/auth/oidc/disconnect", data={"password": "not the password"})
     assert refused.status_code == 403
     assert (await client.get("/api/auth/oidc/link")).json()["linked"] is True
 
-    accepted = await client.post("/api/auth/oidc/unlink", data={"password": PASSWORD})
+    accepted = await client.post("/api/auth/oidc/disconnect", data={"password": PASSWORD})
     assert accepted.status_code == 204
     assert (await client.get("/api/auth/oidc/link")).json()["linked"] is False
 

@@ -40,7 +40,7 @@ export default function ConnectD3Auth() {
     setBusy(true);
     setError(null);
     try {
-      await oidcApi.unlink(password);
+      await oidcApi.disconnect(password);
       setPassword("");
       setDisconnecting(false);
       setNotice("Disconnected. Your password still signs you in.");

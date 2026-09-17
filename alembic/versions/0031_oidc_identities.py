@@ -34,8 +34,7 @@ def upgrade() -> None:
         "oidc_identity",
         sa.Column("id", _UUID(as_uuid=True), primary_key=True,
                   server_default=sa.text("gen_random_uuid()")),
-        sa.Column("user_id", _UUID(as_uuid=True),
-                  sa.ForeignKey("app_user.id"), nullable=False, unique=True),
+        sa.Column("user_id", _UUID(as_uuid=True), sa.ForeignKey("app_user.id"), nullable=False),
         sa.Column("issuer", sa.Text(), nullable=False),
         sa.Column("subject", sa.Text(), nullable=False),
         sa.Column("preferred_username", sa.Text()),
@@ -44,7 +43,16 @@ def upgrade() -> None:
         sa.Column("linked_at", sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text("now()")),
         sa.Column("last_seen_at", sa.DateTime(timezone=True)),
-        sa.UniqueConstraint("issuer", "subject", name="uq_oidc_identity_issuer_subject"),
+        sa.Column("unlinked_at", sa.DateTime(timezone=True)),
+    )
+    # Partial and unique: a disconnected link stays as history, and frees the pair for a new one.
+    op.create_index(
+        "uq_oidc_identity_live", "oidc_identity", ["issuer", "subject"],
+        unique=True, postgresql_where=sa.text("unlinked_at IS NULL"),
+    )
+    op.create_index(
+        "uq_oidc_identity_user_live", "oidc_identity", ["user_id"],
+        unique=True, postgresql_where=sa.text("unlinked_at IS NULL"),
     )
 
     op.create_table(

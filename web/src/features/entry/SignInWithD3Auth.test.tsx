@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../api")>()),
-  oidcApi: { status: vi.fn(), link: vi.fn(), unlink: vi.fn() },
+  oidcApi: { status: vi.fn(), link: vi.fn(), disconnect: vi.fn() },
 }));
 
 const { oidcApi } = await import("../../api");

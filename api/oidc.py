@@ -27,8 +27,8 @@ import json
 import logging
 import secrets
 import time
-import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 import sqlalchemy as sa
@@ -178,7 +178,11 @@ async def identity_for(session: AsyncSession, *, issuer: str, subject: str) -> O
     """The link for this provider identity, if an account has one."""
     return (
         await session.execute(
-            sa.select(OidcIdentity).where(OidcIdentity.issuer == issuer, OidcIdentity.subject == subject)
+            sa.select(OidcIdentity).where(
+                OidcIdentity.issuer == issuer,
+                OidcIdentity.subject == subject,
+                OidcIdentity.unlinked_at.is_(None),
+            )
         )
     ).scalar_one_or_none()
 
@@ -186,7 +190,11 @@ async def identity_for(session: AsyncSession, *, issuer: str, subject: str) -> O
 async def identity_of(session: AsyncSession, *, user: AppUser) -> OidcIdentity | None:
     """The link this account holds, if it holds one."""
     return (
-        await session.execute(sa.select(OidcIdentity).where(OidcIdentity.user_id == user.id))
+        await session.execute(
+            sa.select(OidcIdentity).where(
+                OidcIdentity.user_id == user.id, OidcIdentity.unlinked_at.is_(None)
+            )
+        )
     ).scalar_one_or_none()
 
 
@@ -229,13 +237,21 @@ async def link(
     return identity
 
 
-async def unlink(session: AsyncSession, *, user: AppUser) -> bool:
-    """Remove the link. The caller has already proved the local password."""
+async def disconnect(session: AsyncSession, *, user: AppUser) -> bool:
+    """Tombstone the link. The caller has already proved the local password.
+
+    Named `disconnect` rather than `unlink` deliberately: `unlink` is how a file is deleted in
+    Python, and `tests/test_no_destructive_paths.py` reads call sites by name — a database
+    operation borrowing a filesystem verb makes that guard cry wolf, and a guard that cries wolf
+    is one somebody switches off.
+    """
     identity = await identity_of(session, user=user)
     if identity is None:
         return False
     before = {"issuer": identity.issuer, "subject": identity.subject}
-    await session.delete(identity)
+    # Tombstoned, not deleted (REQ-090). "Is this account connected" and "was it ever" are two
+    # questions, and the second is the one an audit asks after somebody loses access.
+    identity.unlinked_at = datetime.now(UTC)
     await record(
         session,
         entity_type="app_user",

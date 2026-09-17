@@ -28,7 +28,7 @@ lock:             ## regenerate requirements.lock from a freshly built image
 	$(COMPOSE) --profile test build test-worker
 	@sed -n '/^[^#]/q;p' requirements.lock > requirements.lock.tmp
 	@$(COMPOSE) --profile test run --rm --no-deps -T test-worker \
-	  python -m pip freeze --exclude-editable | tr -d '\r' | sort >> requirements.lock.tmp
+	  python -m pip freeze --exclude-editable | tr -d '\r' | grep -v ' @ ' | sort >> requirements.lock.tmp
 	@mv requirements.lock.tmp requirements.lock
 	@echo 'requirements.lock regenerated. Review the diff, then run: make test'
 
