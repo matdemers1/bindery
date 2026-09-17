@@ -47,14 +47,28 @@ async def configure(session, *, mode: str = "optional") -> None:
 # ---------------------------------------------------------------------------
 
 
+async def unconfigure(session) -> None:
+    """Back to a fresh archive: settings are a shared table, and other tests write it."""
+    for key in (
+        settings_store.OIDC_ISSUER,
+        settings_store.OIDC_CLIENT_ID,
+        settings_store.OIDC_CLIENT_SECRET,
+        settings_store.SSO_MODE,
+    ):
+        await settings_store.set_(session, key, None, actor_id=None)
+    await session.commit()
+
+
 async def test_sso_is_off_until_an_operator_configures_it(session) -> None:
     """A self-hosted archive should not mention a provider nobody has set up."""
+    await unconfigure(session)
     configuration = await oidc.config(session)
     assert configuration.mode == "off"
     assert configuration.enabled is False
 
 
 async def test_a_half_configured_provider_is_not_enabled(session) -> None:
+    await unconfigure(session)
     await settings_store.set_(session, settings_store.SSO_MODE, "optional", actor_id=None)
     await settings_store.set_(session, settings_store.OIDC_ISSUER, "https://auth.example.test", actor_id=None)
     await session.commit()

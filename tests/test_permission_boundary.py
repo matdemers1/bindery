@@ -503,6 +503,20 @@ NOT_LIBRARY_SCOPED = {
     "/api/account": "the caller's own account and its own storage total",
     "/api/version": "build metadata; deliberately unauthenticated (REQ-152)",
     "/api/account/totp": "the caller's own two-factor state",
+    # Sign in with D3 Auth (Phase 20). None of these reaches a document, and the
+    # three anonymous ones are anonymous by necessity: they are how a session
+    # comes to exist, and how the provider ends one.
+    "/api/auth/oidc/status": (
+        "whether to offer the button, before anyone is signed in; says the mode "
+        "and whether the provider answers, and names no provider when SSO is off"
+    ),
+    "/api/auth/oidc/start": "begins a sign-in; a redirect to the provider, carrying no archive data",
+    "/api/auth/oidc/callback": (
+        "finishes a sign-in; the transaction cookie and the provider's answer are "
+        "the only inputs, and the reply is a redirect plus this archive's own cookies"
+    ),
+    "/api/auth/oidc/link/start": "begins a link for the caller's own account; a redirect",
+    "/api/auth/oidc/link": "whether the caller's own account is connected, and to what",
     # Unauthenticated and internet-facing (Phase 19). Returns one enum —
     # unclaimed / needs_second_factor / complete — and no count, address or
     # name; tests/test_setup.py asserts the body has that one key.
