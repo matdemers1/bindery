@@ -375,6 +375,50 @@ async def apply_roles(session: AsyncSession, *, user: AppUser, roles: list[str])
     return True
 
 
+async def refresh_roles(session: AsyncSession, *, user: AppUser) -> list[str] | None:
+    """Re-read this account's roles from the provider, and apply them (REQ-207).
+
+    Called when Bindery renews its own session, which is the moment that costs nothing: the
+    person is here, a round trip is affordable, and the answer is at most one renewal old. A
+    grant withdrawn at the provider therefore lands on the next request rather than at the next
+    sign-in, which for a session that renews itself might be never.
+
+    Returns the roles, or None when there is nothing to ask about — no link, no stored token, or
+    a provider that did not answer. A provider that is down must not sign anybody out: the
+    session they already hold is Bindery's to honour.
+    """
+    identity = await identity_of(session, user=user)
+    if identity is None:
+        return None
+    token = decrypt_token(identity.refresh_token_enc)
+    if not token:
+        return None
+
+    configuration = await config(session)
+    if not configuration.enabled or configuration.issuer != identity.issuer:
+        return None
+
+    try:
+        from d3auth_client import D3AuthClient
+
+        client = D3AuthClient(
+            issuer=configuration.issuer,
+            client_id=configuration.client_id,
+            client_secret=configuration.client_secret,
+            sso_mode=configuration.mode,
+        )
+        renewed = await client.refresh(token)
+    except Exception as failure:  # noqa: BLE001 - any failure here means "ask again next time"
+        log.info("could not re-read roles for %s: %s", user.email, failure)
+        return None
+
+    if renewed.refresh_token:
+        identity.refresh_token_enc = encrypt_token(renewed.refresh_token)
+    identity.last_seen_at = datetime.now(UTC)
+    await apply_roles(session, user=user, roles=renewed.roles)
+    return renewed.roles
+
+
 async def end_sessions(
     session: AsyncSession, *, issuer: str, subject: str, sid: str | None
 ) -> int:

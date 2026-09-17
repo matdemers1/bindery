@@ -11,6 +11,7 @@ import sys
 import types
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -403,3 +404,130 @@ async def test_a_logout_token_that_does_not_verify_is_a_bad_request(client, sess
 
     response = await client.post("/api/auth/oidc/backchannel-logout", data={"logout_token": "forged"})
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Roles re-read when the session renews (REQ-207)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RenewedSession:
+    identity: FakeIdentity
+    access_token: str = "a-renewed-access-token"
+    refresh_token: str | None = "a-renewed-refresh-token"
+    roles: list[str] | None = None
+
+
+async def test_a_role_withdrawn_at_the_provider_lands_on_the_next_renewal(
+    client, session, user_factory, provider, monkeypatch
+) -> None:
+    """A grant taken away upstream must not wait for a sign-in that may never come again."""
+    from api.auth import totp
+
+    user, _ = await user_factory()
+    user.totp_secret = totp.new_secret()
+    user.totp_confirmed_at = sa.func.now()
+    await session.flush()
+    await session.refresh(user)
+    await oidc.link(
+        session, user=user, issuer=ISSUER, subject=a_subject(),
+        preferred_username=None, refresh_token="a-provider-refresh-token", origin="link",
+    )
+    await oidc.apply_roles(session, user=user, roles=["admin"])
+    await session.commit()
+    assert user.is_admin is True
+    await configure(session)
+
+    renewed = RenewedSession(identity=FakeIdentity(iss=ISSUER, sub="x", claims={}, roles=["member"]))
+    renewed.identity.roles = ["member"]
+
+    class Renewing:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        async def refresh(self, _token: str) -> Any:
+            class Result:
+                roles = ["member"]
+                refresh_token = "a-rotated-provider-token"
+
+            return Result()
+
+    monkeypatch.setattr(sys.modules["d3auth_client"], "D3AuthClient", Renewing)
+
+    assert await oidc.refresh_roles(session, user=user) == ["member"]
+    await session.commit()
+    await session.refresh(user)
+
+    assert user.is_admin is False, "the admin screens are gone on the next request"
+    identity = await oidc.identity_of(session, user=user)
+    assert oidc.decrypt_token(identity.refresh_token_enc) == "a-rotated-provider-token", (
+        "a rotated provider token replaces the one it rotated"
+    )
+
+
+async def test_a_provider_that_cannot_be_reached_does_not_sign_anybody_out(
+    client, session, user_factory, provider, monkeypatch
+) -> None:
+    user, _ = await user_factory()
+    await oidc.link(
+        session, user=user, issuer=ISSUER, subject=a_subject(),
+        preferred_username=None, refresh_token="a-provider-refresh-token", origin="link",
+    )
+    await session.commit()
+    await configure(session)
+
+    class Unreachable:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        async def refresh(self, _token: str) -> Any:
+            raise OSError("the provider is not answering")
+
+    monkeypatch.setattr(sys.modules["d3auth_client"], "D3AuthClient", Unreachable)
+
+    assert await oidc.refresh_roles(session, user=user) is None
+    assert await oidc.identity_of(session, user=user) is not None, "the link survives an outage"
+
+
+async def test_an_account_with_no_link_asks_the_provider_nothing(session, user_factory, provider) -> None:
+    user, _ = await user_factory()
+    assert await oidc.refresh_roles(session, user=user) is None
+
+
+async def test_renewing_the_session_is_what_re_reads_the_roles(
+    client, session, signed_in, provider, monkeypatch
+) -> None:
+    """Through the route, because the service being right is not the same as it being called."""
+    from api.auth import totp
+
+    user, _ = await signed_in()
+    user.totp_secret = totp.new_secret()
+    # A real timestamp, not sa.func.now(): the property reads it back before the flush has been
+    # refreshed, and a SQL expression there is a lazy load in the wrong place.
+    user.totp_confirmed_at = datetime.now(UTC)
+    await session.flush()
+    await oidc.link(
+        session, user=user, issuer=ISSUER, subject=a_subject(),
+        preferred_username=None, refresh_token="a-provider-refresh-token", origin="link",
+    )
+    await oidc.apply_roles(session, user=user, roles=["admin"])
+    await session.commit()
+    await configure(session)
+
+    class Demoting:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        async def refresh(self, _token: str) -> Any:
+            class Result:
+                roles = ["member"]
+                refresh_token = None
+
+            return Result()
+
+    monkeypatch.setattr(sys.modules["d3auth_client"], "D3AuthClient", Demoting)
+
+    assert (await client.get("/api/auth/me")).json()["is_admin"] is True
+    assert (await client.post("/api/auth/refresh")).status_code == 200
+    assert (await client.get("/api/auth/me")).json()["is_admin"] is False

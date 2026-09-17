@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import accounts
+from api import accounts, oidc
 from api.audit import record
 from api.auth import service, throttle
 from api.auth.client import client_ip
@@ -103,6 +103,11 @@ async def refresh(
         await session.commit()
         clear_auth_cookies(response)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+    # A renewal is also when a role granted elsewhere is re-read (Phase 20, REQ-207). Only for
+    # an account linked to a provider, and never fatal: a provider that cannot be reached leaves
+    # the roles as they were rather than signing anybody out.
+    await oidc.refresh_roles(session, user=user)
 
     await session.commit()
     set_auth_cookies(response, access_token, refresh_secret)
