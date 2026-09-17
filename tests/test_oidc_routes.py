@@ -10,12 +10,13 @@ from __future__ import annotations
 import sys
 import types
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 import sqlalchemy as sa
+from d3auth_client import D3AuthClient, Identity, Session, SignInStart
 
 from api import oidc, settings_store
 from api.auth import service
@@ -582,3 +583,47 @@ async def test_renewing_the_session_is_what_re_reads_the_roles(
     assert (await client.get("/api/auth/me")).json()["is_admin"] is True
     assert (await client.post("/api/auth/refresh")).status_code == 200
     assert (await client.get("/api/auth/me")).json()["is_admin"] is False
+
+
+# ---------------------------------------------------------------------------
+# The stand-ins, against the thing they stand in for
+# ---------------------------------------------------------------------------
+
+
+def test_a_stand_in_may_not_invent_a_field_the_client_does_not_have(provider) -> None:
+    """A fake is only as good as the shape it copies.
+
+    The first version of `RenewedSession` carried a `roles` attribute of its own. The SDK puts
+    roles on the session's *identity*, and `refresh_roles` read them off the session — so the
+    fake and the bug agreed with each other, and 38 passing tests said nothing. This compares
+    the two directly, which is the only thing that would have caught it while the package still
+    shipped no types.
+    """
+    installed = sys.modules["d3auth_client"]
+    for fake, real in (
+        (FakeIdentity, Identity),
+        (FakeSession, Session),
+        (RenewedSession, Session),
+        (installed.SignInStart, SignInStart),
+    ):
+        invented = {f.name for f in fields(fake)} - {f.name for f in fields(real)}
+        assert not invented, (
+            f"{fake.__name__} carries {sorted(invented)}, which {real.__name__} does not. "
+            "Either the client gained a field and this fake is ahead of it, or the fake is "
+            "describing a provider answer that will never arrive."
+        )
+
+    # The same rule for the calls. The stand-in implements only the ones the routes reach —
+    # the renewal tests install a client of their own for `refresh` — but a name it answers to
+    # that the real client does not is a test passing against a method nobody wrote.
+    real_calls = {name for name in dir(D3AuthClient) if not name.startswith("_")}
+    stood_in = {
+        name for name in vars(installed.D3AuthClient)
+        if not name.startswith("_") and callable(getattr(installed.D3AuthClient, name))
+    }
+    assert stood_in <= real_calls, (
+        f"the stand-in answers to {sorted(stood_in - real_calls)}, which the client does not"
+    )
+    assert {"healthy", "start_sign_in", "finish_sign_in", "refresh"} <= real_calls, (
+        "the routes call all four; the client no longer offers them all"
+    )
