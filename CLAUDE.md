@@ -83,12 +83,12 @@ docker compose --env-file .env -f infra/docker-compose.yml --profile test \
 host, because ZimaOS's read-only root and split `HOME` break SSH keys and
 private registry pulls in ways that look like unrelated problems.
 
-**Built: phases 0–11 and 13–19** — retrieval, bundles and known forms,
+**Built: phases 0–11 and 13–20** — retrieval, bundles and known forms,
 classification with provenance and the gate, backlog import, entities,
 trust/export/resilience, household and libraries, ask/health/hardening, the
 first-real-corpus consolidation, accounts and administration, documentation and
 versioning, offsite replication, signal and navigation, the build gate, the
-private vault, corrections, media/metadata/inbox, and the front door (first-run setup and the entry screens). **Planned next: Phase 12**
+private vault, corrections, media/metadata/inbox, the front door (first-run setup and the entry screens), and Sign in with D3 Auth. **Planned next: Phase 12**
 (later features). The per-phase truth is
 `D3 Cloud Vault/Bindery/Scope of Work.md` — this line is a pointer, not a second
 copy, because the copy is what went eleven phases stale.
@@ -513,6 +513,42 @@ harness.
 
 `infra/zimaos/bindery.zimaos.yaml` is the CasaOS custom-app manifest. It must
 never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
+
+## Sign in with D3 Auth (Phase 20)
+
+`api/oidc.py` holds the rules, `api/routers/oidc.py` the routes, `web/src/features/entry/SignInWithD3Auth.tsx`
+and `web/src/features/settings/ConnectD3Auth.tsx` the two places it shows. Bindery is the
+reference relying party for [D3 Auth](https://auth.d3cloud.io); the provider's consumer contract
+is the specification.
+
+- **Off until an operator configures it**, and `optional` by intent: adding a second way in must
+  not weaken the first. Nothing changes for an account that never uses it.
+- **A sign-in through the provider ends in an ordinary Bindery session**, minted by
+  `issue_session` exactly as a password login mints one. Nothing downstream of `current_user`
+  knows SSO exists — which is what keeps the permission suite meaningful.
+- **Identity is `(iss, sub)`.** Never email. An address is a display value that changes, is
+  reused, and at some providers is chosen by the person claiming it. An address that already
+  exists here is refused with "connect it from Settings instead", never linked.
+- **The PKCE verifier, state and nonce live in a signed, short-lived cookie scoped to the
+  callback.** Not a table keyed on `state` — that table is readable by whoever supplies the
+  state, which is D3 Auth's own finding F-12: login-CSRF, and role theft through linking.
+- **JIT provisioning needs a role.** The provider is deny-by-default, so arriving with a role is
+  an administrator's decision that already happened. No role provisions nothing.
+- **`admin` does not make an administrator until Bindery's own TOTP is enrolled** (REQ-156). An
+  administrator here can reset every other password; a claim made at another server does not
+  lift that.
+- **Back-channel logout is idempotent by `jti` in Postgres**, not in the process: a retry landing
+  elsewhere must not end a session the person has since started again. A repeat is a 200, or the
+  provider retries for nothing and marks the app slow to revoke.
+- **Disconnecting tombstones** (`unlinked_at`), and is named `disconnect` rather than `unlink`
+  because `unlink` is how a file is deleted and the destructive-paths guard reads call sites by
+  name.
+- **The client is pinned to a commit** of the provider's repository and installed from a source
+  archive — no git, no registry, no credentials, so a stranger's `docker compose build` works.
+  pip refuses a direct reference that is also a constraint, so it is deliberately absent from
+  `requirements.lock`.
+- `infra/bindery.d3auth.json` is the manifest to register; copy the values from the provider's
+  **connection sheet**, never from documentation.
 
 ## The front door and first-run setup (Phase 19)
 
