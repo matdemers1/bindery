@@ -546,7 +546,9 @@ is the specification.
 - **The client is pinned to a commit** of the provider's repository and installed from a source
   archive — no git, no registry, no credentials, so a stranger's `docker compose build` works.
   pip refuses a direct reference that is also a constraint, so it is deliberately absent from
-  `requirements.lock`.
+  `requirements.lock`. It ships `py.typed`, and must keep doing so: without the marker mypy skips
+  the package, every call into it is `Any`, and `refresh_roles` was reading `roles` off a
+  `Session` that carries them on its identity — with a test fake that had invented the same shape.
 - `infra/bindery.d3auth.json` is the manifest to register; copy the values from the provider's
   **connection sheet**, never from documentation.
 
