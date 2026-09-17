@@ -18,6 +18,8 @@ import { Alert, Button, Checkbox, Input, PageHeader } from "@d3cloud/ui";
  * configured and its last four characters; a settings page that renders your
  * key into the DOM has handed it to every extension you run.
  */
+import ConnectD3Auth from "./ConnectD3Auth";
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [key, setKey] = useState("");
@@ -155,6 +157,8 @@ export default function SettingsPage() {
       <OffsiteReplication settings={settings} onSaved={load} />
       <ApiTokens />
       <Keyboard />
+
+      <ConnectD3Auth />
 
       <section className="mt-6">
         <h2 className="text-base font-medium">Diagnostics</h2>

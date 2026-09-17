@@ -127,3 +127,36 @@
   outline: var(--focus-width) solid var(--color-focus);
   outline-offset: var(--focus-offset);
 }
+
+/* The provider button. Deliberately secondary to the password form beside it: this is an
+   option an operator switched on, not the way in. */
+.entry-sso {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  min-height: 40px;
+  padding: var(--space-8) var(--space-16);
+  border: var(--border-width) solid var(--color-border-field);
+  border-radius: var(--radius-md);
+  color: var(--color-fg);
+  font-size: var(--text-14);
+  font-weight: 500;
+  text-align: center;
+  text-decoration: none;
+  transition: background-color var(--motion-hover), border-color var(--motion-hover);
+}
+.entry-sso:hover { background: var(--color-surface-hover); }
+.entry-sso:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+/* Not a button at all when it cannot work: nothing to press, and a reason instead. */
+.entry-sso--down {
+  margin: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  border-style: dashed;
+  color: var(--color-fg-muted);
+  cursor: default;
+}

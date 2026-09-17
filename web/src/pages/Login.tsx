@@ -3,7 +3,8 @@ import { Button, CodeInput, FormField, Input, PasswordInput, type CodeInputStatu
 
 import { ApiError, api } from "../api";
 import { EntryHeading, EntryShell } from "../features/entry/EntryShell";
-import { retryMessage } from "../features/entry/messages";
+import { SignInWithD3Auth } from "../features/entry/SignInWithD3Auth";
+import { retryMessage, ssoMessage } from "../features/entry/messages";
 
 type Step = "password" | "code";
 type CodeKind = "totp" | "recovery";
@@ -27,7 +28,9 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
   const [code, setCode] = useState("");
   const [codeKind, setCodeKind] = useState<CodeKind>("totp");
   const [codeStatus, setCodeStatus] = useState<CodeInputStatus>("idle");
-  const [error, setError] = useState<string | null>(null);
+  // A refused sign-in through the provider comes back as a redirect, so its message belongs to
+  // the first render rather than to an effect.
+  const [error, setError] = useState<string | null>(() => ssoMessage(window.location.search));
   const [busy, setBusy] = useState(false);
   const clearing = useRef<number | undefined>(undefined);
 
@@ -197,6 +200,11 @@ export default function Login({ onSignedIn }: { onSignedIn: () => Promise<void> 
           Sign in
         </Button>
       </form>
+
+      {/* Below the password form, and only when an operator has configured it. */}
+      <div className="mt-5">
+        <SignInWithD3Auth />
+      </div>
 
       <div className="mt-6 grid gap-2 border-t border-border pt-5 text-sm leading-relaxed text-fg-muted">
         <p>

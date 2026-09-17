@@ -1658,3 +1658,40 @@ export const setupApi = {
   /** After two-factor is confirmed: the owner becomes administrator. */
   complete: () => request<User>("/setup/complete", { method: "POST" }),
 };
+
+// ---------------------------------------------------------------------------
+// Sign in with D3 Auth (Phase 20, REQ-203 … REQ-209)
+// ---------------------------------------------------------------------------
+
+export interface OidcStatus {
+  /** `off`, `optional` or `required`. `off` means say nothing about a provider at all. */
+  mode: string;
+  /** Whether the provider answered its health probe just now. */
+  ready: boolean;
+  issuer: string | null;
+}
+
+export interface OidcLink {
+  mode: string;
+  issuer: string | null;
+  linked: boolean;
+  preferred_username: string | null;
+  linked_at: string | null;
+}
+
+/** Whole-document navigations, not fetches: both ends of this are redirects the browser follows. */
+export const oidcPaths = {
+  signIn: "/api/auth/oidc/start",
+  connect: "/api/auth/oidc/link/start",
+};
+
+export const oidcApi = {
+  status: () => request<OidcStatus>("/auth/oidc/status"),
+  link: () => request<OidcLink>("/auth/oidc/link"),
+  unlink: (password: string) =>
+    request<void>("/auth/oidc/unlink", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ password }).toString(),
+    }),
+};
