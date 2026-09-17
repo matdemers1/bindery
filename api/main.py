@@ -14,7 +14,6 @@ from api import eventlog, events, first_run
 from api.config import get_settings, require_usable_configuration
 from api.db.session import SessionFactory
 from api.routers import accounts as accounts_router
-from api.routers import oidc as oidc_router
 from api.routers import (
     auth,
     badges,
@@ -38,6 +37,7 @@ from api.routers import (
     trust,
     upload,
 )
+from api.routers import oidc as oidc_router
 from api.routers import vault as vault_router
 from api.vault import sweep as vault_sweep
 

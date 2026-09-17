@@ -102,10 +102,11 @@ NOT_UNDOABLE: dict[str, str] = {
                    "would not.",
     "oidc_unlinked": "disconnecting is reversed by connecting again, which needs the "
                      "provider to say who you are; the link row is tombstoned either way.",
-    "admin_granted": "administrator rights are granted and withdrawn where they are "
-                     "managed — People here, or the grant at the provider — and a "
-                     "one-click undo of a permission change is how permissions drift.",
-    "admin_revoked": "the same in the other direction.",
+    "admin_revoked": "administrator rights are granted and withdrawn where they "
+                     "are managed — People here, or the grant at the provider. A "
+                     "one-click undo of a permission change is how permissions "
+                     "drift; `admin_granted` below says the same in the other "
+                     "direction.",
     "ingest": "originals are immutable and never deleted (invariant 1 and 3), "
               "so an arrival cannot be taken back.",
     "scan": "a backlog scan reads a folder and writes only its own inventory; "

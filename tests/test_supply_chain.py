@@ -89,7 +89,8 @@ def test_every_declared_dependency_is_pinned_by_the_lock() -> None:
     floating = [
         requirement.name
         for requirement in _declared()
-        if requirement.url and not re.search(r"/(archive|releases/download)/[0-9a-f]{40}\.", requirement.url)
+        if requirement.url
+        and not re.search(r"/(archive|releases/download)/[0-9a-f]{40}\.", requirement.url)
     ]
     assert not floating, (
         "pinned by URL to something that can move; name a commit instead: "

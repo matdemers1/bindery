@@ -17,12 +17,11 @@ from typing import Any
 from urllib.parse import urlencode
 
 import sqlalchemy as sa
-
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import oidc, settings_store
+from api import oidc
 from api.audit import record
 from api.auth import service, throttle
 from api.auth.client import client_ip
@@ -34,7 +33,7 @@ from api.db.enums import ActorType
 from api.db.models import AppUser, OidcLogoutEvent
 from api.db.models.user import RefreshToken
 from api.db.session import get_session
-from api.schemas import OidcStatusOut, OidcLinkOut
+from api.schemas import OidcLinkOut, OidcStatusOut
 
 log = logging.getLogger("bindery.oidc")
 
@@ -105,7 +104,9 @@ async def oidc_status(session: AsyncSession = Depends(get_session)) -> OidcStatu
 # ---------------------------------------------------------------------------
 
 
-async def _begin(request: Request, session: AsyncSession, *, linking: AppUser | None) -> RedirectResponse:
+async def _begin(
+    request: Request, session: AsyncSession, *, linking: AppUser | None
+) -> RedirectResponse:
     """Begin a sign-in, and put everything the callback must remember in one cookie.
 
     The verifier, state and nonce go into a signed, short-lived cookie scoped to the callback —
@@ -326,7 +327,9 @@ def _to(path: str, *, clear_transaction: bool = False) -> RedirectResponse:
     return response
 
 
-def _back_to_sign_in(reason: str, *, detail: str | None = None, retry_after: int | None = None) -> RedirectResponse:
+def _back_to_sign_in(
+    reason: str, *, detail: str | None = None, retry_after: int | None = None
+) -> RedirectResponse:
     """Back to the sign-in screen, which says what happened in its own words.
 
     The reason is a short code rather than a sentence: the screen owns the wording, and a
@@ -416,7 +419,9 @@ async def backchannel_logout(
         )
     except Exception as refused:
         log.warning("a logout token was refused: %s", refused)
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "that logout token was not accepted") from refused
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "that logout token was not accepted"
+        ) from refused
 
     already = (
         await session.execute(sa.select(OidcLogoutEvent).where(OidcLogoutEvent.jti == verified.jti))
@@ -428,7 +433,9 @@ async def backchannel_logout(
         session, issuer=configuration.issuer, subject=verified.sub, sid=verified.sid
     )
     session.add(
-        OidcLogoutEvent(jti=verified.jti, subject=verified.sub, sid=verified.sid, ended_sessions=ended)
+        OidcLogoutEvent(
+            jti=verified.jti, subject=verified.sub, sid=verified.sid, ended_sessions=ended
+        )
     )
     await session.commit()
     return Response(status_code=status.HTTP_200_OK)

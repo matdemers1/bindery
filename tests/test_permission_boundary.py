@@ -510,7 +510,9 @@ NOT_LIBRARY_SCOPED = {
         "whether to offer the button, before anyone is signed in; says the mode "
         "and whether the provider answers, and names no provider when SSO is off"
     ),
-    "/api/auth/oidc/start": "begins a sign-in; a redirect to the provider, carrying no archive data",
+    "/api/auth/oidc/start": (
+        "begins a sign-in; a redirect to the provider, carrying no archive data"
+    ),
     "/api/auth/oidc/callback": (
         "finishes a sign-in; the transaction cookie and the provider's answer are "
         "the only inputs, and the reply is a redirect plus this archive's own cookies"
