@@ -96,12 +96,19 @@ async def config(session: AsyncSession) -> OidcConfig:
     """Read the configuration: Settings first, environment as the fallback."""
     mode = (await settings_store.get(session, settings_store.SSO_MODE) or "off").strip().lower()
     if mode not in ("off", "optional", "required"):
-        log.warning("SSO_MODE is %r, which is not off, optional or required — treating it as off", mode)
+        log.warning(
+            "SSO_MODE is %r, which is not off, optional or required — treating it as off",
+            mode,
+        )
         mode = "off"
     return OidcConfig(
-        issuer=(await settings_store.get(session, settings_store.OIDC_ISSUER) or "").strip().rstrip("/"),
+        issuer=(
+            await settings_store.get(session, settings_store.OIDC_ISSUER) or ""
+        ).strip().rstrip("/"),
         client_id=(await settings_store.get(session, settings_store.OIDC_CLIENT_ID) or "").strip(),
-        client_secret=(await settings_store.get(session, settings_store.OIDC_CLIENT_SECRET) or "").strip(),
+        client_secret=(
+            await settings_store.get(session, settings_store.OIDC_CLIENT_SECRET) or ""
+        ).strip(),
         mode=mode,  # type: ignore[arg-type]
     )
 
@@ -126,7 +133,8 @@ def _signing_key() -> bytes:
 
 def seal_transaction(payload: dict[str, Any]) -> str:
     """A transaction, signed and safe to hand to a browser."""
-    body = base64.urlsafe_b64encode(json.dumps({**payload, "iat": int(time.time())}).encode()).decode().rstrip("=")
+    sealed = json.dumps({**payload, "iat": int(time.time())}).encode()
+    body = base64.urlsafe_b64encode(sealed).decode().rstrip("=")
     signature = hashlib.blake2b(body.encode(), key=_signing_key(), digest_size=32).hexdigest()
     return f"{body}.{signature}"
 
@@ -310,7 +318,10 @@ async def provision(
         display_name=(display_name or "").strip() or None,
         storage_quota_bytes=quota_for(roles),
     )
-    library = Library(name=display_name or email.split("@")[0] or "Personal", kind=LibraryKind.PERSONAL)
+    library = Library(
+        name=display_name or email.split("@")[0] or "Personal",
+        kind=LibraryKind.PERSONAL,
+    )
     session.add_all([user, library])
     await session.flush()
     session.add(Membership(user_id=user.id, library_id=library.id, role=MembershipRole.OWNER))
@@ -371,7 +382,11 @@ async def apply_roles(session: AsyncSession, *, user: AppUser, roles: list[str])
         before=before,
         after={"is_admin": wants_admin, "via": "d3auth", "roles": roles},
     )
-    log.warning("administrator %s for %s, from D3 Auth roles", "granted" if wants_admin else "revoked", user.email)
+    log.warning(
+        "administrator %s for %s, from D3 Auth roles",
+        "granted" if wants_admin else "revoked",
+        user.email,
+    )
     return True
 
 
@@ -408,15 +423,18 @@ async def refresh_roles(session: AsyncSession, *, user: AppUser) -> list[str] | 
             sso_mode=configuration.mode,
         )
         renewed = await client.refresh(token)
-    except Exception as failure:  # noqa: BLE001 - any failure here means "ask again next time"
+    # Any failure here means "ask again next time": a provider that cannot be reached
+    # leaves the roles as they were rather than signing anybody out.
+    except Exception as failure:
         log.info("could not re-read roles for %s: %s", user.email, failure)
         return None
 
     if renewed.refresh_token:
         identity.refresh_token_enc = encrypt_token(renewed.refresh_token)
     identity.last_seen_at = datetime.now(UTC)
-    await apply_roles(session, user=user, roles=renewed.roles)
-    return renewed.roles
+    roles = renewed.identity.roles
+    await apply_roles(session, user=user, roles=roles)
+    return roles
 
 
 async def end_sessions(
@@ -436,10 +454,17 @@ async def end_sessions(
     if sid:
         condition.append(RefreshToken.oidc_sid == sid)
 
-    result = await session.execute(
-        sa.update(RefreshToken).where(sa.and_(*condition)).values(revoked_at=sa.func.now())
-    )
-    ended = result.rowcount or 0
+    # RETURNING rather than `rowcount`: the ids are what the audit row is about, and the
+    # count is exact rather than whatever the driver last reported.
+    revoked = (
+        await session.execute(
+            sa.update(RefreshToken)
+            .where(sa.and_(*condition))
+            .values(revoked_at=datetime.now(UTC))
+            .returning(RefreshToken.id)
+        )
+    ).scalars().all()
+    ended = len(revoked)
     if ended:
         await record(
             session,

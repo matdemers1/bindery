@@ -45,7 +45,7 @@ dependencies = [
     # fetched as a source archive: no git in the image, no package registry, and — the point —
     # no credentials, so somebody else's `docker compose build` works exactly as this one does.
     # Move the pin deliberately; an OIDC client is not a dependency to float.
-    "d3auth-client @ https://github.com/matdemers1/d3-auth/archive/ad50389a3f53eb0a822850853cebf95a937a1dd7.tar.gz#subdirectory=packages/auth-client-python",
+    "d3auth-client @ https://github.com/matdemers1/d3-auth/archive/59c0643738ba177a39571cf596f94fdfc87f4f8b.tar.gz#subdirectory=packages/auth-client-python",
     # The api needs it too: /api/settings/test-ai validates a key against the
     # live API, and Q&A (REQ-116) is a synchronous request, not a worker stage.
     #

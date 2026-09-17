@@ -61,9 +61,20 @@ class FakeProvider:
         self.logout_refusal: Exception | None = None
         self.starts = 0
 
-    def sign_in_as(self, sub: str, *, roles: list[str], email: str, sid: str | None = "a-provider-session",
-                   name: str | None = None, username: str | None = None) -> None:
-        claims = {"sub": sub, "email": email, "name": name, "preferred_username": username, "roles": roles}
+    def sign_in_as(
+        self,
+        sub: str,
+        *,
+        roles: list[str],
+        email: str,
+        sid: str | None = "a-provider-session",
+        name: str | None = None,
+        username: str | None = None,
+    ) -> None:
+        claims = {
+            "sub": sub, "email": email, "name": name,
+            "preferred_username": username, "roles": roles,
+        }
         self.session = FakeSession(
             identity=FakeIdentity(iss=ISSUER, sub=sub, claims=claims, roles=roles), sid=sid
         )
@@ -104,10 +115,15 @@ def provider(monkeypatch) -> FakeProvider:
         async def start_sign_in(self, redirect_uri: str, **_: Any) -> SignInStart:
             fake.starts += 1
             return SignInStart(
-                url=f"{ISSUER}/oidc/auth?state=a-state", verifier="a-verifier", state="a-state", nonce="a-nonce"
+                url=f"{ISSUER}/oidc/auth?state=a-state",
+                verifier="a-verifier",
+                state="a-state",
+                nonce="a-nonce",
             )
 
-        async def finish_sign_in(self, callback_url: str, *, start: Any, redirect_uri: str) -> FakeSession:
+        async def finish_sign_in(
+            self, callback_url: str, *, start: Any, redirect_uri: str
+        ) -> FakeSession:
             if fake.refuse_with is not None:
                 raise fake.refuse_with
             # The real SDK refuses a callback whose state is not the one this browser began,
@@ -159,7 +175,9 @@ async def begin(client) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_an_archive_that_never_configured_sso_says_nothing_about_a_provider(client, session) -> None:
+async def test_an_archive_that_never_configured_sso_says_nothing_about_a_provider(
+    client, session
+) -> None:
     await settings_store.set_(session, settings_store.SSO_MODE, "off", actor_id=None)
     await session.commit()
 
@@ -173,10 +191,13 @@ async def test_every_sso_route_is_absent_while_sso_is_off(client, session, provi
 
     assert (await client.get("/api/auth/oidc/start")).status_code == 404
     assert (await client.get(callback_url())).status_code == 404
-    assert (await client.post("/api/auth/oidc/backchannel-logout", data={"logout_token": "x"})).status_code == 404
+    logout = await client.post("/api/auth/oidc/backchannel-logout", data={"logout_token": "x"})
+    assert logout.status_code == 404
 
 
-async def test_the_status_says_when_the_provider_cannot_be_reached(client, session, provider) -> None:
+async def test_the_status_says_when_the_provider_cannot_be_reached(
+    client, session, provider
+) -> None:
     await configure(session, mode="required")
     provider.healthy_answer = False
 
@@ -189,7 +210,9 @@ async def test_the_status_says_when_the_provider_cannot_be_reached(client, sessi
 # ---------------------------------------------------------------------------
 
 
-async def test_a_sign_in_begins_with_a_transaction_bound_to_this_browser(client, session, provider) -> None:
+async def test_a_sign_in_begins_with_a_transaction_bound_to_this_browser(
+    client, session, provider
+) -> None:
     await configure(session)
     response = await client.get("/api/auth/oidc/start")
 
@@ -198,7 +221,9 @@ async def test_a_sign_in_begins_with_a_transaction_bound_to_this_browser(client,
     cookie = response.cookies.get("bindery_oidc_tx")
     assert cookie, "the verifier, state and nonce travel with the browser, not in a table"
     opened = oidc.open_transaction(cookie)
-    assert opened["state"] == "a-state" and opened["verifier"] == "a-verifier" and opened["link"] is None
+    assert opened["state"] == "a-state"
+    assert opened["verifier"] == "a-verifier"
+    assert opened["link"] is None
 
 
 async def test_a_callback_without_a_transaction_signs_nobody_in(client, session, provider) -> None:
@@ -223,7 +248,9 @@ async def test_a_callback_from_somebody_elses_sign_in_is_refused(client, session
     assert (await client.get("/api/auth/me")).status_code == 401
 
 
-async def test_a_first_sign_in_with_a_role_lands_in_a_new_account(client, session, provider) -> None:
+async def test_a_first_sign_in_with_a_role_lands_in_a_new_account(
+    client, session, provider
+) -> None:
     await configure(session)
     subject, email = a_subject(), f"new-{uuid.uuid4().hex[:6]}@example.test"
     provider.sign_in_as(subject, roles=["member"], email=email, name="A Newcomer")
@@ -256,7 +283,9 @@ async def test_a_sign_in_with_no_role_creates_nothing(client, session, provider)
     ).scalar_one_or_none() is None
 
 
-async def test_a_returning_identity_lands_in_the_account_it_is_linked_to(client, session, user_factory, provider) -> None:
+async def test_a_returning_identity_lands_in_the_account_it_is_linked_to(
+    client, session, user_factory, provider
+) -> None:
     await configure(session)
     user, _ = await user_factory()
     subject = a_subject()
@@ -276,7 +305,9 @@ async def test_a_returning_identity_lands_in_the_account_it_is_linked_to(client,
     )
 
 
-async def test_the_provider_session_rides_on_the_bindery_session_it_produced(client, session, provider) -> None:
+async def test_the_provider_session_rides_on_the_bindery_session_it_produced(
+    client, session, provider
+) -> None:
     await configure(session)
     subject = a_subject()
     provider.sign_in_as(subject, roles=["member"], email=f"sid-{uuid.uuid4().hex[:6]}@example.test",
@@ -288,7 +319,9 @@ async def test_the_provider_session_rides_on_the_bindery_session_it_produced(cli
         await session.execute(sa.select(OidcIdentity).where(OidcIdentity.subject == subject))
     ).scalar_one()
     tokens = (
-        await session.execute(sa.select(RefreshToken).where(RefreshToken.user_id == identity.user_id))
+        await session.execute(
+            sa.select(RefreshToken).where(RefreshToken.user_id == identity.user_id)
+        )
     ).scalars().all()
     assert [token.oidc_sid for token in tokens] == ["the-provider-session"]
 
@@ -309,7 +342,9 @@ async def test_a_link_attaches_the_identity_without_changing_who_is_signed_in(
     await configure(session)
     user, _ = await signed_in()
     subject = a_subject()
-    provider.sign_in_as(subject, roles=["member"], email="a-different-address@example.test", username="them")
+    provider.sign_in_as(
+        subject, roles=["member"], email="a-different-address@example.test", username="them"
+    )
 
     start = await client.get("/api/auth/oidc/link/start")
     assert start.status_code == 302
@@ -366,7 +401,9 @@ async def test_a_logout_token_ends_the_session_it_names_and_only_once(
     await service.issue_session(session, user)
     token = (
         await session.execute(
-            sa.select(RefreshToken).where(RefreshToken.user_id == user.id).order_by(RefreshToken.issued_at.desc())
+            sa.select(RefreshToken)
+            .where(RefreshToken.user_id == user.id)
+            .order_by(RefreshToken.issued_at.desc())
         )
     ).scalars().first()
     token.oidc_sid = "a-provider-session"
@@ -382,12 +419,16 @@ async def test_a_logout_token_ends_the_session_it_names_and_only_once(
     # A retry must not end a session the person has since started again.
     await service.issue_session(session, user)
     await session.commit()
-    repeat = await client.post("/api/auth/oidc/backchannel-logout", data={"logout_token": "a-token"})
+    repeat = await client.post(
+        "/api/auth/oidc/backchannel-logout", data={"logout_token": "a-token"}
+    )
     assert repeat.status_code == 200, "a repeat is a 200, or the provider retries for nothing"
 
     live = (
         await session.execute(
-            sa.select(RefreshToken).where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+            sa.select(RefreshToken).where(
+                RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)
+            )
         )
     ).scalars().all()
     assert len(live) == 1, "the newer session survived the repeated event"
@@ -398,11 +439,15 @@ async def test_a_logout_token_ends_the_session_it_names_and_only_once(
     assert len(events) == 1
 
 
-async def test_a_logout_token_that_does_not_verify_is_a_bad_request(client, session, provider) -> None:
+async def test_a_logout_token_that_does_not_verify_is_a_bad_request(
+    client, session, provider
+) -> None:
     await configure(session)
     provider.logout_refusal = ValueError("logout token rejected: bad signature")
 
-    response = await client.post("/api/auth/oidc/backchannel-logout", data={"logout_token": "forged"})
+    response = await client.post(
+        "/api/auth/oidc/backchannel-logout", data={"logout_token": "forged"}
+    )
     assert response.status_code == 400
 
 
@@ -413,10 +458,15 @@ async def test_a_logout_token_that_does_not_verify_is_a_bad_request(client, sess
 
 @dataclass
 class RenewedSession:
+    """The SDK's `Session`, as `refresh()` answers it: the roles hang off the identity.
+
+    Deliberately not a `roles` attribute of its own. The first version of this fake had one,
+    which agreed with a bug in `refresh_roles` and hid it until the SDK began shipping types.
+    """
+
     identity: FakeIdentity
     access_token: str = "a-renewed-access-token"
     refresh_token: str | None = "a-renewed-refresh-token"
-    roles: list[str] | None = None
 
 
 async def test_a_role_withdrawn_at_the_provider_lands_on_the_next_renewal(
@@ -439,19 +489,17 @@ async def test_a_role_withdrawn_at_the_provider_lands_on_the_next_renewal(
     assert user.is_admin is True
     await configure(session)
 
-    renewed = RenewedSession(identity=FakeIdentity(iss=ISSUER, sub="x", claims={}, roles=["member"]))
-    renewed.identity.roles = ["member"]
+    renewed = RenewedSession(
+        identity=FakeIdentity(iss=ISSUER, sub="x", claims={}, roles=["member"]),
+        refresh_token="a-rotated-provider-token",
+    )
 
     class Renewing:
         def __init__(self, **_: Any) -> None:
             pass
 
-        async def refresh(self, _token: str) -> Any:
-            class Result:
-                roles = ["member"]
-                refresh_token = "a-rotated-provider-token"
-
-            return Result()
+        async def refresh(self, _token: str) -> RenewedSession:
+            return renewed
 
     monkeypatch.setattr(sys.modules["d3auth_client"], "D3AuthClient", Renewing)
 
@@ -490,7 +538,9 @@ async def test_a_provider_that_cannot_be_reached_does_not_sign_anybody_out(
     assert await oidc.identity_of(session, user=user) is not None, "the link survives an outage"
 
 
-async def test_an_account_with_no_link_asks_the_provider_nothing(session, user_factory, provider) -> None:
+async def test_an_account_with_no_link_asks_the_provider_nothing(
+    session, user_factory, provider
+) -> None:
     user, _ = await user_factory()
     assert await oidc.refresh_roles(session, user=user) is None
 
@@ -515,16 +565,17 @@ async def test_renewing_the_session_is_what_re_reads_the_roles(
     await session.commit()
     await configure(session)
 
+    demoted = RenewedSession(
+        identity=FakeIdentity(iss=ISSUER, sub=a_subject(), claims={}, roles=["member"]),
+        refresh_token=None,
+    )
+
     class Demoting:
         def __init__(self, **_: Any) -> None:
             pass
 
-        async def refresh(self, _token: str) -> Any:
-            class Result:
-                roles = ["member"]
-                refresh_token = None
-
-            return Result()
+        async def refresh(self, _token: str) -> RenewedSession:
+            return demoted
 
     monkeypatch.setattr(sys.modules["d3auth_client"], "D3AuthClient", Demoting)
 

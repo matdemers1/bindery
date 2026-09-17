@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 from api import oidc, settings_store
 from api.auth import service
-from api.db.models import AppUser, Membership, OidcIdentity
+from api.db.models import AppUser, Membership
 from api.db.models.user import RefreshToken
 
 GOOD_PASSWORD = "quiet harbour lantern orchard"
@@ -70,9 +70,13 @@ async def test_sso_is_off_until_an_operator_configures_it(session) -> None:
 async def test_a_half_configured_provider_is_not_enabled(session) -> None:
     await unconfigure(session)
     await settings_store.set_(session, settings_store.SSO_MODE, "optional", actor_id=None)
-    await settings_store.set_(session, settings_store.OIDC_ISSUER, "https://auth.example.test", actor_id=None)
+    await settings_store.set_(
+        session, settings_store.OIDC_ISSUER, "https://auth.example.test", actor_id=None
+    )
     await session.commit()
-    assert (await oidc.config(session)).enabled is False, "no client id and no secret is not configured"
+    assert (await oidc.config(session)).enabled is False, (
+        "no client id and no secret is not configured"
+    )
 
 
 async def test_the_client_secret_is_never_read_back(client, signed_in, session) -> None:
@@ -123,8 +127,12 @@ def test_the_verifier_is_not_readable_by_whoever_holds_the_state() -> None:
     Nothing here is keyed on `state`, so there is no lookup for an attacker to make. The only
     copy of the verifier is in the cookie the browser that started it holds.
     """
-    first = oidc.open_transaction(oidc.seal_transaction({"verifier": "mine", "state": "shared", "nonce": "n"}))
-    second = oidc.open_transaction(oidc.seal_transaction({"verifier": "theirs", "state": "shared", "nonce": "n"}))
+    first = oidc.open_transaction(
+        oidc.seal_transaction({"verifier": "mine", "state": "shared", "nonce": "n"})
+    )
+    second = oidc.open_transaction(
+        oidc.seal_transaction({"verifier": "theirs", "state": "shared", "nonce": "n"})
+    )
     assert first["verifier"] != second["verifier"]
 
 
@@ -178,7 +186,9 @@ async def test_an_identity_with_no_role_provisions_nothing(session) -> None:
     ).scalar_one_or_none() is None
 
 
-async def test_an_address_that_already_exists_here_is_never_taken_over(session, user_factory) -> None:
+async def test_an_address_that_already_exists_here_is_never_taken_over(
+    session, user_factory
+) -> None:
     """The case auto-linking by email gets wrong, refused in words that say what to do."""
     existing, _ = await user_factory("shared@example.test")
     await session.commit()
@@ -208,7 +218,9 @@ async def test_a_member_is_not_capped_and_a_guest_is() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_an_identity_belongs_to_one_account_and_an_account_to_one_identity(session, user_factory) -> None:
+async def test_an_identity_belongs_to_one_account_and_an_account_to_one_identity(
+    session, user_factory
+) -> None:
     first, _ = await user_factory()
     second, _ = await user_factory()
     subject = a_subject()
@@ -230,7 +242,9 @@ async def test_an_identity_belongs_to_one_account_and_an_account_to_one_identity
         )
 
 
-async def test_disconnecting_leaves_the_account_and_its_documents_alone(session, user_factory) -> None:
+async def test_disconnecting_leaves_the_account_and_its_documents_alone(
+    session, user_factory
+) -> None:
     user, _ = await user_factory()
     await oidc.link(
         session, user=user, issuer=ISSUER, subject=a_subject(),
@@ -250,7 +264,9 @@ async def test_disconnecting_leaves_the_account_and_its_documents_alone(session,
 # ---------------------------------------------------------------------------
 
 
-async def test_the_admin_role_does_not_make_an_administrator_without_bindery_two_factor(session, user_factory) -> None:
+async def test_the_admin_role_does_not_make_an_administrator_without_bindery_two_factor(
+    session, user_factory
+) -> None:
     """REQ-156 is Bindery's rule, and an identity arriving from elsewhere does not lift it.
 
     An administrator here can issue a reset code for every other account. That is why two-factor
@@ -308,7 +324,9 @@ async def test_a_logout_naming_a_session_ends_that_one_only(session, user_factor
     await service.issue_session(session, user)
     phone = (
         await session.execute(
-            sa.select(RefreshToken).where(RefreshToken.user_id == user.id).order_by(RefreshToken.issued_at.desc())
+            sa.select(RefreshToken)
+            .where(RefreshToken.user_id == user.id)
+            .order_by(RefreshToken.issued_at.desc())
         )
     ).scalars().first()
     phone.oidc_sid = "phone-session"
@@ -321,13 +339,17 @@ async def test_a_logout_naming_a_session_ends_that_one_only(session, user_factor
     assert ended == 1
     live = (
         await session.execute(
-            sa.select(RefreshToken).where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+            sa.select(RefreshToken).where(
+                RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)
+            )
         )
     ).scalars().all()
     assert len(live) == 1 and live[0].oidc_sid is None, "the laptop is still signed in"
 
 
-async def test_a_logout_naming_no_session_ends_every_session_this_identity_holds(session, user_factory) -> None:
+async def test_a_logout_naming_no_session_ends_every_session_this_identity_holds(
+    session, user_factory
+) -> None:
     user, _ = await user_factory()
     subject = a_subject()
     await oidc.link(
