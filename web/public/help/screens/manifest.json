@@ -139,7 +139,7 @@
         "web/src/components/Shell.tsx",
         "web/src/index.css"
       ],
-      "source_commit": "c775248cf2753b5ae4b64e7e5bde2bba8e6e4cee"
+      "source_commit": "e869e31f140f41c9c1cf3469bf273cab3734f854"
     },
     {
       "route": "/trust",

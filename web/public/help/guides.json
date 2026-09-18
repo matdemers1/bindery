@@ -376,6 +376,15 @@
             "Ingest, OCR, search, the viewer and export all work with no API key and no network. Only classification and Ask defer.",
             "Documents added before a key was configured are not lost or broken — they wait, and can be sent through review whenever you add one."
           ]
+        },
+        {
+          "heading": "Sign in with D3 Auth",
+          "body": [
+            "Optional, off until an operator configures it, and nothing changes for an account that never uses it — passwords keep working exactly as before.",
+            "Register Bindery at your provider first. It shows a connection sheet once, with the issuer, the client ID and a client secret; those three go in the card near the bottom of this screen, along with the redirect URI it prints for you to register.",
+            "Only an administrator can set it, because choosing which provider may mint sessions here is a statement about the whole archive rather than about one library. Turning it on is refused until all three are filled in: a button on the sign-in screen that cannot work is worse than no button.",
+            "Once it is on, connect your own account from the card below it and try the round trip before anyone else depends on it."
+          ]
         }
       ]
     },
