@@ -549,6 +549,12 @@ is the specification.
   `requirements.lock`. It ships `py.typed`, and must keep doing so: without the marker mypy skips
   the package, every call into it is `Any`, and `refresh_roles` was reading `roles` off a
   `Session` that carries them on its identity — with a test fake that had invented the same shape.
+- **Settings is where it is configured**, in `D3AuthProvider.tsx` — issuer, client id, secret and
+  mode, administrator-only at both ends. The phase shipped without this card and was reachable
+  only by editing a compose file over SSH, which is the answer that screen exists to replace.
+  The server refuses `optional` or `required` while any of the three is missing, judged on what
+  the archive will hold *after* the write, since the form sends the provider and the mode
+  together.
 - `infra/bindery.d3auth.json` is the manifest to register; copy the values from the provider's
   **connection sheet**, never from documentation.
 

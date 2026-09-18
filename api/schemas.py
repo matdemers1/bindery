@@ -751,6 +751,18 @@ class SettingsOut(BaseModel):
     offsite_region: str | None = None
     offsite_kms_key_id: str | None = None
 
+    # Sign in with D3 Auth (Phase 20, REQ-203). The issuer and client id are printed on the
+    # provider's own connection sheet and appear in every authorization URL, so they come back
+    # in full — you cannot check a redirect URI you are not allowed to read. The client secret
+    # follows the same rule as every other secret here: configured-or-not, and four characters.
+    # Administrator-only, like the offsite half: which provider holds the keys to the archive is
+    # a statement about the host, not about anybody's library.
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_secret_configured: bool = False
+    oidc_secret_hint: str | None = None
+    sso_mode: str = "off"
+
 
 class SettingsUpdateIn(BaseModel):
     # None means "leave alone"; empty string means "clear it".
@@ -763,6 +775,10 @@ class SettingsUpdateIn(BaseModel):
     offsite_bucket: str | None = None
     offsite_region: str | None = None
     offsite_kms_key_id: str | None = None
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    sso_mode: str | None = None
 
 
 class SettingsTestOut(BaseModel):

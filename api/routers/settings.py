@@ -75,6 +75,31 @@ _OFFSITE_FIELDS: tuple[tuple[str, str], ...] = (
     ("offsite_region", settings_store.OFFSITE_REGION),
     ("offsite_kms_key_id", settings_store.OFFSITE_KMS_KEY_ID),
 )
+# The provider half, by the same rule. `sso_mode` is validated rather than written blind, so it
+# is not in this table.
+_OIDC_FIELDS: tuple[tuple[str, str], ...] = (
+    ("oidc_issuer", settings_store.OIDC_ISSUER),
+    ("oidc_client_id", settings_store.OIDC_CLIENT_ID),
+    ("oidc_client_secret", settings_store.OIDC_CLIENT_SECRET),
+)
+
+SSO_MODES = ("off", "optional", "required")
+
+
+def sso_admin_only(user: AppUser) -> None:
+    """Which provider may mint sessions here is the administrator's, for the same reason.
+
+    An account that could point this at a provider it controls could grant itself `admin` there
+    and arrive here holding it — the whole archive, through a settings form. `_owner_only` is
+    satisfied by owning any library, and every invited account owns one.
+    """
+    if not user.is_admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Sign in with D3 Auth is the archive administrator's to configure.",
+        )
+
+
 # The secret is excluded on purpose: the audit records *that* it changed, never
 # a value. The other four are identifiers, and "which bucket was it before" is
 # the question asked after a destination has been swapped.
@@ -196,6 +221,53 @@ def _check_offsite(payload: SettingsUpdateIn) -> None:
             )
 
 
+async def _check_sso(session: AsyncSession, payload: SettingsUpdateIn) -> None:
+    """Refuse a configuration the sign-in screen could not act on.
+
+    The failure this exists to prevent is a *visible* one: turning SSO on with no issuer puts a
+    button on the front door that cannot work, and in `required` mode it is the front door.
+    """
+    if payload.oidc_issuer:
+        issuer = payload.oidc_issuer.strip()
+        parsed = urlparse(issuer)
+        if parsed.scheme != "https" or not parsed.netloc:
+            _reject(
+                f"{issuer!r} is not an https issuer URL. Copy it from the provider's "
+                "connection sheet — ID tokens are verified against it character for character."
+            )
+        if parsed.query or parsed.fragment:
+            _reject("An issuer is an origin and an optional path, with no query or fragment.")
+
+    mode = (payload.sso_mode or "").strip().lower()
+    if payload.sso_mode is not None and mode not in SSO_MODES:
+        _reject(f"{mode!r} is not off, optional or required.")
+
+    if mode in ("optional", "required"):
+        # What the archive will hold *after* this write, not what it holds now: the form sends
+        # the provider and the mode together, and checking the stored values would refuse the
+        # one request that configures everything at once.
+        async def settled(field: str, key: str) -> str:
+            sent = getattr(payload, field)
+            if sent is not None:
+                return sent.strip()
+            return (await settings_store.get(session, key) or "").strip()
+
+        missing = [
+            name
+            for name, field, key in (
+                ("an issuer", "oidc_issuer", settings_store.OIDC_ISSUER),
+                ("a client id", "oidc_client_id", settings_store.OIDC_CLIENT_ID),
+                ("a client secret", "oidc_client_secret", settings_store.OIDC_CLIENT_SECRET),
+            )
+            if not await settled(field, key)
+        ]
+        if missing:
+            _reject(
+                f"Turning SSO {mode} needs {', '.join(missing)}. Register Bindery at the "
+                "provider first and copy its connection sheet."
+            )
+
+
 @router.get("", response_model=SettingsOut)
 async def read_settings(
     user: AppUser = Depends(current_user),
@@ -222,6 +294,7 @@ async def read_settings(
     webhook = await settings_store.get(session, settings_store.NOTIFY_WEBHOOK_URL)
     aws_secret = await settings_store.get(session, settings_store.AWS_SECRET_ACCESS_KEY)
     offsite_visible = user.is_admin
+    oidc_secret = await settings_store.get(session, settings_store.OIDC_CLIENT_SECRET)
     return SettingsOut(
         available_models=[
             ModelChoiceOut(
@@ -258,6 +331,21 @@ async def read_settings(
             if offsite_visible
             else None
         ),
+        oidc_issuer=(
+            await settings_store.get(session, settings_store.OIDC_ISSUER)
+            if offsite_visible
+            else None
+        ),
+        oidc_client_id=(
+            await settings_store.get(session, settings_store.OIDC_CLIENT_ID)
+            if offsite_visible
+            else None
+        ),
+        oidc_secret_configured=bool(oidc_secret) if offsite_visible else False,
+        oidc_secret_hint=settings_store.mask(oidc_secret) if offsite_visible else None,
+        # The mode is not redacted: `/auth/oidc/status` already tells an anonymous browser
+        # whether this archive offers SSO, because the sign-in screen has to render something.
+        sso_mode=await settings_store.get(session, settings_store.SSO_MODE) or "off",
     )
 
 
@@ -275,6 +363,7 @@ async def update_settings(
     # nothing observable, which is worth knowing before someone "tidies" it and
     # believes they have broken something.
     _check_offsite(payload)
+    await _check_sso(session, payload)
 
     before: dict[str, str | None] = {}
     if any(getattr(payload, field) is not None for field, _ in _OFFSITE_FIELDS):
@@ -283,6 +372,14 @@ async def update_settings(
         # pointing before?" — the question a swapped destination raises.
         for field, setting_key in _OFFSITE_AUDITED:
             before[field] = await settings_store.get(session, setting_key)
+
+    sso_sent = [field for field, _ in _OIDC_FIELDS if getattr(payload, field) is not None]
+    if sso_sent or payload.sso_mode is not None:
+        sso_admin_only(user)
+        for field, setting_key in _OIDC_FIELDS:
+            if field != "oidc_client_secret":
+                before[field] = await settings_store.get(session, setting_key)
+        before["sso_mode"] = await settings_store.get(session, settings_store.SSO_MODE)
 
     changed: list[str] = []
     if payload.anthropic_api_key is not None:
@@ -334,6 +431,20 @@ async def update_settings(
                 session, setting_key, value.strip() or None, actor_id=user.id
             )
             changed.append(field)
+
+    for field, setting_key in _OIDC_FIELDS:
+        value = getattr(payload, field)
+        if value is not None:
+            await settings_store.set_(
+                session, setting_key, value.strip() or None, actor_id=user.id
+            )
+            changed.append(field)
+    if payload.sso_mode is not None:
+        await settings_store.set_(
+            session, settings_store.SSO_MODE,
+            payload.sso_mode.strip().lower(), actor_id=user.id,
+        )
+        changed.append("sso_mode")
 
     if changed:
         # The audit records *that* a secret changed, never its value.

@@ -19,9 +19,14 @@ import { Alert, Button, Checkbox, Input, PageHeader } from "@d3cloud/ui";
  * key into the DOM has handed it to every extension you run.
  */
 import ConnectD3Auth from "./ConnectD3Auth";
+import D3AuthProvider from "./D3AuthProvider";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  // Who is asking, for the one card that is an administrator's alone. The server redacts the
+  // provider fields for everybody else, which would otherwise render as "not configured" — a
+  // form that looks fillable and answers 403 on save.
+  const [admin, setAdmin] = useState(false);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [test, setTest] = useState<SettingsTest | null>(null);
@@ -30,6 +35,7 @@ export default function SettingsPage() {
   const load = useCallback(() => api.settings().then(setSettings).catch(() => {}), []);
   useEffect(() => {
     void load();
+    void api.me().then((user) => setAdmin(user.is_admin)).catch(() => setAdmin(false));
   }, [load]);
 
   async function save(value: string | null) {
@@ -158,6 +164,7 @@ export default function SettingsPage() {
       <ApiTokens />
       <Keyboard />
 
+      {admin && <D3AuthProvider settings={settings} onSaved={load} />}
       <ConnectD3Auth />
 
       <section className="mt-6">

@@ -387,6 +387,11 @@ export interface Settings {
   offsite_bucket: string | null;
   offsite_region: string | null;
   offsite_kms_key_id: string | null;
+  oidc_issuer: string | null;
+  oidc_client_id: string | null;
+  oidc_secret_configured: boolean;
+  oidc_secret_hint: string | null;
+  sso_mode: string;
 }
 
 export interface OffsiteRun {
@@ -674,7 +679,11 @@ export const api = {
         | "aws_secret_access_key"
         | "offsite_bucket"
         | "offsite_region"
-        | "offsite_kms_key_id",
+        | "offsite_kms_key_id"
+        | "oidc_issuer"
+        | "oidc_client_id"
+        | "oidc_client_secret"
+        | "sso_mode",
         string
       >
     >,
