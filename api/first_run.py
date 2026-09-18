@@ -208,6 +208,22 @@ async def owner_id(session: AsyncSession) -> uuid.UUID | None:
         return None
 
 
+async def resume_at_second_factor(session: AsyncSession, *, user: AppUser) -> bool:
+    """Arm the Secure step for an owner who has just lost their authenticator.
+
+    Only when no administrator is left: with another admin still holding the box, the way back
+    is that admin re-granting rights once this account has enrolled again from Settings, and
+    recording a setup owner would claim a setup is in progress that nobody is doing.
+    """
+    if await _admin_exists(session):
+        return False
+    await _write(session, OWNER_USER_ID, str(user.id))
+    await _audit_system(
+        session, "setup_owner_recorded", reason="second factor retired; resume at Secure"
+    )
+    return True
+
+
 async def state(session: AsyncSession) -> SetupState:
     """The one fact an anonymous caller may learn: is this archive claimed?"""
     if await archive_is_empty(session):

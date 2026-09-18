@@ -17,7 +17,13 @@ import sqlalchemy as sa
 from api import accounts
 from api.auth import totp
 from api.auth.passwords import WeakPassword, verify_password
-from api.db.models import Invitation, Membership, PasswordResetCode, RefreshToken
+from api.db.models import (
+    Invitation,
+    Membership,
+    PasswordResetCode,
+    RecoveryCode,
+    RefreshToken,
+)
 
 GOOD_PASSWORD = "ledger obelisk hangar 41"
 
@@ -564,3 +570,69 @@ async def test_regenerating_recovery_codes_retires_them_rather_than_deleting(
     await session.commit()
     with pytest.raises(accounts.AccountError):
         await accounts.check_second_factor(session, user=user, code=first[0])
+
+
+# --------------------------------------------------------------------------
+# A recovery code retires the authenticator it stood in for
+# --------------------------------------------------------------------------
+
+
+async def _enrolled(session, user) -> list[str]:
+    user.totp_secret = totp.new_secret()
+    codes = await accounts.confirm_totp(
+        session, user=user, code=totp._code_for_step(user.totp_secret, totp.current_step())
+    )
+    await session.commit()
+    return codes
+
+
+async def test_check_says_which_factor_answered(session, user_factory) -> None:
+    """The caller cannot act on a lost authenticator it was never told about."""
+    user, _ = await user_factory()
+    codes = await _enrolled(session, user)
+
+    # The next step, not this one: enrolment already spent the current step, and the replay
+    # guard refuses a code from a step that has been.
+    live = totp._code_for_step(user.totp_secret, totp.current_step() + 1)
+    assert await accounts.check_second_factor(session, user=user, code=live) is (
+        accounts.SecondFactor.TOTP
+    )
+    assert await accounts.check_second_factor(session, user=user, code=codes[0]) is (
+        accounts.SecondFactor.RECOVERY
+    )
+
+    plain, _ = await user_factory()
+    assert await accounts.check_second_factor(session, user=plain, code="") is (
+        accounts.SecondFactor.NONE
+    )
+
+
+async def test_retiring_the_factor_withdraws_the_codes_minted_with_it(
+    session, user_factory
+) -> None:
+    """The remaining codes are the same piece of paper as the authenticator."""
+    user, _ = await user_factory()
+    codes = await _enrolled(session, user)
+    await accounts.check_second_factor(session, user=user, code=codes[0])
+
+    retired = await accounts.retire_second_factor(session, user=user)
+    await session.commit()
+
+    assert retired.codes_superseded == accounts.RECOVERY_CODE_COUNT - 1, "the spent one is spent"
+    assert user.totp_enabled is False
+    assert user.totp_secret is None
+
+    rows = (
+        await session.execute(sa.select(RecoveryCode).where(RecoveryCode.user_id == user.id))
+    ).scalars().all()
+    assert len(rows) == accounts.RECOVERY_CODE_COUNT, "nothing was deleted (REQ-090)"
+    assert all(r.used_at is not None or r.superseded_at is not None for r in rows)
+
+    # With nothing enrolled there is no second factor to ask for, so the interesting case is
+    # the one after: a leftover code must not open the *new* authenticator's account.
+    assert await accounts.check_second_factor(session, user=user, code=codes[1]) is (
+        accounts.SecondFactor.NONE
+    )
+    await _enrolled(session, user)
+    with pytest.raises(accounts.AccountError):
+        await accounts.check_second_factor(session, user=user, code=codes[1])

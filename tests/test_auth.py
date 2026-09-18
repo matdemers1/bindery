@@ -6,6 +6,7 @@ from httpx import ASGITransport, AsyncClient
 
 from api.auth.cookies import ACCESS_COOKIE, REFRESH_COOKIE
 from api.auth.passwords import hash_password
+from api.db.enums import MembershipRole
 from api.db.models import AppUser, RefreshToken
 from api.main import app
 from tests.conftest import PASSWORD
@@ -375,3 +376,120 @@ def test_the_password_policy_needs_no_network() -> None:
     source = inspect.getsource(passwords)
     for forbidden in ("requests", "httpx", "urllib", "aiohttp", "socket"):
         assert forbidden not in source
+
+
+# --------------------------------------------------------------------------
+# Signing in with a recovery code retires the authenticator (REQ-210)
+# --------------------------------------------------------------------------
+
+
+async def _with_totp(session, user) -> list[str]:
+    from api import accounts
+    from api.auth import totp
+
+    user.totp_secret = totp.new_secret()
+    codes = await accounts.confirm_totp(
+        session, user=user, code=totp._code_for_step(user.totp_secret, totp.current_step())
+    )
+    await session.commit()
+    return codes
+
+
+async def test_a_recovery_sign_in_retires_the_factor_and_the_rights(
+    client: AsyncClient, session, user_factory
+) -> None:
+    """Ten recovery codes is not ten sign-ins; it is one, and then re-enrolment.
+
+    Asking again for a code the person has already shown they cannot produce is how somebody
+    spends the whole sheet and ends up needing a shell on the host.
+    """
+    from api import first_run
+
+    user, _ = await user_factory()
+    codes = await _with_totp(session, user)
+    # The last administrator, said rather than assumed: the suite shares one database, and
+    # another module's admin would make this the *other* case — the one below.
+    await session.execute(
+        sa.update(AppUser).where(AppUser.is_admin.is_(True)).values(is_admin=False)
+    )
+    user.is_admin = True
+    await session.commit()
+
+    response = await client.post(
+        "/api/auth/login",
+        json={"email": user.email, "password": PASSWORD, "code": codes[0]},
+    )
+    assert response.status_code == 200, "the recovery code is a way in"
+
+    await session.refresh(user)
+    assert user.totp_enabled is False, "the authenticator it stood in for is retired"
+    assert user.is_admin is False, "REQ-156: no administrator without a second factor"
+    # The owner row is what arms Secure. Asserted rather than `state()`, which is archive-wide:
+    # another test's administrator makes it COMPLETE and says nothing about this account.
+    assert await first_run.owner_id(session) == user.id, (
+        "the next sign-in lands on Secure and hands the rights back"
+    )
+
+    # And the next sign-in asks for nothing they cannot produce.
+    again = await client.post(
+        "/api/auth/login", json={"email": user.email, "password": PASSWORD}
+    )
+    assert again.status_code == 200
+
+
+async def test_a_totp_sign_in_changes_nothing(
+    client: AsyncClient, session, user_factory
+) -> None:
+    """Only the recovery path says the authenticator is gone."""
+    from api.auth import totp
+
+    user, _ = await user_factory()
+    await _with_totp(session, user)
+    user.is_admin = True
+    await session.commit()
+
+    response = await client.post(
+        "/api/auth/login",
+        json={
+            "email": user.email,
+            "password": PASSWORD,
+            "code": totp._code_for_step(user.totp_secret, totp.current_step() + 1),
+        },
+    )
+    assert response.status_code == 200
+
+    await session.refresh(user)
+    assert user.totp_enabled is True
+    assert user.is_admin is True
+
+
+async def test_another_admin_means_no_setup_to_resume(
+    client: AsyncClient, session, user_factory
+) -> None:
+    """A setup owner would claim a first run nobody is doing.
+
+    With the box still held by somebody, the way back is that admin re-granting rights once
+    this account has enrolled again — not the first-run flow.
+    """
+    from api import first_run
+
+    other, library = await user_factory()
+    other.is_admin = True
+    user, _ = await user_factory(library=library, role=MembershipRole.CONTRIBUTOR)
+    codes = await _with_totp(session, user)
+    user.is_admin = True
+    await session.commit()
+
+    response = await client.post(
+        "/api/auth/login",
+        json={"email": user.email, "password": PASSWORD, "code": codes[0]},
+    )
+    assert response.status_code == 200
+
+    await session.refresh(user)
+    assert user.is_admin is False, "this one still loses the rights"
+    # Not "no owner at all": the setting is one row for the whole archive, and an earlier
+    # sign-in in this suite may have armed it. What must be true is that *this* demotion did
+    # not claim it.
+    assert await first_run.owner_id(session) != user.id, "no setup owner was recorded for them"
+    assert await first_run.state(session) is first_run.SetupState.COMPLETE

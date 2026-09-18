@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import accounts, oidc
+from api import accounts, first_run, oidc
 from api.audit import record
 from api.auth import service, throttle
 from api.auth.client import client_ip
@@ -52,9 +52,12 @@ async def login(
     # The password was right. A missing or wrong second factor is still a
     # failed attempt as far as the throttle is concerned, or the code becomes
     # the unthrottled half of the login.
+    factor = accounts.SecondFactor.NONE
     if user.totp_enabled:
         try:
-            await accounts.check_second_factor(session, user=user, code=payload.code or "")
+            factor = await accounts.check_second_factor(
+                session, user=user, code=payload.code or ""
+            )
         except accounts.AccountError as exc:
             await throttle.record(session, payload.email, ip, succeeded=False)
             await session.commit()
@@ -67,6 +70,36 @@ async def login(
             ) from exc
 
     await throttle.record(session, payload.email, ip, succeeded=True)
+
+    # A recovery code got them in, so the authenticator is gone. Retire it here rather than
+    # ask for it again at the next sign-in, which is how somebody spends ten recovery codes
+    # and then needs a shell on the host.
+    if factor is accounts.SecondFactor.RECOVERY:
+        retired = await accounts.retire_second_factor(session, user=user)
+        await record(
+            session,
+            entity_type="app_user",
+            entity_id=user.id,
+            action="totp_disabled",
+            actor_type=ActorType.HUMAN,
+            actor_id=user.id,
+            after={
+                "via": "recovery_code",
+                "recovery_codes_superseded": retired.codes_superseded,
+            },
+        )
+        if retired.admin_revoked:
+            await record(
+                session,
+                entity_type="app_user",
+                entity_id=user.id,
+                action="admin_revoked",
+                actor_type=ActorType.SYSTEM,
+                actor_id=None,
+                before={"is_admin": True},
+                after={"reason": "REQ-156: no second factor until it is enrolled again"},
+            )
+            await first_run.resume_at_second_factor(session, user=user)
 
     access_token, refresh_secret = await service.issue_session(session, user)
     await record(

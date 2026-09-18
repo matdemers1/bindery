@@ -572,6 +572,15 @@ is the specification.
 - **Codes are canonicalised before hashing.** `CodeInput` never sends dashes,
   and people type spaces; `canonical_recovery_code` and `canonical_reset_code`
   restore the issued form. Do not compare codes as typed.
+- **A recovery code retires the authenticator it stood in for** (REQ-210). Spending one *is*
+  the account saying the authenticator is gone, so the sign-in that accepted it clears the TOTP
+  secret, supersedes the remaining codes — same sheet of paper, same moment — and revokes admin
+  (REQ-156), and the next sign-in lands on Secure and hands the rights back. Without it the next
+  sign-in asks again for the code they have already shown they cannot produce, and ten codes
+  later the only way in is a shell on the host. `check_second_factor` returns *which* factor
+  answered, because a caller cannot act on a lost authenticator it was never told about.
+  A setup owner is recorded only when no administrator is left; with another admin holding the
+  box the way back is enrolment from Settings and that admin re-granting.
 - **Kit components carry no margin.** Space entry layouts from the parent grid.
 
 ## Media, metadata and the inbox (Phase 18)

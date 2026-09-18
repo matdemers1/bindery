@@ -20,6 +20,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +51,22 @@ TOKEN_BYTES = 32
 
 class AccountError(Exception):
     """Refused, with a reason meant for a person to read."""
+
+
+class SecondFactor(StrEnum):
+    """Which factor got somebody through, which is not the same question as whether they did."""
+
+    NONE = "none"
+    TOTP = "totp"
+    RECOVERY = "recovery"
+
+
+@dataclass(frozen=True)
+class FactorRetired:
+    """What retiring a lost authenticator cost: codes withdrawn, and rights with them."""
+
+    codes_superseded: int
+    admin_revoked: bool
 
 
 def _now() -> datetime:
@@ -336,14 +353,19 @@ async def confirm_totp(session: AsyncSession, *, user: AppUser, code: str) -> li
 
 async def check_second_factor(
     session: AsyncSession, *, user: AppUser, code: str
-) -> None:
-    """Verify a TOTP code or spend a recovery code. Raises on failure."""
+) -> SecondFactor:
+    """Verify a TOTP code or spend a recovery code. Raises on failure.
+
+    Returns *which* factor answered, because the two mean different things about the
+    authenticator: a TOTP code proves it still exists, and a recovery code is what somebody
+    reaches for when it does not. `retire_second_factor` is what the caller does about that.
+    """
     if not user.totp_enabled:
-        return
+        return SecondFactor.NONE
     step = verify_totp(user.totp_secret or "", code, after_step=user.totp_last_step)
     if step is not None:
         user.totp_last_step = step
-        return
+        return SecondFactor.TOTP
 
     normalised = canonical_recovery_code(code)
     recovery = (
@@ -360,6 +382,50 @@ async def check_second_factor(
         raise AccountError("that code is not right")
     recovery.used_at = _now()
     log.warning("recovery code spent for %s", user.email)
+    return SecondFactor.RECOVERY
+
+
+async def retire_second_factor(session: AsyncSession, *, user: AppUser) -> FactorRetired:
+    """Retire an authenticator nobody has any more, and everything minted with it.
+
+    Spending a recovery code *is* the account saying the authenticator is gone. Leaving the
+    enrolment in place asks for a code at the next sign-in that the person still cannot
+    produce, so they spend another code, and another — ten sign-ins later they are locked out
+    with no way back that does not involve somebody with a shell on the host. Retiring it turns
+    one bad evening into one re-enrolment.
+
+    The remaining codes go with it: they were minted alongside that secret, they are the same
+    piece of paper, and a set that outlives the factor it belonged to is a second key to the
+    account that nobody is keeping track of. Superseded, never deleted (REQ-090).
+
+    An administrator loses the rights with it (REQ-156): an admin can reset every other
+    password, and an admin with no second factor is exactly what that rule exists to prevent.
+    `grant_admin` hands them back after enrolment, which is the only place that check lives.
+    """
+    superseded = (
+        await session.execute(
+            sa.update(RecoveryCode)
+            .where(
+                RecoveryCode.user_id == user.id,
+                RecoveryCode.used_at.is_(None),
+                RecoveryCode.superseded_at.is_(None),
+            )
+            .values(superseded_at=_now())
+            .returning(RecoveryCode.id)
+        )
+    ).scalars().all()
+
+    user.totp_secret = None
+    user.totp_confirmed_at = None
+    user.totp_last_step = None
+    was_admin = user.is_admin
+    user.is_admin = False
+    await session.flush()
+    log.warning(
+        "second factor retired for %s after a recovery code: %d code(s) withdrawn%s",
+        user.email, len(superseded), ", admin revoked" if was_admin else "",
+    )
+    return FactorRetired(codes_superseded=len(superseded), admin_revoked=was_admin)
 
 
 async def grant_admin(session: AsyncSession, *, user: AppUser) -> None:
