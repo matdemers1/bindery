@@ -549,6 +549,14 @@ is the specification.
   `requirements.lock`. It ships `py.typed`, and must keep doing so: without the marker mypy skips
   the package, every call into it is `Any`, and `refresh_roles` was reading `roles` off a
   `Session` that carries them on its identity — with a test fake that had invented the same shape.
+- **The api has to be told it is behind TLS.** Cloudflare terminates it and the tunnel speaks
+  plain http to nginx, so `request.url` says `http://` unless nginx forwards `X-Forwarded-Proto`
+  *and* uvicorn is started with `--proxy-headers --forwarded-allow-ips '*'` — it trusts only
+  127.0.0.1 otherwise, and nginx is another container. Missing either half, the first real
+  sign-in sent `http://bindery.d3cloud.io/api/auth/oidc/callback` to a provider holding the https
+  form and was refused with `invalid_redirect_uri`. A redirect URI is compared character for
+  character by design: that comparison is what stops an authorization code being delivered
+  somewhere else.
 - **Settings is where it is configured**, in `D3AuthProvider.tsx` — issuer, client id, secret and
   mode, administrator-only at both ends. The phase shipped without this card and was reachable
   only by editing a compose file over SSH, which is the answer that screen exists to replace.

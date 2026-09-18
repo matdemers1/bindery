@@ -465,6 +465,45 @@ def test_nginx_re_resolves_the_api_container_rather_than_caching_it_forever() ->
     )
 
 
+def test_the_api_can_tell_it_is_behind_tls() -> None:
+    """Three pieces have to agree, and any one of them alone does nothing.
+
+    TLS is terminated at Cloudflare; the tunnel speaks plain http to nginx, and nginx to the api.
+    So `request.url.scheme` inside the app is `http` unless the browser's scheme is forwarded
+    *and* uvicorn is willing to believe it — uvicorn trusts only 127.0.0.1 by default, and nginx
+    is a different container whose address Docker reassigns on every recreate.
+
+    Missed, this is invisible until something builds an absolute URL. The first real
+    *Sign in with D3 Auth* attempt sent `http://bindery.d3cloud.io/api/auth/oidc/callback` to a
+    provider holding the https form, and was refused with `invalid_redirect_uri` — a redirect URI
+    is compared character for character, by design, because that comparison is what stops an
+    authorization code being delivered somewhere else.
+    """
+    conf = NGINX.read_text()
+    assert "X-Forwarded-Proto" in conf, (
+        "nginx forwards no scheme, so every absolute URL the api builds claims http"
+    )
+
+    # The *serving* CMD, not the last one in the file: the `dev` stage ends with
+    # `CMD ["python", "-m", "pytest"]`, and reading that would pass this test while the shipped
+    # image still built http:// URLs. Continuations are folded first, so a CMD split over two
+    # lines is one string.
+    dockerfile = (ROOT / "infra" / "Dockerfile.api").read_text().replace("\\\n", " ")
+    command = next(
+        (line for line in dockerfile.splitlines()
+         if line.startswith("CMD ") and "uvicorn" in line),
+        None,
+    )
+    assert command, "the api image no longer starts uvicorn from a CMD; this guard needs rewriting"
+    assert "--proxy-headers" in command, (
+        "uvicorn is started without --proxy-headers, so X-Forwarded-Proto is ignored"
+    )
+    assert "--forwarded-allow-ips" in command, (
+        "uvicorn trusts 127.0.0.1 by default and nginx is another container, so the header "
+        "arrives from an address it will not believe"
+    )
+
+
 # ---------------------------------------------------------------------------
 # The runbooks, which are read at 3am and are therefore part of the system
 # ---------------------------------------------------------------------------

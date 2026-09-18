@@ -70,7 +70,13 @@ COPY alembic.ini ./
 USER bindery
 # `python -m` puts /app first on sys.path. Do not switch to the bare `uvicorn`
 # console script: it would resolve `api` from site-packages instead.
-CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# `--proxy-headers` with `--forwarded-allow-ips`: uvicorn trusts 127.0.0.1 by default, and
+# nginx is a different container with an address Docker reassigns on every recreate, so the
+# X-Forwarded-Proto it sets was being ignored and every absolute URL the api built came out
+# `http://`. Trusting the whole network is safe here because nothing else can reach this
+# port: the compose network is private and REQ-104 forbids publishing one.
+CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--proxy-headers", "--forwarded-allow-ips", "*"]
 
 # Stamped at the end of the *runtime* stage, on purpose. These change on every
 # commit, so an ARG consumed earlier would invalidate every layer built after
