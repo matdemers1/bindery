@@ -20,7 +20,17 @@ export function ssoMessage(search: string): string | null {
     case "expired":
       return "That sign-in took too long. Try again.";
     case "refused":
-      return "D3 Auth could not sign you in. If you have never used this archive before, ask whoever runs it for access.";
+      return "D3 Auth would not complete that sign-in. Try again.";
+    case "no-access":
+      return "That D3 Auth account has no access to this archive yet. Ask whoever runs it to give you access.";
+    case "connect-first":
+      return "An account with that email address already exists here. Sign in with your password, then connect D3 Auth from Settings.";
+    case "already-linked":
+      return "That D3 Auth account is already connected to an account here.";
+    case "failed":
+      // Deliberately not "ask for access": this is the archive failing, and sending somebody to
+      // an administrator to ask for something they already have wastes both their time.
+      return "Bindery could not complete that sign-in. That is a fault here rather than something you did — the details are in Settings → Diagnostics.";
     case "unavailable":
       return "D3 Auth is unavailable right now. You can still sign in with a password.";
     case "too-many-attempts":

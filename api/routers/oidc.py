@@ -202,11 +202,23 @@ async def oidc_callback(
         await throttle.record(session, THROTTLE_KEY, ip, succeeded=False)
         await session.commit()
         return _back_to_sign_in("expired", detail=refused.reason)
-    except Exception as failure:  # the SDK raises ValueError for every refusal it makes
+    except ValueError as refusal:
+        # The SDK raises ValueError for every refusal it *makes* — a state that does not match,
+        # an issuer that is not ours, a signing algorithm we will not accept. Somebody else's
+        # decision about this sign-in, and a warning.
         await throttle.record(session, THROTTLE_KEY, ip, succeeded=False)
         await session.commit()
-        log.warning("a D3 Auth callback was refused: %s", failure)
+        log.warning("a D3 Auth callback was refused: %s", refusal)
         return _back_to_sign_in("refused")
+    except Exception:
+        # Anything else is this archive failing, and must not be dressed up as a decision about
+        # the person in front of it. Telling somebody to "ask for access" when the exchange
+        # itself is broken sends them to argue with an administrator about a bug — which is
+        # exactly what happened the first time this ran against a real provider.
+        await throttle.record(session, THROTTLE_KEY, ip, succeeded=False)
+        await session.commit()
+        log.exception("a D3 Auth sign-in could not be completed")
+        return _back_to_sign_in("failed")
 
     claims = dict(result.identity.claims or {})
     try:
@@ -222,7 +234,7 @@ async def oidc_callback(
     except oidc.SignInRefused as refused:
         await throttle.record(session, THROTTLE_KEY, ip, succeeded=False)
         await session.commit()
-        return _back_to_sign_in("refused", detail=refused.reason)
+        return _back_to_sign_in(refused.code, detail=refused.reason)
 
     if transaction.get("link"):
         # A link, not a sign-in: the browser already has a session, and that session stays.

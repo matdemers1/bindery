@@ -71,11 +71,18 @@ class SsoUnavailable(Exception):
 
 
 class SignInRefused(Exception):
-    """The sign-in itself was refused, with a reason fit to show a person."""
+    """The sign-in itself was refused, with a reason fit to show a person.
 
-    def __init__(self, reason: str) -> None:
+    The `code` is what the sign-in screen renders, because the reason travels only to the log —
+    a message carried in a query string is a message an attacker can choose. Codes exist so the
+    screen can tell somebody what to *do*: "ask for access" and "connect it from Settings" are
+    different sentences, and answering both with one of them sends people the wrong way.
+    """
+
+    def __init__(self, reason: str, *, code: str = "refused") -> None:
         super().__init__(reason)
         self.reason = reason
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -218,9 +225,13 @@ async def link(
 ) -> OidcIdentity:
     """Attach a provider identity to an account. Refuses if either half is already spoken for."""
     if (await identity_for(session, issuer=issuer, subject=subject)) is not None:
-        raise SignInRefused("that D3 Auth account is already connected to somebody here")
+        raise SignInRefused(
+            "that D3 Auth account is already connected to somebody here", code="already-linked"
+        )
     if (await identity_of(session, user=user)) is not None:
-        raise SignInRefused("this account is already connected to D3 Auth")
+        raise SignInRefused(
+            "this account is already connected to D3 Auth", code="already-linked"
+        )
 
     identity = OidcIdentity(
         user_id=user.id,
@@ -296,7 +307,9 @@ async def provision(
     provider rather than an administrator here.
     """
     if not roles:
-        raise SignInRefused("this account has no access to Bindery yet — ask whoever runs it")
+        raise SignInRefused(
+            "this account has no access to Bindery yet — ask whoever runs it", code="no-access"
+        )
 
     email = (email or "").strip().lower()
     if not email:
@@ -307,7 +320,8 @@ async def provision(
         # An address that already exists here is exactly the case auto-linking would get wrong.
         raise SignInRefused(
             "an account with that address already exists here. Sign in with your password, "
-            "then connect D3 Auth from Settings"
+            "then connect D3 Auth from Settings",
+            code="connect-first",
         )
 
     user = AppUser(

@@ -277,7 +277,9 @@ async def test_a_sign_in_with_no_role_creates_nothing(client, session, provider)
 
     response = await client.get(callback_url())
 
-    assert response.status_code == 303 and "sso=refused" in response.headers["location"]
+    # `no-access`, not `refused`: the screen tells them to ask for access, which is the one
+    # thing that will actually fix it.
+    assert response.status_code == 303 and "sso=no-access" in response.headers["location"]
     assert (await client.get("/api/auth/me")).status_code == 401
     assert (
         await session.execute(sa.select(AppUser).where(AppUser.email == email))
@@ -627,3 +629,88 @@ def test_a_stand_in_may_not_invent_a_field_the_client_does_not_have(provider) ->
     assert {"healthy", "start_sign_in", "finish_sign_in", "refresh"} <= real_calls, (
         "the routes call all four; the client no longer offers them all"
     )
+
+
+# ---------------------------------------------------------------------------
+# What the sign-in screen is told, which is not always about the person reading it
+# ---------------------------------------------------------------------------
+
+
+async def test_an_address_that_exists_here_says_to_connect_it_from_settings(
+    client, session, user_factory, provider
+) -> None:
+    """The refusal is right; the instruction is the point.
+
+    Identity is `(iss, sub)` and never the email, so an address that already exists here is
+    deliberately not linked. Somebody in that position needs to be told the two steps that work,
+    not told to ask an administrator for access they already have.
+    """
+    await configure(session)
+    user, _ = await user_factory()
+    provider.sign_in_as(a_subject(), roles=["member"], email=user.email)
+    await begin(client)
+
+    response = await client.get(callback_url())
+
+    assert "sso=connect-first" in response.headers["location"]
+
+
+async def test_a_broken_exchange_is_not_reported_as_a_decision_about_the_person(
+    client, session, provider, monkeypatch
+) -> None:
+    """The one that cost an evening.
+
+    The SDK passed the token endpoint as a keyword Authlib already supplies positionally, so
+    every exchange died with a TypeError. Bindery caught it with the same `except Exception` it
+    used for the provider's own refusals and told the person to ask whoever runs the archive for
+    access — sending them to argue with an administrator about a bug in this code.
+    """
+    await configure(session)
+    provider.sign_in_as(a_subject(), roles=["member"], email="someone@example.test")
+    await begin(client)
+
+    class Broken:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        def healthy(self) -> bool:
+            return True
+
+        async def start_sign_in(self, *_: Any, **__: Any) -> Any:
+            raise AssertionError("not reached")
+
+        async def finish_sign_in(self, *_: Any, **__: Any) -> Any:
+            raise TypeError("fetch_token() got multiple values for argument 'url'")
+
+    monkeypatch.setattr(sys.modules["d3auth_client"], "D3AuthClient", Broken)
+
+    response = await client.get(callback_url())
+
+    assert "sso=failed" in response.headers["location"], (
+        "a fault here must not be reported as a refusal about them"
+    )
+
+
+async def test_the_providers_own_refusal_is_still_a_refusal(
+    client, session, provider, monkeypatch
+) -> None:
+    """The other side of that split: a ValueError is a decision the SDK made, not a fault."""
+    await configure(session)
+    provider.sign_in_as(a_subject(), roles=["member"], email="someone@example.test")
+    await begin(client)
+
+    class Refusing:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        def healthy(self) -> bool:
+            return True
+
+        async def finish_sign_in(self, *_: Any, **__: Any) -> Any:
+            raise ValueError("this callback belongs to a different sign-in")
+
+    monkeypatch.setattr(sys.modules["d3auth_client"], "D3AuthClient", Refusing)
+
+    response = await client.get(callback_url())
+
+    assert "sso=refused" in response.headers["location"]
