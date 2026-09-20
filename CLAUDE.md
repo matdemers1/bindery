@@ -1,6 +1,6 @@
 # CLAUDE.md — Bindery
 
-Self-hosted document archive. **Read `D3 Cloud Vault/Bindery/` before doing any work** — the planning corpus there is the source of truth for every decision below.
+Self-hosted document archive. **Read Foreman before doing any work** — `foreman_brief BND` for where it stands, then its documents as resources. Foreman is the source of truth for every decision below (ADR-009); the vault is a read-only archive of the state before the 2026-09-20 cutover.
 
 ## What Bindery Is
 
@@ -90,7 +90,7 @@ first-real-corpus consolidation, accounts and administration, documentation and
 versioning, offsite replication, signal and navigation, the build gate, the
 private vault, corrections, media/metadata/inbox, the front door (first-run setup and the entry screens), and Sign in with D3 Auth. **Planned next: Phase 12**
 (later features). The per-phase truth is
-`D3 Cloud Vault/Bindery/Scope of Work.md` — this line is a pointer, not a second
+Foreman's phases and tasks for `BND` — this line is a pointer, not a second
 copy, because the copy is what went eleven phases stale.
 
 Phase 3 was built **deliberately, with its own entry gate unmet**, and that debt
@@ -735,12 +735,24 @@ exist. The PDFs are generated rather than committed — a handful of bytes of co
 beats four binaries nobody can diff, and they carry real selectable text, so
 OCR, the known-form matcher and search all have something true to do.
 
-## ⚠️ Private repository
+## Public repository — the corpus is not in it
 
-`tests/corpus/` holds real personal documents (DD-214, VA medical records, financial statements) as the golden corpus. **This repository must never be made public.**
+Bindery is public under Apache-2.0 (ADR-014). The archive it serves is private;
+the code that serves it is not.
+
+`tests/corpus/` is the golden corpus of **real** personal records — a DD-214, VA
+medical records, financial statements. Those documents are **not in this
+repository and must never be committed**: `.gitignore` ignores everything in that
+directory except the Python harness and its README, and the corpus lives on the
+maintainer's machine.
+
+This is a live hazard rather than a historical note, because **T-1.12 is still
+open and its instruction is "add real fixtures to `tests/corpus/`"**. Add them to
+the working copy, run `make ocr-report`, and let them stay untracked. If you ever
+find yourself writing `git add -f` under that path, stop.
 
 ## Planning Corpus
 
-`D3 Cloud Vault/Bindery/` — Discovery Roadmap · Discovery & Requirements · Research Notes · Feature Ideas · Architecture · Data Model · Glossary · UX Flows & Screen Inventory · Risk Register · Test Strategy · Requirements Register (157 REQs) · Scope of Work (phases 0–18, plus 3.5 and 8.5) · Phase Plans ×14 · ADR-001 … ADR-013
+Foreman `BND` — its documents, ADRs, risks and glossary · Glossary · UX Flows & Screen Inventory · Risk Register · Test Strategy · Requirements Register (157 REQs) · Scope of Work (phases 0–18, plus 3.5 and 8.5) · Phase Plans ×14 · ADR-001 … ADR-013
 
 Start a coding session with `/start-development bindery`.
