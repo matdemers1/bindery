@@ -111,8 +111,11 @@ Rules:
 
 - Give a one-line reason for each group, in plain language.
 
+Each entry is listed as `[id] name (count)`. Refer to entries by their **id**, never by
+their name: two entries can carry the same name and only the id tells them apart.
+
 Return JSON only, with no trailing commas, in exactly this shape:
-{"groups": [{"canonical": "<name>", "members": ["<name>", "<name>"], "reason": "<why>"}]}
+{"groups": [{"canonical": "<id>", "members": ["<id>", "<id>"], "reason": "<why>"}]}
 """
 
 CORRESPONDENT_PROMPT = """You are tidying the list of organisations that a
@@ -301,8 +304,10 @@ async def propose(
 
     proposals: list[UnifyProposal] = []
     for chunk in _chunks(names):
+        # The id is shown because the name is not a key: two correspondents really can both be
+        # called "VERIZON", and a listing of names alone cannot express that they are two rows.
         listing = "\n".join(
-            f"- {entry['name']}  ({entry['documents']} documents)"
+            f"- [{entry['id']}] {entry['name']}  ({entry['documents']} documents)"
             for entry in chunk[:MAX_NAMES]
         )
         try:
@@ -419,14 +424,34 @@ def _parse(
             unavailable_reason="The model's answer could not be read as a proposal.",
         )
 
-    by_name = {entry["name"].strip().lower(): entry for entry in names}
+    by_id = {entry["id"]: entry for entry in names}
+
+    # Names map to a *list*, not to one entry. Two rows whose names differ only in case are two
+    # rows, and a dict keyed on the folded name silently kept one of them: the merge proposal then
+    # covered one duplicate and left the other behind, which is the opposite of unifying.
+    by_name: dict[str, list[dict]] = {}
+    for entry in names:
+        by_name.setdefault(entry["name"].strip().lower(), []).append(entry)
+
+    def _resolve(reference: object) -> list[dict]:
+        """Ids first, because a name is not unique. An unknown reference resolves to nothing."""
+        token = str(reference).strip()
+        entry = by_id.get(token)
+        if entry is not None:
+            return [entry]
+        # A model that answers with names anyway must not cost us a row.
+        return by_name.get(token.lower(), [])
+
     groups: list[ProposedGroup] = []
 
     for group in payload.get("groups", []):
-        members = []
+        members: list[dict] = []
+        seen: set[str] = set()
         for member_name in group.get("members", []):
-            entry = by_name.get(str(member_name).strip().lower())
-            if entry is not None:
+            for entry in _resolve(member_name):
+                if entry["id"] in seen:
+                    continue
+                seen.add(entry["id"])
                 members.append(entry)
 
         # A group of one merges nothing.
@@ -438,8 +463,12 @@ def _parse(
             log.info("dropping a group whose own reason rejects it: %r", reason[:80])
             continue
 
-        canonical_name = str(group.get("canonical", "")).strip()
-        canonical = by_name.get(canonical_name.lower())
+        canonical_reference = str(group.get("canonical", "")).strip()
+        resolved = _resolve(canonical_reference)
+        # The survivor must be one of the members: naming a row outside the group as canonical
+        # would merge documents into something the group never mentioned.
+        canonical = next((entry for entry in resolved if entry["id"] in seen), None)
+        canonical_name = canonical["name"] if canonical is not None else canonical_reference
         if canonical is None:
             # The model named a survivor that does not exist. Rather than
             # invent it, keep the member carrying the most documents — the
