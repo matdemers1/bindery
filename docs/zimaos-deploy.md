@@ -4,7 +4,7 @@ Everything here is done once. After that a deploy is `docker compose pull &&
 docker compose up -d`, and you choose when it happens — nothing auto-updates the
 thing holding your passport.
 
-**Host:** ZimaOS at `192.168.1.231`
+**Host:** ZimaOS at `<zima-lan-ip>`
 **Hostname:** `bindery.d3cloud.io` (Cloudflare Tunnel — no ports opened on the Zima)
 
 > [!warning] There is no Cloudflare Access in front of this hostname
@@ -77,7 +77,7 @@ Create a **classic** personal access token with the single scope
 `read:packages` at <https://github.com/settings/tokens>. Fine-grained tokens do
 not currently work for GHCR pulls.
 
-Then, on the Zima — over SSH (`ssh root@192.168.1.231`) or the terminal in the
+Then, on the Zima — over SSH (`ssh root@<zima-lan-ip>`) or the terminal in the
 ZimaOS web UI:
 
 ```bash

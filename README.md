@@ -147,7 +147,7 @@ docs/       Operator runbooks: deploy, backup and restore, offsite replication
 
 ## ⚠️ This repository is private and must stay private
 
-`tests/corpus/` contains **real personal documents** — a DD-214, VA medical records, and financial statements — used as the golden corpus for scoring OCR and classification quality. Never make this repository public.
+`tests/corpus/` is the golden corpus used to score OCR and classification quality. It holds **real personal documents** — a DD-214, VA medical records, financial statements — and they are **not in this repository**: everything under that path is gitignored except the harness. The fixtures stay on the maintainer's machine, so `make ocr-report` is reproducible only against a corpus you supply yourself.
 
 ## Documentation
 
@@ -161,3 +161,7 @@ used to carry was wrong.
 `CLAUDE.md` is the working conventions and the hard-won gotchas.
 `web/public/help/guides.json` is the in-app documentation, and
 `tests/test_docs.py` fails the build when it drifts from the screens it describes.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE). The code is open; the archive it serves is not.

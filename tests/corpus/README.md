@@ -40,9 +40,17 @@ make ocr-report
 ## ⚠️ Handling
 
 These are **genuine personal records** — a DD-214, VA medical records, financial
-statements. They live in this private repo and nowhere else. Where a fixture can
-be redacted without losing its test value, redact it. **Never make this
-repository public.**
+statements. **They are not in this repository and must never be committed.**
+This directory is ignored apart from the harness and this file; the documents
+live in the maintainer's working copy and nowhere a clone can reach.
+
+That makes the corpus un-shareable, which is a real cost — a contributor cannot
+reproduce the R-01 figure, only re-run the report against fixtures of their own.
+It is the cost of the repository being public, and it is the right way round:
+the alternative prices a stranger's convenience above a veteran's medical file.
+
+Where a fixture can be redacted without losing its test value, redact it —
+locally, and for your own benefit, not as a licence to commit it.
 
 ## The gate
 

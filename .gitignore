@@ -30,9 +30,19 @@ infra/cloudflared/*.json
 /.data-staging/
 *.sqlite
 
-# Golden corpus contains real personal documents.
-# Tracked deliberately in this PRIVATE repo; never publish this repo.
-!tests/corpus/
+# Golden corpus — REAL personal records (a DD-214, VA medical records, financial
+# statements). They live on the maintainer's machine and are never committed.
+#
+# This used to read `!tests/corpus/`, un-ignoring the directory so the fixtures
+# could be tracked in what was then a private repo. That is inverted here because
+# the repo is public now, and because T-1.12 — still open — is literally the task
+# "add real fixtures to tests/corpus/". Left as it was, doing the next planned
+# piece of work would have published somebody's medical records. See ADR-014.
+#
+# The harness itself stays tracked; only the documents are ignored.
+tests/corpus/*
+!tests/corpus/*.py
+!tests/corpus/README.md
 
 # OS
 .DS_Store

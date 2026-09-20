@@ -113,7 +113,7 @@ restart without you choosing the moment.
 migrations (0021–0023).
 
 ```bash
-ssh root@192.168.1.231 /DATA/AppData/bindery/backup.sh
+ssh root@<zima-lan-ip> /DATA/AppData/bindery/backup.sh
 ```
 
 **2. Verify that backup rather than assuming it.** A backup nobody has
@@ -121,7 +121,7 @@ restored from is a hypothesis, and that applies most on the day you are about
 to change the schema.
 
 ```bash
-ssh root@192.168.1.231
+ssh root@<zima-lan-ip>
 PG_IMAGE=pgvector/pgvector:pg16 /DATA/AppData/bindery/restore-drill.sh \
   /media/Main-Storage/Backups/bindery
 ```
@@ -148,7 +148,7 @@ api and worker report the same commit.
 so a `docker compose pull` does not update it.
 
 ```bash
-scp scripts/restore-drill.sh root@192.168.1.231:/DATA/AppData/bindery/
+scp scripts/restore-drill.sh root@<zima-lan-ip>:/DATA/AppData/bindery/
 ```
 
 **6. Configure the credentials in the UI**, not on the host: Settings →
