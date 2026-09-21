@@ -23,6 +23,7 @@ const TONE: Record<string, string> = {
   never_attempted: "border-edge bg-surface",
   provider_unavailable: "border-warning/40 bg-warning-muted/20",
   failed: "border-danger/40 bg-danger-muted/20",
+  declined: "border-edge bg-surface",
 };
 
 export default function PendingReviewPanel({ compact = false }: { compact?: boolean }) {
@@ -73,6 +74,12 @@ export default function PendingReviewPanel({ compact = false }: { compact?: bool
   // explaining a problem you do not have is noise on every other visit.
   if (!pending || pending.total === 0) return null;
 
+  // What "all" means. The heading still counts every document without AI review — that
+  // number is the truth about the archive — but the button may only promise the ones a
+  // re-run could actually reach.
+  const rerunnable = pending.reasons.filter((reason) => reason.rerunnable !== false);
+  const rerunnableTotal = rerunnable.reduce((sum, reason) => sum + reason.count, 0);
+
   return (
     <section className="rounded-lg border border-edge bg-surface p-5">
       <h2 className="text-base font-medium">
@@ -95,16 +102,23 @@ export default function PendingReviewPanel({ compact = false }: { compact?: bool
               </span>
             </div>
             <p className="mt-1 max-w-2xl text-sm text-muted">{reason.detail}</p>
-            <Button size="sm" className="mt-2" onClick={() => void run(reason.code)} disabled={busy !== null}>
-              {busy === reason.code ? "Queueing…" : `Run AI review on these ${reason.count}`}
-            </Button>
+            {/* A bucket the model has already refused gets no button. Offering one would only
+                produce the same refusal, and an action that cannot change anything reads as a
+                promise that it might. */}
+            {reason.rerunnable !== false && (
+              <Button size="sm" className="mt-2" onClick={() => void run(reason.code)} disabled={busy !== null}>
+                {busy === reason.code ? "Queueing…" : `Run AI review on these ${reason.count}`}
+              </Button>
+            )}
           </li>
         ))}
       </ul>
 
-      {pending.reasons.length > 1 && (
+      {/* The total counts every bucket, including the ones nothing can be done about, so "all"
+          is the sum of what is actually runnable rather than what is listed. */}
+      {rerunnable.length > 1 && (
         <Button variant="primary" className="mt-3" onClick={() => void run(null)} disabled={busy !== null}>
-          {busy === "all" ? "Queueing…" : `Run AI review on all ${pending.total}`}
+          {busy === "all" ? "Queueing…" : `Run AI review on all ${rerunnableTotal}`}
         </Button>
       )}
 

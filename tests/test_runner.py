@@ -121,3 +121,41 @@ def test_shutdown_signals_are_handled(signal_name) -> None:
 
     source = inspect.getsource(runner.main)
     assert signal_name in source
+
+
+async def test_a_refusal_is_not_logged_as_a_retryable_failure(
+    session, monkeypatch, caplog
+) -> None:
+    """A declined file is not a failure (ADR-011), and the log is where that shows.
+
+    The `else` arm writes "failed (attempt 1 of 5), retrying shortly" — false in both
+    halves for a refusal, which is terminal and is not a fault. Every log line is also
+    persisted to `event_log`, so this went to the diagnostics screen, which is the screen
+    that exists so nothing fails silently: a wrong explanation there is worse than none.
+    """
+    from api.db.enums import JobState
+    from worker.ai.provider import ProviderRefusedError
+
+    async def refuse(session_, job):
+        raise ProviderRefusedError("the model declined to classify this")
+
+    async def capture_fail(session_, job_id, attempts, error, *, permanent=False):
+        assert permanent, "a refusal must reach the queue as permanent, not as attempt 1 of 5"
+        return JobState.DECLINED
+
+    monkeypatch.setitem(runner.STAGES, JobStage.NORMALIZE, refuse)
+    monkeypatch.setattr(runner.queue, "fail", capture_fail)
+
+    with caplog.at_level("INFO", logger="bindery.worker"):
+        await runner._run_one(_job())
+
+    failure_lines = [
+        record for record in caplog.records if "declined" in record.message
+        or "retrying shortly" in record.message or "gave up" in record.message
+    ]
+    assert failure_lines, "the outcome has to be written down somewhere"
+    assert all("retrying shortly" not in record.message for record in failure_lines)
+    assert all(record.levelname == "INFO" for record in failure_lines), (
+        "nothing is wrong, so it is not a warning — a warning filter full of "
+        "correct outcomes is one nobody reads"
+    )

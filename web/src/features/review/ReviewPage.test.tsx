@@ -180,6 +180,7 @@ describe("the empty queue tells the truth (D-05)", () => {
           label: "Waiting for AI review",
           detail: "These arrived before an API key was configured.",
           count: 33,
+          rerunnable: true,
           document_ids: [],
         },
       ],

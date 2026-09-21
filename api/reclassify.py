@@ -46,6 +46,10 @@ class Reason:
     label: str
     detail: str
     document_ids: list[uuid.UUID] = field(default_factory=list)
+    # Whether re-running AI review on this bucket could plausibly change anything. False for a
+    # refusal: the model already looked and said no, and it will say no again. The screen should
+    # not offer an action whose only outcome is the same answer (ADR-011).
+    rerunnable: bool = True
 
     @property
     def count(self) -> int:
@@ -72,6 +76,7 @@ class PendingReview:
                     "label": r.label,
                     "detail": r.detail,
                     "count": r.count,
+                    "rerunnable": r.rerunnable,
                     "document_ids": [str(i) for i in r.document_ids],
                 }
                 for r in self.reasons
@@ -160,6 +165,17 @@ async def pending(session: AsyncSession, library_ids: list[uuid.UUID]) -> Pendin
         "These were attempted and could not be completed. Re-running is safe; if "
         "it fails again the error is on the Pipeline screen.",
     )
+    # A declined document is not waiting and did not fail (ADR-011). Without this bucket it fell
+    # into "never_attempted", under a heading saying nothing failed, and the screen offered to
+    # re-run it against a model that had already refused it — forever, and identically each time.
+    declined = Reason(
+        "declined",
+        "Refused by the model",
+        "The model looked at these and declined to classify them — a safety refusal, or a "
+        "file with nothing in it to read. Re-running will produce the same answer. They are "
+        "searchable, and you can title them by hand.",
+        rerunnable=False,
+    )
 
     seen: set[uuid.UUID] = set()
     for row in rows:
@@ -177,7 +193,10 @@ async def pending(session: AsyncSession, library_ids: list[uuid.UUID]) -> Pendin
             JobState.DEAD_LETTER, JobState.FAILED,
             JobState.DEAD_LETTER.value, JobState.FAILED.value,
         }
-        if state in gave_up:
+        declined_states = {JobState.DECLINED, JobState.DECLINED.value}
+        if state in declined_states:
+            declined.document_ids.append(row.id)
+        elif state in gave_up:
             bucket = unavailable if NO_PROVIDER in (row.last_error or "") else failed
             bucket.document_ids.append(row.id)
         elif row.review_state in (
@@ -191,7 +210,7 @@ async def pending(session: AsyncSession, library_ids: list[uuid.UUID]) -> Pendin
             # overwrite a human's work.
             never.document_ids.append(row.id)
 
-    return PendingReview(reasons=[never, unavailable, failed])
+    return PendingReview(reasons=[never, unavailable, failed, declined])
 
 
 async def requeue(

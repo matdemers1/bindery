@@ -556,10 +556,16 @@ export interface DuplicatePair {
 // --- The pipeline ----------------------------------------------------------
 
 export interface PendingReason {
-  code: "never_attempted" | "provider_unavailable" | "failed";
+  code: "never_attempted" | "provider_unavailable" | "failed" | "declined";
   label: string;
   detail: string;
   count: number;
+  /**
+   * Whether re-running AI review on this bucket could change anything. False for a
+   * refusal — the model has already looked and said no (ADR-011) — and the screen must
+   * not offer an action whose only outcome is the same answer.
+   */
+  rerunnable: boolean;
   document_ids: string[];
 }
 

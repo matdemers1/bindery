@@ -261,10 +261,14 @@ async def rerun_review(
     if body.all_pending:
         waiting = await reclassify.pending(session, library_ids)
         codes = set(body.reasons) if body.reasons else None
+        # "Everything that is waiting" excludes the buckets nothing can be done about: a
+        # document the model refused is not waiting for anything, and sweeping it back in
+        # spends money to be told no a second time (ADR-011). Naming the code explicitly
+        # still works — that is a deliberate act, and the answer can change if the model has.
         document_ids += [
             document_id
             for reason in waiting.reasons
-            if codes is None or reason.code in codes
+            if (reason.code in codes if codes is not None else reason.rerunnable)
             for document_id in reason.document_ids
         ]
 

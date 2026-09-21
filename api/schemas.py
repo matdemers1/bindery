@@ -1156,6 +1156,9 @@ class PendingReasonOut(BaseModel):
     label: str
     detail: str
     count: int
+    # False when re-running cannot change the outcome, so the screen can say so rather than
+    # offering a button that does the same thing again.
+    rerunnable: bool = True
     document_ids: list[uuid.UUID]
 
 

@@ -213,6 +213,15 @@ async def _run_one(job: queue.ClaimedJob) -> None:
                     "gave up on %s after %s attempts — it will not retry on its own: %s",
                     job.stage.value, job.attempts, exc, exc_info=exc,
                 )
+            elif state is queue.JobState.DECLINED:
+                # A declined file is not a failure (ADR-011). Without this arm it fell to the
+                # `else` and was written as "failed (attempt 1 of 5), retrying shortly" — false in
+                # both halves, and written to the event log, which is the screen that exists so
+                # nothing fails silently. Info, not warning: nothing is wrong.
+                log.info(
+                    "%s declined this one; it will not be retried: %s",
+                    job.stage.value, exc,
+                )
             else:
                 log.warning(
                     "%s failed (attempt %s of %s), retrying shortly: %s",

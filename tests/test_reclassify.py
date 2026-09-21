@@ -498,3 +498,112 @@ async def test_enqueue_still_refuses_to_disturb_work_in_the_normal_flow(
 
     assert first is not None
     assert second is None, "enqueue is still a no-op when the job exists"
+
+
+# --------------------------------------------------------------------------
+# A refusal is its own answer (ADR-011)
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def refused(session, unclassified):
+    """A fourth document, which the model looked at and declined to classify."""
+    library, docs = unclassified
+    source_file_id = docs["never"].source_file_id
+    session.add(Page(source_file_id=source_file_id, page_number=4, text="page 4"))
+    declined = Document(
+        library_id=library.id, source_file_id=source_file_id, page_start=4, page_end=4,
+        review_state=ReviewState.PENDING_CLASSIFICATION,
+    )
+    session.add(declined)
+    await session.flush()
+    session.add(
+        Job(
+            document_id=declined.id, stage=JobStage.CLASSIFY, state=JobState.DECLINED,
+            attempts=1,
+            last_error="ProviderRefusedError('the model declined to classify this')",
+        )
+    )
+    await session.commit()
+    return library, declined
+
+
+async def test_a_refusal_is_neither_waiting_nor_a_failure(session, refused) -> None:
+    """It fell into "never attempted", under a heading that says nothing failed.
+
+    Which was wrong twice over: something did happen, and what happened was an
+    answer. The screen then offered to run AI review on it — forever, and
+    identically each time.
+    """
+    library, declined = refused
+    result = await reclassify.pending(session, [library.id])
+
+    assert _reason(result, "declined").document_ids == [declined.id]
+    for code in ("never_attempted", "provider_unavailable", "failed"):
+        assert declined.id not in _reason(result, code).document_ids
+
+
+async def test_the_declined_bucket_does_not_invite_a_re_run(session, refused) -> None:
+    """The one property the UI reads to decide whether to render a button."""
+    library, _declined = refused
+    result = await reclassify.pending(session, [library.id])
+
+    assert _reason(result, "declined").rerunnable is False
+    assert all(
+        _reason(result, code).rerunnable
+        for code in ("never_attempted", "provider_unavailable", "failed")
+    ), "the other three are still worth re-running"
+
+    wire = result.as_dict()
+    assert {r["code"]: r["rerunnable"] for r in wire["reasons"]}["declined"] is False
+
+
+async def test_running_everything_waiting_leaves_the_refusals_alone(
+    client, session, refused
+) -> None:
+    """"All" means everything a re-run could reach.
+
+    Sweeping a refusal back in spends money to be told no a second time, and
+    the count in the button would be promising work it cannot do.
+    """
+    library, declined = refused
+    response = await client.post("/api/pipeline/reclassify", json={"all_pending": True})
+    assert response.status_code == 200, response.text
+    assert response.json()["queued"] == 3, "the other three, not four"
+
+    job = (
+        await session.execute(sa.select(Job).where(Job.document_id == declined.id))
+    ).scalar_one()
+    assert job.state == JobState.DECLINED, "its job was not reset"
+
+
+async def test_a_refusal_can_still_be_re_run_when_it_is_asked_for_by_name(
+    client, session, refused
+) -> None:
+    """Not forbidden — just never offered.
+
+    Naming the code is a deliberate act, and the answer genuinely can change:
+    the model is selectable, and a file one model refuses another may read.
+    """
+    _library, declined = refused
+    response = await client.post(
+        "/api/pipeline/reclassify",
+        json={"all_pending": True, "reasons": ["declined"]},
+    )
+    assert response.json()["queued"] == 1
+
+    job = (
+        await session.execute(sa.select(Job).where(Job.document_id == declined.id))
+    ).scalar_one()
+    assert job.state == JobState.QUEUED
+
+
+async def test_a_refusal_is_counted_but_not_called_a_failure(client, refused) -> None:
+    """It is still without AI review, so it is still in the total — the archive's
+    own count of what has no title, date or tags must not quietly shrink."""
+    body = (await client.get("/api/pipeline/reclassify/pending")).json()
+    assert body["total"] == 4
+    codes = {reason["code"]: reason["count"] for reason in body["reasons"]}
+    assert codes == {
+        "never_attempted": 1, "provider_unavailable": 1, "failed": 1, "declined": 1,
+    }
