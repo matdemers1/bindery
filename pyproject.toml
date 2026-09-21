@@ -52,7 +52,7 @@ dependencies = [
     # Bounded to the major whose citations shape api/ask.py depends on. Q&A
     # refuses to answer without a citation, so a response schema that moved
     # under us would not degrade the feature, it would disable it.
-    "anthropic>=1.2.0,<2",
+    "anthropic>=1.6.0,<2",
     # AES-256 ZIP for the go-bag export. Standard enough that 7-Zip and Keka
     # open it, which is the point: the recipient may not have Bindery.
     "pyzipper",
