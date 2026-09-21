@@ -566,7 +566,7 @@ async def test_running_everything_waiting_leaves_the_refusals_alone(
     Sweeping a refusal back in spends money to be told no a second time, and
     the count in the button would be promising work it cannot do.
     """
-    library, declined = refused
+    _library, declined = refused
     response = await client.post("/api/pipeline/reclassify", json={"all_pending": True})
     assert response.status_code == 200, response.text
     assert response.json()["queued"] == 3, "the other three, not four"

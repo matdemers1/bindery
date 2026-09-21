@@ -44,7 +44,11 @@ def test_two_rows_with_the_same_name_are_both_kept() -> None:
     names = [loud, quiet]
 
     proposal = _parse(
-        _answer([{"canonical": quiet["id"], "members": [loud["id"], quiet["id"]], "reason": "one company"}]),
+        _answer([{
+            "canonical": quiet["id"],
+            "members": [loud["id"], quiet["id"]],
+            "reason": "one company",
+        }]),
         names, model="test",
     )
 
@@ -60,7 +64,11 @@ def test_a_name_reply_still_resolves_and_keeps_every_row_of_that_name() -> None:
     other = _entry("Comcast", 2)
 
     proposal = _parse(
-        _answer([{"canonical": "Verizon", "members": ["Verizon", "VERIZON"], "reason": "one company"}]),
+        _answer([{
+            "canonical": "Verizon",
+            "members": ["Verizon", "VERIZON"],
+            "reason": "one company",
+        }]),
         [loud, quiet, other], model="test",
     )
 
