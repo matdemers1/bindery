@@ -139,8 +139,19 @@ def test_no_screenshot_is_older_than_the_screen_it_shows() -> None:
             for source in sources
             if not (REPO / source).exists()
         )
+        # Test files are excluded from the comparison. A `.test.tsx` beside a
+        # screen cannot change what the screen looks like, and asking for a
+        # re-capture because a fixture gained a field trains people to run
+        # `make screenshots` without looking at the result — which is the one
+        # habit that makes this check worthless. Pathspecs, so the exclusion
+        # travels with each source rather than being reapplied per directory.
         current = subprocess.run(
-            ["git", "log", "-1", "--format=%H", "--", *sources],
+            [
+                "git", "log", "-1", "--format=%H", "--",
+                *sources,
+                ":(exclude)*.test.tsx", ":(exclude)*.test.ts",
+                ":(exclude)*.spec.tsx", ":(exclude)*.spec.ts",
+            ],
             cwd=REPO, capture_output=True, text=True, check=False,
         ).stdout.strip()
         if not current:
