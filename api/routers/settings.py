@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import events, models, offsite, settings_store
+from api import ai_client, events, models, offsite, settings_store
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -474,8 +474,13 @@ async def test_ai(
     pipeline. This is the one place Bindery deliberately makes a live API call
     on a human's behalf, and it is a cheap one.
     """
-    key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
-    if not key:
+    # Through the same construction point as the pipeline and Ask. It used to
+    # build its own client inline, which meant "check my key" exercised a code
+    # path nothing else runs — a test that passes against a client the pipeline
+    # does not use is a test of the wrong thing (BND-FR-002).
+    config = await ai_client.resolve(session)
+    client = ai_client.build_client(config.api_key)
+    if client is None:
         return SettingsTestOut(
             ok=False,
             detail="No API key is configured. The archive works without one — "
@@ -483,11 +488,8 @@ async def test_ai(
                    "classification defers.",
         )
 
-    model = await settings_store.get(session, settings_store.BINDERY_MODEL) or "claude-opus-5"
+    model = config.model
     try:
-        import anthropic
-
-        client = anthropic.AsyncAnthropic(api_key=key)
         response = await client.messages.create(
             model=model,
             max_tokens=16,

@@ -16,6 +16,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from api import ai_client
+
 log = logging.getLogger("bindery.ask")
 
 ASK_MAX_TOKENS = 8000
@@ -122,13 +124,16 @@ class TruncatedAnswerError(RuntimeError):
 class ClaudeAnswerer:
     """Answers questions over supplied pages, with citations."""
 
-    def __init__(self, api_key: str, model: str = "claude-opus-5", client: Any = None) -> None:
+    def __init__(
+        self, api_key: str, model: str = ai_client.DEFAULT_MODEL, client: Any = None
+    ) -> None:
         self.model = model
-        self._client = client
-        if client is None and api_key:
-            import anthropic
-
-            self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        # Built through `api/ai_client.py` rather than here. This class cannot be
+        # an `AIProvider` — that protocol lives in `worker/`, which `api/` may
+        # not import — but "how a client is made" is not the part that needed
+        # to differ, and having it in two places is what ADR-003 is against
+        # (BND-FR-002).
+        self._client = client if client is not None else ai_client.build_client(api_key)
 
     def available(self) -> bool:
         return self._client is not None

@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import ai_ask, entities, settings_store, taxonomy_health, unify
+from api import ai_ask, ai_client, entities, taxonomy_health, unify
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -646,9 +646,12 @@ async def unify_preview(
             f"kind must be one of {', '.join(unify.KINDS)}",
         )
     library_ids = await _writable(session, user)
-    key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
-    model = await settings_store.get(session, settings_store.BINDERY_MODEL) or "claude-opus-5"
-    answerer = ai_ask.ClaudeAnswerer(key or "", model=model) if key else None
+    config = await ai_client.resolve(session)
+    answerer = (
+        ai_ask.ClaudeAnswerer(config.api_key or "", model=config.model)
+        if config.configured
+        else None
+    )
 
     proposal = await unify.propose(session, library_ids, answerer, kind)
     return UnifyProposalOut(**proposal.as_dict())

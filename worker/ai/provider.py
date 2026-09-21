@@ -17,6 +17,10 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 
+from api.ai_client import AIProviderError as AIProviderError
+from api.ai_client import ProviderRefusedError as ProviderRefusedError
+from api.ai_client import ProviderUnavailableError as ProviderUnavailableError
+
 
 class TaxonomyChoice(BaseModel):
     """Reuse or invention — never both, never a bare string.
@@ -170,41 +174,11 @@ class BoundaryRequest:
     windows: list[BoundaryWindow]
 
 
-class AIProviderError(RuntimeError):
-    """The provider could not produce a valid result.
-
-    Raised loudly and retried. A malformed response is **never** silently
-    accepted or partially applied (REQ-045): half a classification looks like a
-    confident answer, and a confidently wrong answer is the kill criterion.
-    """
-
-
-class ProviderRefusedError(AIProviderError):
-    """A safety classifier declined the request.
-
-    Permanent for this content and this model: the same document sent again
-    gets the same answer, so retrying is five attempts to reach one conclusion.
-
-    It is worth being specific about how this presented, because it cost two
-    wrong diagnoses. The API returns HTTP 200 with `stop_reason="refusal"` and
-    no content — which looked exactly like a malformed response, was reported as
-    "structured output was empty", and sent the investigation to `max_tokens`
-    twice. The refusal is now read before the content.
-    """
-
-    def __init__(self, message: str, *, category: str | None = None) -> None:
-        self.category = category
-        super().__init__(message)
-
-
-class ProviderUnavailableError(AIProviderError):
-    """The provider is unreachable or unconfigured.
-
-    Distinct from a malformed response because the handling differs: this is
-    retried with backoff indefinitely, and the document stays fully searchable
-    in the meantime (REQ-055).
-    """
-
+# The error taxonomy lives in `api/ai_client.py`, with the one place a client is
+# built, and is re-exported here because this protocol is where the pipeline
+# reads it from. Three call sites each constructed their own client and their
+# own idea of what an exception meant (BND-FR-002); the taxonomy is half of what
+# ADR-003's adapter is actually for, since it is what the retry policy reads.
 
 class AIProvider(Protocol):
     name: str

@@ -20,6 +20,7 @@ from typing import Any
 import anthropic
 from pydantic import ValidationError
 
+from api import ai_client
 from worker.ai.provider import (
     AIProviderError,
     BoundaryConfirmation,
@@ -142,17 +143,6 @@ def build_document_block(request: ClassificationRequest) -> str:
     return "\n".join(parts)
 
 
-# Anthropic signals an exhausted balance with a 400 and this wording. Matching
-# on the message is unpleasant and there is no code to match on instead; the
-# check is deliberately narrow, and a miss costs the old behaviour rather than a
-# new one.
-_BILLING_SIGNATURES = ("credit balance is too low", "billing", "purchase credits")
-
-
-def _is_billing(exc: Exception) -> bool:
-    return any(signature in str(exc).lower() for signature in _BILLING_SIGNATURES)
-
-
 class ClaudeProvider:
     name = "claude"
 
@@ -166,9 +156,7 @@ class ClaudeProvider:
         self.model = model
         self.prompt_version = prompt_version
         self._api_key = api_key
-        self._client = client or (
-            anthropic.AsyncAnthropic(api_key=api_key) if api_key else None
-        )
+        self._client = client or ai_client.build_client(api_key)
 
     def available(self) -> bool:
         return self._client is not None
@@ -320,27 +308,12 @@ class ClaudeProvider:
                 messages=[{"role": "user", "content": user_content}],
                 output_format=ClassificationResult,
             )
-        except anthropic.APIConnectionError as exc:
-            raise ProviderUnavailableError(f"could not reach the API: {exc}") from exc
-        except anthropic.RateLimitError as exc:
-            raise ProviderUnavailableError(f"rate limited: {exc}") from exc
-        except anthropic.APIStatusError as exc:
-            # 4xx that is not rate limiting is a request problem, not an outage:
-            # retrying unchanged will not help, so it fails loudly.
-            if exc.status_code >= 500:
-                raise ProviderUnavailableError(f"upstream error {exc.status_code}") from exc
-            if _is_billing(exc):
-                # Except this one. An exhausted credit balance arrives as a 400,
-                # but retrying unchanged is *exactly* what will work — once
-                # somebody tops the account up. Treating it as a bad request
-                # dead-letters every document in the queue over about four
-                # minutes and presents a billing problem as a corpus problem.
-                raise ProviderUnavailableError(
-                    f"the Anthropic account cannot be billed: {exc}"
-                ) from exc
-            raise AIProviderError(f"API rejected the request ({exc.status_code}): {exc}") from exc
         except ValidationError as exc:
+            # The one failure that is about *this* call rather than about the
+            # API: the response arrived and did not match the contract.
             raise AIProviderError(f"response did not match the schema: {exc}") from exc
+        except anthropic.APIError as exc:
+            raise ai_client.translate(exc) from exc
 
     async def confirm_boundaries(self, request: BoundaryRequest) -> BoundaryConfirmation:
         """Rule on the seams the heuristics could not settle (REQ-035).
@@ -386,14 +359,14 @@ class ClaudeProvider:
                 messages=[{"role": "user", "content": "\n".join(parts)}],
                 output_format=BoundaryConfirmation,
             )
-        except anthropic.APIConnectionError as exc:
-            raise ProviderUnavailableError(f"could not reach the API: {exc}") from exc
-        except anthropic.APIStatusError as exc:
-            if exc.status_code >= 500 or exc.status_code == 429:
-                raise ProviderUnavailableError(f"upstream error {exc.status_code}") from exc
-            raise AIProviderError(f"API rejected the request ({exc.status_code})") from exc
         except ValidationError as exc:
             raise AIProviderError(f"response did not match the schema: {exc}") from exc
+        except anthropic.APIError as exc:
+            # This branch used to classify its own errors, and did it differently:
+            # a 429 here was "upstream error 429" rather than "rate limited", and
+            # an exhausted balance dead-lettered instead of waiting. Two policies
+            # for one API, in one file (BND-FR-002).
+            raise ai_client.translate(exc) from exc
 
         confirmation = getattr(response, "parsed_output", None)
         if confirmation is None:

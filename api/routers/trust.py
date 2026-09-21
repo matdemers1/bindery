@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import ai_ask, ask, health_panel, offsite, offsite_runs, settings_store
+from api import ai_ask, ai_client, ask, health_panel, offsite, offsite_runs
 from api.audit import record
 from api.auth.dependencies import current_user
 from api.db import repository
@@ -679,9 +679,12 @@ async def ask_the_archive(
     """
     library_ids = await _visible(session, user)
 
-    key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
-    model = await settings_store.get(session, settings_store.BINDERY_MODEL) or "claude-opus-5"
-    answerer = ai_ask.ClaudeAnswerer(key or "", model=model) if key else None
+    config = await ai_client.resolve(session)
+    answerer = (
+        ai_ask.ClaudeAnswerer(config.api_key or "", model=config.model)
+        if config.configured
+        else None
+    )
 
     # `user.id` so the vault boundary applies: Ask reads page text and sends it
     # to a model, so a vaulted document reaching it would be quoted back *and*

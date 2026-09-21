@@ -6,7 +6,7 @@ one it got — that is the whole point of ADR-003's adapter.
 
 import logging
 
-from api.config import get_settings
+from api import ai_client
 from worker.ai.provider import (
     AIProvider,
     AIProviderError,
@@ -40,28 +40,20 @@ async def get_provider(session=None) -> AIProvider:
     if _override is not None:
         return _override
 
-    settings = get_settings()
-    api_key = settings.anthropic_api_key
-    model = settings.bindery_model
-    prompt_version = settings.bindery_prompt_version
+    config = await ai_client.resolve(session)
 
-    if session is not None:
-        from api import settings_store
-
-        api_key = await settings_store.get(session, settings_store.ANTHROPIC_API_KEY)
-        model = await settings_store.get(session, settings_store.BINDERY_MODEL) or model
-        prompt_version = (
-            await settings_store.get(session, settings_store.PROMPT_VERSION) or prompt_version
-        )
-
-    if not api_key:
+    if not config.configured:
         # Not an error. Retrieval never depends on the API being reachable
         # (invariant 7), so an unconfigured archive is a working archive.
-        return UnavailableProvider(prompt_version=prompt_version)
+        return UnavailableProvider(prompt_version=config.prompt_version)
 
     from worker.ai.claude import ClaudeProvider
 
-    return ClaudeProvider(api_key=api_key, model=model, prompt_version=prompt_version)
+    return ClaudeProvider(
+        api_key=config.api_key or "",
+        model=config.model,
+        prompt_version=config.prompt_version,
+    )
 
 
 __all__ = [
