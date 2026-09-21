@@ -808,7 +808,9 @@ async def test_a_long_list_is_asked_in_chunks(session, signed_in) -> None:
     await unify.propose(session, [library.id], answerer, "tag")
 
     assert len(answerer.asked) > 1, "a list past the threshold is split"
-    seen = sum(prompt.count("- tag-") for prompt in answerer.asked)
+    # Each line is `- [<id>] <name>  (<n> documents)`: the id is what the model
+    # answers with, because two rows can share a name (invariant 6).
+    seen = sum(prompt.count("] tag-") for prompt in answerer.asked)
     assert seen >= unify.CHUNK_SIZE + 50, "every name is asked about at least once"
 
 
