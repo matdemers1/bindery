@@ -143,6 +143,13 @@ decision currently happens at the end of `rules`.
   fuzzy match. Ids are re-validated against the document's library *after* the
   call, because filtering the candidates does not stop a model returning an id
   it was never shown. An unresolvable id zeroes the gate score.
+- **Taxonomy belongs to exactly one library, and the column is NOT NULL**
+  (migration 0032). `tag`, `correspondent` and `document_type` used to permit a
+  null, and four read paths widened to include such rows — a row belonging to
+  every account at once, inside the one boundary ADR-005 calls the access
+  boundary. Nothing ever created one, which is why it was cheap to close; the
+  leak suite asserts the constraint at the database, because a query clause can
+  be re-added and a NOT NULL cannot.
 - **Provenance is written in the same transaction as the values it justifies.**
   A classification without evidence is a bug, not a degraded result.
 - **Only ambiguous seams reach the model.** Heuristics settle the easy ones; the
@@ -173,6 +180,13 @@ decision currently happens at the end of `rules`.
 ## Conventions
 
 - **Adapter pattern** for every external service (AI, notifications, future cloud replication)
+- **`api/ai_client.py` is the only place an Anthropic client is constructed**, and the only
+  definition of what an exception from the API means. It lives in `api/` because that is the
+  package both images carry, so the pipeline stage and the request a person is waiting on share
+  one swap point — which is what ADR-003 is for: sending the OCR text of medical, identity and
+  financial records off the network is an accepted trade, and the adapter is the reversal path.
+  There were three clients, each with its own idea of the model default and of which failures
+  were worth retrying, and `tests/test_one_ai_adapter.py` is what keeps there being one.
 - **Audit logging on all mutations** — ecosystem standard, and here it is also the trust surface
 - **Prompt files are versioned** (`worker/ai/prompts/classify_v1.md`); the version is written to every classification row
 - **AI calls are never live in the default test run** — tests use recorded responses

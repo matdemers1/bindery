@@ -73,7 +73,7 @@ async def _resolve_existing(
         await session.execute(
             sa.select(model).where(
                 model.id == parsed,
-                sa.or_(model.library_id.in_(library_ids), model.library_id.is_(None)),
+                model.library_id.in_(library_ids),
             )
         )
     ).scalar_one_or_none()

@@ -25,6 +25,7 @@ import uuid
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 
 from api.db.enums import (
     ActorType,
@@ -43,6 +44,7 @@ from api.db.models import (
     Correspondent,
     Document,
     DocumentTag,
+    DocumentType,
     ImportItem,
     ImportSession,
     Library,
@@ -237,6 +239,42 @@ async def test_pages_inherit_their_files_library(session, household) -> None:
     bob = await resolve(session, household["bob"].id)
     texts = (await session.execute(bob.pages())).scalars().all()
     assert all(SECRET not in (page.text or "") for page in texts)
+
+
+async def test_taxonomy_cannot_stand_outside_a_library(session, household) -> None:
+    """BND-FR-006 — a null library is a row that belongs to every account at once.
+
+    `tag`, `correspondent` and `document_type` used to permit it, and four read
+    paths widened to include such rows: the classifier's candidate list and its
+    id resolver, search's tag suggestions and the taxonomy health panel. Nothing
+    ever created one, which is precisely why it was worth closing — a dormant
+    path costs one `INSERT` by a future feature meaning "shared vocabulary",
+    and then one household member's tags name another's documents.
+
+    Asserted at the database, because a query clause can be re-added by anyone
+    and a NOT NULL cannot.
+    """
+    alice_library = household["alice_library"]
+    for model in (Tag, Correspondent, DocumentType):
+        # A savepoint per attempt: a failed flush poisons the transaction, and
+        # the fixture's rows have to survive into the next iteration.
+        with pytest.raises(IntegrityError):
+            async with session.begin_nested():
+                session.add(
+                    model(
+                        library_id=None,
+                        name=f"stateless {model.__name__}",
+                        slug=f"stateless-{uuid.uuid4().hex[:8]}",
+                    )
+                )
+                await session.flush()
+
+    # And the ordinary case still works, so this is a boundary rather than a wall.
+    async with session.begin_nested():
+        session.add(
+            Tag(library_id=alice_library.id, name="ordinary", slug=f"ord-{uuid.uuid4().hex[:8]}")
+        )
+        await session.flush()
 
 
 async def test_scope_refuses_models_it_cannot_filter(session, household) -> None:

@@ -211,7 +211,7 @@ async def _full_taxonomy(
             await session.execute(
                 sa.select(model.id, model.name, sa.func.count(Document.id))
                 .outerjoin(Document, sa.and_(column == model.id, live_document))
-                .where(sa.or_(model.library_id.in_(library_ids), model.library_id.is_(None)))
+                .where(model.library_id.in_(library_ids))
                 .group_by(model.id, model.name)
                 .order_by(sa.func.count(Document.id).desc(), model.name)
                 .limit(MAX_FALLBACK_CANDIDATES)
@@ -225,7 +225,7 @@ async def _full_taxonomy(
             .outerjoin(
                 DocumentTag, sa.and_(DocumentTag.tag_id == Tag.id, live_tag_links())
             )
-            .where(sa.or_(Tag.library_id.in_(library_ids), Tag.library_id.is_(None)))
+            .where(Tag.library_id.in_(library_ids))
             .group_by(Tag.id, Tag.name)
             .order_by(sa.func.count(DocumentTag.document_id).desc(), Tag.name)
             .limit(MAX_FALLBACK_CANDIDATES)

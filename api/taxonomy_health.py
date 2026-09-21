@@ -54,7 +54,7 @@ async def report(session: AsyncSession, library_ids: list[uuid.UUID]) -> HealthR
             sa.select(Tag.id, Tag.name, sa.func.coalesce(usage.c.uses, 0).label("uses"))
             .outerjoin(usage, usage.c.tag_id == Tag.id)
             .where(
-                sa.or_(Tag.library_id.in_(library_ids), Tag.library_id.is_(None)),
+                Tag.library_id.in_(library_ids),
                 Tag.merged_at.is_(None),
             )
         )
@@ -93,8 +93,8 @@ async def _near_duplicate_names(session: AsyncSession, model, library_ids) -> li
             sa.select(a.id, a.name, b.id, b.name, similarity.label("similarity"))
             .join(b, sa.and_(a.id < b.id, similarity > NAME_SIMILARITY))
             .where(
-                sa.or_(a.library_id.in_(library_ids), a.library_id.is_(None)),
-                sa.or_(b.library_id.in_(library_ids), b.library_id.is_(None)),
+                a.library_id.in_(library_ids),
+                b.library_id.in_(library_ids),
                 a.merged_at.is_(None), b.merged_at.is_(None),
             )
             .order_by(similarity.desc())

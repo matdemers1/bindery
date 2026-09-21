@@ -18,13 +18,17 @@ class DocumentType(Base):
     """
 
     __tablename__ = "document_type"
+    # `nulls_not_distinct` is now moot — the column is NOT NULL — but the
+    # constraint on disk still carries it, and the model must match.
     __table_args__ = (
         sa.UniqueConstraint("library_id", "slug", postgresql_nulls_not_distinct=True),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    library_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), sa.ForeignKey("library.id"), index=True
+    # Not nullable. A row with no library is a row that belongs to every account
+    # at once, and the library is the access boundary (ADR-005, BND-FR-006).
+    library_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("library.id"), index=True, nullable=False
     )
     name: Mapped[str] = mapped_column(sa.Text, nullable=False)
     slug: Mapped[str] = mapped_column(sa.Text, nullable=False)
@@ -47,13 +51,17 @@ class Correspondent(Base):
     """
 
     __tablename__ = "correspondent"
+    # `nulls_not_distinct` is now moot — the column is NOT NULL — but the
+    # constraint on disk still carries it, and the model must match.
     __table_args__ = (
         sa.UniqueConstraint("library_id", "slug", postgresql_nulls_not_distinct=True),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    library_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), sa.ForeignKey("library.id"), index=True
+    # Not nullable. A row with no library is a row that belongs to every account
+    # at once, and the library is the access boundary (ADR-005, BND-FR-006).
+    library_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("library.id"), index=True, nullable=False
     )
     name: Mapped[str] = mapped_column(sa.Text, nullable=False)
     slug: Mapped[str] = mapped_column(sa.Text, nullable=False)

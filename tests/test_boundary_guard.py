@@ -333,10 +333,6 @@ GRANDFATHERED = {
     "api/rules.py::facts_for":
         "reads the pages of the document a rule is being run against",
 
-    "api/search/query.py::suggest":
-        "the offending clause is `Tag.library_id.is_(None)` — global tags, "
-        "which belong to no library and are deliberately widened in",
-
     "api/segments.py::_count_pages":
         "segment arithmetic over one file the caller already reached",
     "api/segments.py::list_segments":

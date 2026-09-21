@@ -524,8 +524,7 @@ async def suggest(
     tags = sa.select(
         Tag.name.label("name"), similarity(Tag.name, query).label("score")
     ).where(
-        # Global tags (no library) are everyone's, hence the `or_`.
-        sa.or_(bound.only(Tag), Tag.library_id.is_(None)),
+        bound.only(Tag),
         similarity(Tag.name, query) > SUGGESTION_THRESHOLD,
     )
     forms = sa.select(
