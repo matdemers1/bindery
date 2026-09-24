@@ -19,16 +19,14 @@ Retrieval involves **no AI at all**, which is the point: it works on its own, an
 never depends on a third-party API being reachable. Classification is the only
 thing that defers when there is no key.
 
-**Which phases are built is recorded in one place —
-`D3 Cloud Vault/Bindery/Scope of Work.md` — and deliberately not repeated here.**
+**Which phases are built is recorded in one place — project `BND` in
+[Foreman](https://foreman.d3cloud.io) — and deliberately not repeated here.**
 A second copy is a copy that goes stale, and this section spent most of the
 project's life proving it.
 
-> ⚠️ **Phase 3 was built with its own entry gate open.** The golden-corpus OCR accuracy figure has never been measured, so auto-file precision (REQ-058) is unscored and the gate's weights are reasoned rather than calibrated. Details in `D3 Cloud Vault/Bindery/Phase Plans/Phase 3 — Classification & Review.md`.
+> ⚠️ **Phase 3 was built with its own entry gate open.** The golden-corpus OCR accuracy figure has never been measured, so auto-file precision (BND-REQ-058) is unscored and the gate's weights are reasoned rather than calibrated. Details on BND-P-3 and BND-R-01 in Foreman.
 
 Also open: the Brother Scan-to-SMB spike, which needs the scanner.
-
-Full planning corpus lives in the Obsidian vault at `D3 Cloud Vault/Bindery/`.
 
 ## Stack
 
@@ -145,18 +143,23 @@ scripts/    Restore drill, screenshot capture, the typecheck and contract gates
 docs/       Operator runbooks: deploy, backup and restore, offsite replication
 ```
 
-## ⚠️ This repository is private and must stay private
+## ⚠️ The golden corpus is real, and is never committed
 
-`tests/corpus/` is the golden corpus used to score OCR and classification quality. It holds **real personal documents** — a DD-214, VA medical records, financial statements — and they are **not in this repository**: everything under that path is gitignored except the harness. The fixtures stay on the maintainer's machine, so `make ocr-report` is reproducible only against a corpus you supply yourself.
+This repository is public under Apache-2.0 (BND-ADR-014). `tests/corpus/` is the golden corpus used to score OCR and classification quality, and it holds **real personal documents** — a DD-214, VA medical records, financial statements. They are **not in this repository and never have been**: everything under that path is gitignored except the harness. The fixtures stay on the maintainer's machine, so `make ocr-report` is reproducible only against a corpus you supply yourself.
+
+Keep it that way. Never `git add -f` anything under `tests/corpus/`, and never commit a document, screenshot or log excerpt taken from the real archive.
 
 ## Documentation
 
-All planning, architecture, and decisions live in the vault:
-`D3 Cloud Vault/Bindery/` — Discovery, Research, Architecture, Data Model,
-Requirements Register, Scope of Work, Risk Register, Test Strategy, the ADRs and
-the Phase Plans. Counts are deliberately not repeated here: the vault is not part
-of this repository, so nothing in CI can check them, and every count this file
-used to carry was wrong.
+All planning, architecture and decisions live in
+[Foreman](https://foreman.d3cloud.io) as project `BND` — requirements, phases and
+tasks, the ADRs, risks, findings, and the architecture, data model and test
+strategy documents. Cite them by human ID (`BND-REQ-058`, `BND-ADR-014`). Counts
+are deliberately not repeated here: Foreman is not part of this repository, so
+nothing in CI can check them, and every count this file used to carry was wrong.
+
+The Obsidian vault that held the plan before 2026-09-20 is a read-only archive;
+nothing in it is current.
 
 `CLAUDE.md` is the working conventions and the hard-won gotchas.
 `web/public/help/guides.json` is the in-app documentation, and
