@@ -94,6 +94,15 @@ FILESYSTEM_DELETION = {
         "removes the intermediate tarball it created a moment earlier, after "
         "the ciphertext beside it has been written"
     ),
+    "api/export/predeploy.py::run_predeploy_dump": (
+        "removes only its own `.partial` file when pg_dump failed or wrote nothing "
+        "(BND-T-002); a completed dump is renamed away from that name first"
+    ),
+    "api/export/predeploy.py::_prune": (
+        "keeps the newest ten pre-deploy database dumps in backups/predeploy and "
+        "removes older ones there only — copies of the database, never an original, "
+        "a record or a blob; the nightly full backup is untouched (BND-T-002)"
+    ),
 }
 
 # Nothing in the tree declares an ORM cascade today, and that is the point: the
