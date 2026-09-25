@@ -7,6 +7,7 @@ commands call the same functions.
 
     python -m api.export.cli integrity
     python -m api.export.cli backup [--force]
+    python -m api.export.cli dump
     python -m api.export.cli export [--name NAME]
     python -m api.export.cli mirror
 """
@@ -21,7 +22,7 @@ import sqlalchemy as sa
 
 from api.db.models import Library
 from api.db.session import SessionFactory
-from api.export import archive_export, backup, integrity, mirror
+from api.export import archive_export, backup, integrity, mirror, predeploy
 
 
 async def _library_ids() -> list:
@@ -46,6 +47,17 @@ async def _backup(force: bool) -> int:
         print(f"backup refused: {error}", file=sys.stderr)
         return 1
     print(json.dumps(result.manifest, indent=2))
+    return 0
+
+
+def _dump() -> int:
+    # The pre-deploy dump Shipyard's backup step runs (BND-T-002): database only, one file.
+    try:
+        path = predeploy.run_predeploy_dump()
+    except RuntimeError as error:
+        print(f"dump failed: {error}", file=sys.stderr)
+        return 1
+    print(path)
     return 0
 
 
@@ -78,6 +90,7 @@ def main() -> int:
     backup_parser.add_argument(
         "--force", action="store_true", help="back up even if integrity is failing"
     )
+    sub.add_parser("dump", help="database only, one file, for Shipyard's pre-deploy backup")
     export_parser = sub.add_parser("export", help="full export; works without Bindery")
     export_parser.add_argument("--name", default="bindery-export")
     sub.add_parser("mirror", help="rebuild the browsable folder tree")
@@ -88,6 +101,8 @@ def main() -> int:
             return asyncio.run(_integrity())
         case "backup":
             return asyncio.run(_backup(args.force))
+        case "dump":
+            return _dump()
         case "export":
             return asyncio.run(_export(args.name))
         case "mirror":
