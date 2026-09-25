@@ -16,10 +16,22 @@ async def health(response: Response, session: AsyncSession = Depends(get_session
     Unauthenticated on purpose: it reveals nothing, and the container healthcheck
     calls it. Returns 503 when the database is unreachable, so an api container
     that cannot serve is not reported as healthy.
+
+    `schema` is the database's current alembic revision (`alembic_version.version_num`),
+    null when it cannot be read. Shipyard runs `alembic upgrade head` as a one-shot
+    before swapping to the new image, so once the swap completes this must equal the
+    new image's `dev.d3cloud.shipyard.schema` label (SHP-D-019/022).
     """
+    schema: str | None = None
     try:
         await session.execute(sa.text("SELECT 1"))
         database = "ok"
+        try:
+            schema = (
+                await session.execute(sa.text("select version_num from alembic_version"))
+            ).scalar_one_or_none()
+        except Exception:
+            schema = None
     except Exception:
         database = "unavailable"
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -27,6 +39,7 @@ async def health(response: Response, session: AsyncSession = Depends(get_session
         status="ok" if database == "ok" else "degraded",
         database=database,
         version=version.build_of_this_process().short,
+        schema=schema,
     )
 
 

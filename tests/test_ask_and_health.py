@@ -317,6 +317,25 @@ async def test_the_panel_endpoint_needs_authentication(client) -> None:
     assert (await client.get("/api/health")).status_code == 200
 
 
+async def test_liveness_reports_the_database_schema_revision(client, session) -> None:
+    """BND-T-001 — Shipyard's deploy contract.
+
+    Shipyard runs `alembic upgrade head` as a one-shot before swapping to a new
+    image, then checks `/api/health` for the schema it landed on. `schema` must
+    be the database's actual `alembic_version.version_num`, not a value derived
+    from the running process's own code — the two can legitimately differ for
+    the seconds between "the one-shot committed" and "the swap completed", and
+    that gap is exactly what this field exists to make visible.
+    """
+    applied = (
+        await session.execute(sa.text("select version_num from alembic_version"))
+    ).scalar_one()
+
+    body = (await client.get("/api/health")).json()
+    assert body["status"] == "ok"
+    assert body["schema"] == applied
+
+
 # --------------------------------------------------------------------------
 # T-8.3 — notifications (REQ-110)
 # --------------------------------------------------------------------------

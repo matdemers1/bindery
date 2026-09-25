@@ -513,7 +513,39 @@ lint error. Cheapest gate first.
   explicitly, seed, then drive a browser. `make e2e` runs it locally against
   `make up`.
 - **images** — the publish, `main` only. Every Dockerfile's shipped stage is
-  `runtime` and CI must keep saying so.
+  `runtime` and CI must keep saying so. It also labels every image for
+  Shipyard, the deploy tool for the host (BND-T-001): `dev.d3cloud.shipyard.migration`
+  and `dev.d3cloud.shipyard.schema`, computed by `scripts/shipyard-labels.sh`
+  and readable locally the same way CI computes them
+  (`scripts/shipyard-labels.sh migration|schema`).
+
+  **The `Shipyard-Migration:` trailer** on the HEAD commit's message controls
+  the first label — `expand`, `contract`, or absent (read as `none`, the
+  default and the ordinary case). Add it to a commit that needs Shipyard to
+  treat the release specially:
+
+  ```
+  Add a nullable column, backfilled later
+
+  Shipyard-Migration: expand
+  ```
+
+  `expand` and `none` may be rolled back to the previous image freely.
+  `contract` marks a release that drops or renames something an older image
+  still reads — Shipyard must never auto-roll a `contract` release back, so
+  say so on the commit that lands the destructive migration, not the one that
+  starts using the new shape.
+
+  **`dev.d3cloud.shipyard.schema`** is not hand-set — it is the alembic head
+  at that commit, found by walking `alembic/versions/*.py` for the revision
+  nothing else's `down_revision` points at (the same approach as
+  `api/version._head_revision`). Bindery never migrates on container boot
+  (invariant 10); Shipyard runs `alembic upgrade head` as a one-shot of the
+  new image before swapping to it, and then checks `/api/health` — whose
+  `schema` field is the database's actual `alembic_version.version_num` — for
+  agreement with this label. A commit with no migration still gets a
+  `schema` label: it is simply unchanged from the last one, which is the
+  correct claim to make.
 
 **Actions does not support YAML merge keys.** An `env: &anchor` plus `<<: *anchor`
 parses locally and makes Actions refuse the whole file with "this run likely

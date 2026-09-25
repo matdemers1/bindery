@@ -480,6 +480,30 @@ jobs:
         service: [api, worker, web]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The Shipyard-Migration trailer lives on the HEAD commit's full
+          # message, which a shallow clone still carries — but `fetch-depth: 0`
+          # is what the trailer script and `git log -1` are written against,
+          # and cheap here since `images` runs once per push, not per matrix
+          # entry's build.
+          fetch-depth: 0
+      - id: shipyard
+        name: Shipyard deploy-contract labels (BND-T-001)
+        # What Shipyard checks after a swap: `/api/health` reports a schema
+        # revision, and when the image carries `dev.d3cloud.shipyard.schema`
+        # the reported schema must equal it (SHP-D-019/022). Bindery never
+        # migrates on boot — Shipyard runs `alembic upgrade head` as a
+        # one-shot of this image before the swap (SHP-D-021/028) — so the
+        # label names the revision that one-shot is expected to reach: the
+        # alembic head at this commit. `dev.d3cloud.shipyard.migration` comes
+        # from the HEAD commit's `Shipyard-Migration:` trailer (see
+        # CLAUDE.md); `contract` marks a release Shipyard must never
+        # auto-roll back.
+        run: |
+          migration=$(scripts/shipyard-labels.sh migration)
+          schema=$(scripts/shipyard-labels.sh schema)
+          echo "migration=$migration" >> "$GITHUB_OUTPUT"
+          echo "schema=$schema" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -494,6 +518,9 @@ jobs:
             type=raw,value=main,enable={{is_default_branch}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=long
+          labels: |
+            dev.d3cloud.shipyard.migration=${{ steps.shipyard.outputs.migration }}
+            dev.d3cloud.shipyard.schema=${{ steps.shipyard.outputs.schema }}
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .

@@ -904,9 +904,18 @@ class OffsiteTestOut(BaseModel):
 
 
 class HealthOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     status: str
     database: str
     version: str
+    # The database's current alembic revision (`alembic_version.version_num`),
+    # null when the database is unreachable. Shipyard compares this against the
+    # `dev.d3cloud.shipyard.schema` image label after running the one-shot
+    # migration and before treating a swap as healthy (SHP-D-019/022).
+    # Aliased on the wire: `schema` shadows a BaseModel attribute, so the
+    # Python-side name stays `schema_`.
+    schema_: str | None = Field(default=None, alias="schema")
 
 
 
