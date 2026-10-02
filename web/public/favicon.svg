@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="32" height="32" fill="none">
+  <title>Bindery</title>
+  <style>
+    /* A favicon cannot read the page's CSS variables: the ink is the D3 light and dark --color-fg,
+       fixed, and the star is Bindery's lit star from d3cloud.io (DI-REQ-040) in both. The scheme
+       here is the browser's, not the page's — Bindery's pages are dark-only, but a tab strip is not. */
+    .ink { stroke: #101117; }
+    .joint { fill: #101117; }
+    .star { fill: #E8B86D; }
+    @media (prefers-color-scheme: dark) {
+      .ink { stroke: #f0f2f7; }
+      .joint { fill: #f0f2f7; }
+    }
+  </style>
+  <g class="ink" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="32" cy="32" r="26" />
+    <path d="M21 13 L37 13 L45 21 L45 51 L21 51 Z M37 13 L37 21 L45 21" />
+    <path d="M26 30 L39 30 M26 38 L36 38" stroke-width="2.625" stroke-dasharray="2.5 3.5" opacity="0.8" />
+  </g>
+  <circle class="joint" cx="21" cy="13" r="3.4" />
+  <circle class="joint" cx="21" cy="51" r="3.4" />
+  <circle class="joint" cx="45" cy="51" r="3.4" />
+  <circle class="star" cx="37" cy="21" r="5.5" />
+</svg>

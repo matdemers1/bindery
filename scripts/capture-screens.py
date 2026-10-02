@@ -67,8 +67,15 @@ SOURCES: dict[str, list[str]] = {
     "/settings": ["web/src/features/settings"],
 }
 
-# Every screen also depends on the shell around it.
-SHARED = ["web/src/components/Shell.tsx", "web/src/index.css"]
+# Every screen also depends on the shell around it — including the mark at the
+# top of the sidebar, which lives beside Shell rather than in it. Without the
+# brand directory here, redrawing the logo changed every screenshot and the
+# staleness check noticed none of them (BND-T-21.1).
+SHARED = [
+    "web/src/components/Shell.tsx",
+    "web/src/components/brand",
+    "web/src/index.css",
+]
 
 
 def _uncommitted(paths: list[str]) -> list[str]:
