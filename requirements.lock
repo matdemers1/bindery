@@ -33,7 +33,7 @@
 Authlib==1.8.0
 Mako==1.4.1
 MarkupSafe==3.0.3
-PyJWT==2.13.0
+PyJWT==2.15.0
 PyYAML==6.0.3
 Pygments==2.21.0
 SQLAlchemy==2.0.52
@@ -94,7 +94,7 @@ pycryptodomex==3.23.0
 pydantic-settings==2.15.0
 pydantic==2.13.5
 pydantic_core==2.46.5
-pypdf==6.16.2
+pypdf==6.19.0
 pypdfium2==5.13.0
 pytest-asyncio==1.4.0
 pytest==9.1.1
@@ -114,7 +114,7 @@ truststore==0.10.4
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 uharfbuzz==0.56.1
-urllib3==2.7.0
+urllib3==2.8.0
 uvicorn==0.52.4
 uvloop==0.22.1
 watchfiles==1.2.0
