@@ -33,7 +33,7 @@ export function EntryShell({
       <main className="flex justify-center px-4 py-8 sm:px-8 lg:items-center lg:py-12">
         <div className={wide ? "w-full max-w-md" : "w-full max-w-sm"}>
           <div className="mb-8 flex items-center gap-2.5 text-base font-semibold lg:hidden">
-            <Logo size={28} /> Bindery
+            <Logo size={28} decorative /> Bindery
           </div>
           {children}
         </div>
@@ -50,7 +50,7 @@ function StoryPanel() {
       className="entry-story relative hidden overflow-hidden border-r border-border bg-bg-sunken px-14 py-12 lg:flex lg:flex-col"
     >
       <div className="relative z-10 flex items-center gap-2.5 text-base font-semibold">
-        <Logo size={28} /> Bindery
+        <Logo size={28} decorative /> Bindery
       </div>
 
       <PagesIllustration className="pointer-events-none absolute top-20 right-12 z-0 w-[19rem] opacity-90" />

@@ -299,7 +299,7 @@ export default function AskPage({
 function Hero() {
   return (
     <div className="mb-8 text-center">
-      <Logo size={56} variant="mascot" className="mx-auto text-fg" />
+      <Logo size={56} variant="mascot" decorative className="mx-auto text-fg" />
       <h1 className="mt-4 text-2xl font-semibold tracking-tight">
         What do you need to find?
       </h1>
