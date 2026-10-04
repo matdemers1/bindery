@@ -71,35 +71,8 @@ async def login(
 
     await throttle.record(session, payload.email, ip, succeeded=True)
 
-    # A recovery code got them in, so the authenticator is gone. Retire it here rather than
-    # ask for it again at the next sign-in, which is how somebody spends ten recovery codes
-    # and then needs a shell on the host.
     if factor is accounts.SecondFactor.RECOVERY:
-        retired = await accounts.retire_second_factor(session, user=user)
-        await record(
-            session,
-            entity_type="app_user",
-            entity_id=user.id,
-            action="totp_disabled",
-            actor_type=ActorType.HUMAN,
-            actor_id=user.id,
-            after={
-                "via": "recovery_code",
-                "recovery_codes_superseded": retired.codes_superseded,
-            },
-        )
-        if retired.admin_revoked:
-            await record(
-                session,
-                entity_type="app_user",
-                entity_id=user.id,
-                action="admin_revoked",
-                actor_type=ActorType.SYSTEM,
-                actor_id=None,
-                before={"is_admin": True},
-                after={"reason": "REQ-156: no second factor until it is enrolled again"},
-            )
-            await first_run.resume_at_second_factor(session, user=user)
+        await retire_after_recovery(session, user)
 
     access_token, refresh_secret = await service.issue_session(session, user)
     await record(
@@ -114,6 +87,40 @@ async def login(
 
     set_auth_cookies(response, access_token, refresh_secret)
     return user
+
+
+async def retire_after_recovery(session: AsyncSession, user: AppUser) -> None:
+    """A recovery code got them in, so the authenticator is gone.
+
+    Retire it here rather than ask for it again at the next sign-in, which is how somebody spends
+    ten recovery codes and then needs a shell on the host. Shared by the browser sign-in and the
+    native one (BND-T-22.2), so both leave the account in the same state.
+    """
+    retired = await accounts.retire_second_factor(session, user=user)
+    await record(
+        session,
+        entity_type="app_user",
+        entity_id=user.id,
+        action="totp_disabled",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+        after={
+            "via": "recovery_code",
+            "recovery_codes_superseded": retired.codes_superseded,
+        },
+    )
+    if retired.admin_revoked:
+        await record(
+            session,
+            entity_type="app_user",
+            entity_id=user.id,
+            action="admin_revoked",
+            actor_type=ActorType.SYSTEM,
+            actor_id=None,
+            before={"is_admin": True},
+            after={"reason": "REQ-156: no second factor until it is enrolled again"},
+        )
+        await first_run.resume_at_second_factor(session, user=user)
 
 
 @router.post("/refresh", response_model=UserOut)

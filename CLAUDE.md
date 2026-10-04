@@ -560,6 +560,39 @@ harness.
 `infra/zimaos/bindery.zimaos.yaml` is the CasaOS custom-app manifest. It must
 never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
 
+## The native app contract (Phase 22)
+
+D3 Constellation, the native Apple app, reaches Bindery through the D3 App contract
+(`matdemers1/d3-app-contract`; Foreman CON-ADR-003). `api/routers/native.py` is all of it so far:
+
+- `GET /.well-known/d3-app.json` — the manifest, served by the api and routed by an exact `location`
+  in `infra/nginx.conf` (without it the web app's `index.html` answers, which a live run found).
+  Endpoint URLs come from the request's own origin, so the proxy-header setup above matters here too.
+- `POST /api/auth/native/signin` — password (`202 {next: "totp", challenge}`, or the session at once
+  for an account with no authenticator), then `{challenge, totp | recoveryCode}`. The challenge is a
+  five-minute signed JWT (`typ: native-challenge`) naming the account and the device, not a table.
+  The throttle, audit and recovery-code retirement are the web login's — `retire_after_recovery` is
+  shared with `api/routers/auth.py`.
+- `POST /api/auth/native/refresh {refreshToken}`, `POST /api/auth/native/revoke` (Bearer),
+  `GET /api/auth/native/me` (Bearer) — JSON, never cookies.
+- **A native session is an ordinary session**: the same `refresh_token` row, now carrying
+  `device_name` / `device_platform` (migration 0033) for the sessions screen, so its Bearer token works
+  on every route and nothing downstream of `current_user` can tell a phone from a browser. Its access
+  token lives at most 15 minutes (`NATIVE_ACCESS_TTL_MINUTES`), the contract's ceiling, through every
+  rotation; a browser's stays at `JWT_ACCESS_TTL_MINUTES`.
+- **Reuse is a rotated token presented again** (`replaced_by_id` set): it ends every session and
+  answers `refresh_reused`. A token revoked *without* a successor — signed out, reset, suspended —
+  answers `session_revoked` and ends nothing else, so a phone retrying once after signing out does
+  not sign the laptop out.
+- Refusals are problem+json (`api/problems.py`) with the contract's registered types:
+  `invalid_credentials`, `invalid_code`, `throttled` (with `retryAfter`), `refresh_reused`,
+  `session_revoked`. Tests that fail on purpose send `CF-Connecting-IP` of their own, or their
+  failures throttle every later test's sign-in.
+- **The conformance suite** is `ghcr.io/matdemers1/d3-app-conformance:contract-1`; against a local
+  stack: `docker run --rm --network infra_default <image> --base http://api:8000 --allow-http
+  --product bindery --email … --password … --totp-secret …` (13 checks; the phase II ones skip while
+  their endpoints are `null`).
+
 ## Sign in with D3 Auth (Phase 20)
 
 `api/oidc.py` holds the rules, `api/routers/oidc.py` the routes, `web/src/features/entry/SignInWithD3Auth.tsx`

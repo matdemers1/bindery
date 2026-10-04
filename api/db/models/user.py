@@ -203,6 +203,10 @@ class RefreshToken(Base):
     # honest answer to "end that session" is "end all of this person's", which
     # signs them out of the laptop because they signed out on the phone.
     oidc_sid: Mapped[str | None] = mapped_column(sa.Text, index=True)
+    # The device a native session was signed in from (BND-T-22.2): what the sessions screen
+    # calls it. Null for a browser session; carried along every rotation.
+    device_name: Mapped[str | None] = mapped_column(sa.Text)
+    device_platform: Mapped[str | None] = mapped_column(sa.Text)
     # Set when this token was rotated, forming the chain reuse detection walks.
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), sa.ForeignKey("refresh_token.id")

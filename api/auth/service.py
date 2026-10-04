@@ -20,6 +20,15 @@ class AuthError(Exception):
     """Authentication failed. The message is safe to show to the caller."""
 
 
+class RefreshReused(AuthError):
+    """A rotated refresh token came back: every session the user holds has just been ended.
+
+    Its own type because the native contract answers it differently (`refresh_reused`) from a
+    token that is merely unknown or expired (`session_revoked`), and a client treats them
+    differently — this one means the token leaked.
+    """
+
+
 async def _verify(password_hash: str, password: str) -> bool:
     """`verify_password`, off the event loop and behind the bounded pool.
 
@@ -60,7 +69,11 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> AppU
 
 
 async def issue_session(
-    session: AsyncSession, user: AppUser, *, replaces: RefreshToken | None = None
+    session: AsyncSession,
+    user: AppUser,
+    *,
+    replaces: RefreshToken | None = None,
+    device: tuple[str, str] | None = None,
 ) -> tuple[str, str]:
     """Mint an access token and a fresh refresh token. Returns (access, refresh).
 
@@ -70,11 +83,24 @@ async def issue_session(
     """
     secret, secret_hash, expires_at = new_refresh_secret()
 
-    refresh = RefreshToken(user_id=user.id, token_hash=secret_hash, expires_at=expires_at)
+    # A rotation keeps the device the session started on, so the sessions screen still says
+    # "Matthew's iPhone" thirty refreshes later.
+    if device is None and replaces is not None and replaces.device_name:
+        device = (replaces.device_name, replaces.device_platform or "")
+    refresh = RefreshToken(
+        user_id=user.id,
+        token_hash=secret_hash,
+        expires_at=expires_at,
+        device_name=device[0] if device else None,
+        device_platform=device[1] if device else None,
+    )
     session.add(refresh)
     await session.flush()
 
-    access_token, _ = issue_access_token(user.id, refresh.id)
+    # A session a device named is a native one, through every rotation.
+    access_token, _ = issue_access_token(
+        user.id, refresh.id, native=refresh.device_name is not None
+    )
 
     if replaces is not None:
         replaces.revoked_at = datetime.now(UTC)
@@ -94,11 +120,18 @@ async def rotate_session(session: AsyncSession, refresh_secret: str) -> tuple[st
     if token is None:
         raise AuthError("unknown refresh token")
 
-    if token.revoked_at is not None:
-        # A revoked token being presented means the secret leaked, or a client
+    if token.revoked_at is not None and token.replaced_by_id is not None:
+        # A rotated token being presented means the secret leaked, or a client
         # replayed one. Either way, end every session this user holds.
         await revoke_all_for_user(session, token.user_id)
-        raise AuthError("refresh token has already been used")
+        raise RefreshReused("refresh token has already been used")
+
+    if token.revoked_at is not None:
+        # Revoked without a successor: the session was ended — signed out, reset,
+        # suspended, or reuse elsewhere in its chain. Nothing leaked by presenting
+        # it, so this ends nothing else (BND-T-22.2: signing out on the phone must
+        # not sign the laptop out when the phone retries once).
+        raise AuthError("this session has ended")
 
     if token.expires_at <= datetime.now(UTC):
         raise AuthError("refresh token has expired")
