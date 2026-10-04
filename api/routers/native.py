@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import accounts, oidc
 from api.audit import record
-from api.auth import service, throttle
+from api.auth import d3auth_bearer, service, throttle
 from api.auth.client import client_ip
 from api.auth.tokens import TokenError, access_ttl_minutes, decode_access_claims
 from api.config import get_settings
@@ -67,6 +67,13 @@ class SignIn(BaseModel):
     recoveryCode: str | None = None
 
 
+class Link(BaseModel):
+    email: str
+    password: str
+    totp: str | None = None
+    recoveryCode: str | None = None
+
+
 class Refresh(BaseModel):
     refreshToken: str
 
@@ -78,10 +85,11 @@ def _base(request: Request) -> str:
 
 
 @well_known.get("/.well-known/d3-app.json", include_in_schema=False)
-async def manifest(request: Request) -> JSONResponse:
+async def manifest(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     """The D3 App manifest (BND-T-22.1): what this server is, what it offers, where to sign in."""
     base = _base(request)
     build = build_of_this_process()
+    sso = await oidc.config(session)
     body: dict[str, Any] = {
         "product": "bindery",
         "name": "Bindery",
@@ -95,12 +103,17 @@ async def manifest(request: Request) -> JSONResponse:
             "nativeRefresh": f"{base}/api/auth/native/refresh",
             "nativeRevoke": f"{base}/api/auth/native/revoke",
             "me": f"{base}/api/auth/native/me",
-            "link": None,
+            "link": f"{base}/api/auth/native/link" if sso.enabled else None,
             "inviteAccept": None,
             "deleteAccount": None,
             "relayRegister": None,
         },
     }
+    if sso.enabled:
+        # D3 Auth tokens for this Bindery are accepted once the operator has connected a provider
+        # (BND-T-22.3): the app asks the issuer for this origin as the audience.
+        body["signIn"]["methods"].append("d3auth")
+        body["signIn"]["d3auth"] = {"issuer": sso.issuer, "resource": base}
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
 
 
@@ -264,27 +277,47 @@ def _bearer(request: Request) -> str | None:
     return value or None if scheme.lower() == "bearer" else None
 
 
-async def _live_user(request: Request, session: AsyncSession) -> tuple[AppUser, uuid.UUID] | None:
+class _NotLinked(Exception):
+    pass
+
+
+async def _live_user(
+    request: Request, session: AsyncSession
+) -> tuple[AppUser, uuid.UUID | None] | None:
+    """The account a Bearer token speaks for, and its Bindery session (none for a D3 Auth token).
+    Raises `_NotLinked` for a valid D3 Auth token with no account linked here."""
     token = _bearer(request)
     if not token:
         return None
+    if d3auth_bearer.looks_like_provider_token(token):
+        try:
+            user = await d3auth_bearer.user_for(session, token, resource=_base(request))
+        except d3auth_bearer.IdentityNotLinked as exc:
+            raise _NotLinked from exc
+        except d3auth_bearer.NotD3AuthToken:
+            return None
+        return user, None
     try:
         claims = decode_access_claims(token)
     except TokenError:
         return None
     if not await service.session_is_live(session, claims.session_id):
         return None
-    user = await session.get(AppUser, claims.user_id)
-    return (user, claims.session_id) if user is not None and user.is_active else None
+    account = await session.get(AppUser, claims.user_id)
+    return (account, claims.session_id) if account is not None and account.is_active else None
 
 
 @router.post("/revoke", status_code=204)
 async def revoke(request: Request, session: AsyncSession = Depends(get_session)) -> Response:
     """Sign out: the session the Bearer token names ends here, now."""
-    live = await _live_user(request, session)
-    if live is None:
+    try:
+        live = await _live_user(request, session)
+    except _NotLinked:
+        live = None
+    if live is None or live[1] is None:
+        # A D3 Auth token has no session here to end; signing out of D3 Auth is D3 Auth's.
         return problem(401, "session_revoked", "This sign-in has ended")
-    user, session_id = live
+    user, session_id = live[0], live[1]
     await service.revoke_session_by_id(session, session_id)
     await record(
         session,
@@ -302,7 +335,15 @@ async def revoke(request: Request, session: AsyncSession = Depends(get_session))
 @router.get("/me")
 async def me(request: Request, session: AsyncSession = Depends(get_session)) -> Response:
     """The account, as the contract's `me` describes it."""
-    live = await _live_user(request, session)
+    try:
+        live = await _live_user(request, session)
+    except _NotLinked:
+        return problem(
+            401,
+            "identity_not_linked",
+            "This D3 Auth account isn't linked here yet",
+            detail="Link it once with your Bindery email, password and code.",
+        )
     if live is None:
         return problem(401, "session_revoked", "Sign in again")
     user, _ = live
@@ -314,3 +355,60 @@ async def me(request: Request, session: AsyncSession = Depends(get_session)) -> 
             "roles": ["admin"] if user.is_admin else ["member"],
         }
     )
+
+
+@router.post("/link")
+async def link(
+    payload: Link, request: Request, session: AsyncSession = Depends(get_session)
+) -> Response:
+    """Link the D3 Auth identity in the Bearer token to this Bindery account, once (BND-T-22.3).
+
+    Proves the local account with its own password and second factor, throttled exactly like a
+    sign-in — linking is a sign-in that leaves a lasting connection behind.
+    """
+    token = _bearer(request)
+    if not token:
+        return problem(401, "session_revoked", "Sign in to D3 Auth first")
+    try:
+        verified = await d3auth_bearer.verify(session, token, resource=_base(request))
+    except d3auth_bearer.NotD3AuthToken:
+        return problem(401, "session_revoked", "This D3 Auth sign-in isn't valid here")
+    ip = client_ip(request)
+    try:
+        await throttle.check(session, payload.email, ip)
+    except throttle.Throttled as limited:
+        await session.commit()
+        return _throttled(limited)
+    try:
+        user = await service.authenticate(session, payload.email, payload.password)
+    except service.AuthError:
+        await throttle.record(session, payload.email, ip, succeeded=False)
+        await session.commit()
+        return problem(401, "invalid_credentials", "Email or password is wrong")
+    if user.totp_enabled:
+        try:
+            factor = await accounts.check_second_factor(
+                session, user=user, code=(payload.totp or payload.recoveryCode or "").strip()
+            )
+        except accounts.AccountError:
+            await throttle.record(session, payload.email, ip, succeeded=False)
+            await session.commit()
+            return problem(401, "invalid_code", "That code didn't work")
+        if factor is accounts.SecondFactor.RECOVERY:
+            await retire_after_recovery(session, user)
+    await throttle.record(session, payload.email, ip, succeeded=True)
+    try:
+        await oidc.link(
+            session,
+            user=user,
+            issuer=verified.issuer,
+            subject=verified.subject,
+            preferred_username=verified.preferred_username,
+            refresh_token=None,
+            origin="native-link",
+        )
+    except oidc.SignInRefused as refused:
+        await session.rollback()
+        return problem(409, None, "Already linked", detail=str(refused))
+    await session.commit()
+    return JSONResponse({"linked": True})

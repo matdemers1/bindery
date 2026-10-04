@@ -588,6 +588,14 @@ D3 Constellation, the native Apple app, reaches Bindery through the D3 App contr
   `invalid_credentials`, `invalid_code`, `throttled` (with `retryAfter`), `refresh_reused`,
   `session_revoked`. Tests that fail on purpose send `CF-Connecting-IP` of their own, or their
   failures throttle every later test's sign-in.
+- **D3 Auth tokens** (`api/auth/d3auth_bearer.py`, BND-T-22.3): once a provider is configured, the
+  manifest lists `d3auth` with `signIn.d3auth = {issuer, resource: <this origin>}` and a `link`
+  endpoint. A Bearer JWT with an asymmetric `alg` is checked against the issuer's JWKS (cached ten
+  minutes, refetched once for an unknown `kid`), for `iss`, `aud` = this origin and time (60 s leeway),
+  then mapped by the `(issuer, subject)` link — `current_user` accepts it on every route, with no
+  Bindery session behind it. Unlinked answers `identity_not_linked` (problem+json at `native/me`);
+  `POST /api/auth/native/link` with the D3 Auth token and `{email, password, totp | recoveryCode}`
+  links it once, throttled like a sign-in. Tests replace `d3auth_bearer.fetch_jwks`.
 - **The conformance suite** is `ghcr.io/matdemers1/d3-app-conformance:contract-1`; against a local
   stack: `docker run --rm --network infra_default <image> --base http://api:8000 --allow-http
   --product bindery --email … --password … --totp-secret …` (13 checks; the phase II ones skip while
