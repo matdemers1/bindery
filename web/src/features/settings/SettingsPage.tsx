@@ -20,6 +20,7 @@ import { Alert, Button, Checkbox, Input, PageHeader } from "@d3cloud/ui";
  */
 import ConnectD3Auth from "./ConnectD3Auth";
 import D3AuthProvider from "./D3AuthProvider";
+import SignedInDevices from "./SignedInDevices";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -166,6 +167,7 @@ export default function SettingsPage() {
 
       {admin && <D3AuthProvider settings={settings} onSaved={load} />}
       <ConnectD3Auth />
+      <SignedInDevices />
 
       <section className="mt-6">
         <h2 className="text-base font-medium">Diagnostics</h2>

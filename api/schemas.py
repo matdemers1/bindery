@@ -44,6 +44,18 @@ class UserOut(BaseModel):
     is_admin: bool = False
 
 
+class SignedInSessionOut(BaseModel):
+    """One session the person holds (BND-T-22.4): a browser, or a device that named itself."""
+
+    id: uuid.UUID
+    # Null for a browser session; what D3 Constellation sent for a native one ("Matthew's iPhone").
+    device_name: str | None
+    device_platform: str | None
+    # When the session last renewed — every refresh is a new row, so this is its latest activity.
+    last_active: datetime
+    current: bool
+
+
 # --------------------------------------------------------------------------
 # Libraries, source files, documents and segments
 # --------------------------------------------------------------------------
@@ -918,7 +930,6 @@ class HealthOut(BaseModel):
     schema_: str | None = Field(default=None, alias="schema")
 
 
-
 # --------------------------------------------------------------------------
 # Trust — export, integrity, mirror, backup, the audit log and the file tree
 # --------------------------------------------------------------------------
@@ -1476,6 +1487,7 @@ class AdminAccountOut(BaseModel):
     used_bytes: int
     created_at: datetime
 
+
 # Every model in this module, in one place, asserted by
 # tests/test_schemas_index.py so it cannot fall behind again.
 # It used to sit two-thirds of the way up the file and list 78 of 124 —
@@ -1607,6 +1619,7 @@ __all__ = [
     "UnifyProposalOut",
     "UploadResult",
     "UserOut",
+    "SignedInSessionOut",
     "VaultItemOut",
     "VaultSearchHitOut",
     "VaultSearchOut",

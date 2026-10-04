@@ -1694,6 +1694,20 @@ export interface OidcLink {
   linked_at: string | null;
 }
 
+/** One session this person holds (BND-T-22.4): a browser, or a device that named itself. */
+export interface SignedInSession {
+  id: string;
+  device_name: string | null;
+  device_platform: string | null;
+  last_active: string;
+  current: boolean;
+}
+
+export const sessionsApi = {
+  list: () => request<SignedInSession[]>("/auth/sessions"),
+  end: (id: string) => request<void>(`/auth/sessions/${id}/end`, { method: "POST" }),
+};
+
 /** Whole-document navigations, not fetches: both ends of this are redirects the browser follows. */
 export const oidcPaths = {
   signIn: "/api/auth/oidc/start",

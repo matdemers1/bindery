@@ -219,3 +219,93 @@ def test_nginx_sends_the_manifest_to_the_api() -> None:
     block = conf[start : conf.index("}", start)]
     assert "proxy_pass http://$api_upstream:8000$request_uri;" in block
     assert "X-Forwarded-Proto $forwarded_scheme" in block
+
+
+async def test_sessions_list_names_the_device_and_marks_this_one(
+    client: AsyncClient, session, user_factory
+) -> None:
+    """BND-T-22.4: the phone appears beside the browser, by the name it gave."""
+    user, _ = await user_factory()
+    secret = await with_authenticator(session, user)
+    phone = await sign_in(client, user, secret)
+    browser = await client.post(
+        "/api/auth/login",
+        json={
+            "email": user.email,
+            "password": PASSWORD,
+            "code": _code_for_step(secret, current_step() + 1),
+        },
+    )
+    assert browser.status_code == 200, browser.text
+
+    listed = await client.get("/api/auth/sessions")  # the browser's cookie
+    assert listed.status_code == 200
+    rows = listed.json()
+    assert len(rows) == 2
+    named = next(r for r in rows if r["device_name"])
+    assert (named["device_name"], named["device_platform"], named["current"]) == (
+        "Matthew's iPhone",
+        "ios",
+        False,
+    )
+    assert next(r for r in rows if not r["device_name"])["current"] is True
+
+    # Ending the phone's session from the browser signs the phone out.
+    ended = await client.post(f"/api/auth/sessions/{named['id']}/end")
+    assert ended.status_code == 204
+    me = await client.get(
+        "/api/auth/native/me", headers={"Authorization": f"Bearer {phone['accessToken']}"}
+    )
+    assert me.status_code == 401
+    refresh = await client.post(
+        "/api/auth/native/refresh", json={"refreshToken": phone["refreshToken"]}
+    )
+    assert problem_type(refresh) == "session_revoked"
+    assert len((await client.get("/api/auth/sessions")).json()) == 1
+
+
+async def test_another_persons_session_cannot_be_ended(
+    client: AsyncClient, session, user_factory
+) -> None:
+    other, _ = await user_factory()
+    other_secret = await with_authenticator(session, other)
+    theirs = await sign_in(client, other, other_secret)
+    their_sid = jwt.decode(theirs["accessToken"], options={"verify_signature": False})["sid"]
+
+    me, _ = await user_factory()
+    assert (
+        await client.post("/api/auth/login", json={"email": me.email, "password": PASSWORD})
+    ).status_code == 200
+    response = await client.post(f"/api/auth/sessions/{their_sid}/end")
+    assert response.status_code == 404
+    still = await client.get(
+        "/api/auth/native/me", headers={"Authorization": f"Bearer {theirs['accessToken']}"}
+    )
+    assert still.status_code == 200
+
+
+async def test_the_vault_takes_a_native_session_but_never_an_api_token(
+    client: AsyncClient, session, user_factory
+) -> None:
+    """BND-T-22.4: a native session is a session, so the vault answers it; an API token is
+    still refused at the door (ADR-012)."""
+    from api import tokens
+
+    user, library = await user_factory()
+    secret = await with_authenticator(session, user)
+    phone = await sign_in(client, user, secret)
+    vault = await client.get(
+        "/api/vault", headers={"Authorization": f"Bearer {phone['accessToken']}"}
+    )
+    assert vault.status_code == 200, vault.text
+
+    issued = await tokens.issue(
+        session, user_id=user.id, name="scanner", scopes=["admin"], library_ids=[library.id]
+    )
+    await session.commit()
+    refused = await client.get("/api/vault", headers={"Authorization": f"Bearer {issued.secret}"})
+    assert refused.status_code == 403
+    listed = await client.get(
+        "/api/auth/sessions", headers={"Authorization": f"Bearer {issued.secret}"}
+    )
+    assert listed.status_code == 403

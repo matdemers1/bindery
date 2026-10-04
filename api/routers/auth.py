@@ -1,3 +1,7 @@
+import uuid
+from datetime import UTC, datetime
+
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,9 +13,9 @@ from api.auth.cookies import ACCESS_COOKIE, REFRESH_COOKIE, clear_auth_cookies, 
 from api.auth.dependencies import current_user
 from api.auth.tokens import TokenError, decode_access_claims
 from api.db.enums import ActorType
-from api.db.models import AppUser
+from api.db.models import AppUser, RefreshToken
 from api.db.session import get_session
-from api.schemas import LoginRequest, UserOut
+from api.schemas import LoginRequest, SignedInSessionOut, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -45,9 +49,7 @@ async def login(
         # A response that distinguishes them turns the login form into a
         # membership oracle, and the membership here is a list of the owner's
         # family (REQ-135).
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "invalid credentials"
-        ) from exc
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials") from exc
 
     # The password was right. A missing or wrong second factor is still a
     # failed attempt as far as the throttle is concerned, or the code becomes
@@ -55,9 +57,7 @@ async def login(
     factor = accounts.SecondFactor.NONE
     if user.totp_enabled:
         try:
-            factor = await accounts.check_second_factor(
-                session, user=user, code=payload.code or ""
-            )
+            factor = await accounts.check_second_factor(session, user=user, code=payload.code or "")
         except accounts.AccountError as exc:
             await throttle.record(session, payload.email, ip, succeeded=False)
             await session.commit()
@@ -195,3 +195,86 @@ async def logout(
 @router.get("/me", response_model=UserOut)
 async def me(user: AppUser = Depends(current_user)) -> AppUser:
     return user
+
+
+def _current_session_id(request: Request) -> uuid.UUID | None:
+    """The session the request itself rides on, so the list can say "this device"."""
+    token = request.cookies.get(ACCESS_COOKIE)
+    if not token:
+        scheme, _, value = request.headers.get("authorization", "").partition(" ")
+        token = value if scheme.lower() == "bearer" else None
+    if not token:
+        return None
+    try:
+        return decode_access_claims(token).session_id
+    except TokenError:
+        return None
+
+
+def _refuse_api_tokens(request: Request) -> None:
+    # Which devices are signed in, and ending them, is a person's business at a screen. A scanner's
+    # token has no reason to read it and none to end somebody's phone session.
+    if getattr(request.state, "api_token", None) is not None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "sessions are not reachable with an API token"
+        )
+
+
+@router.get("/sessions", response_model=list[SignedInSessionOut])
+async def sessions(
+    request: Request,
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[SignedInSessionOut]:
+    """Every session this person holds, newest activity first (BND-T-22.4) — browsers and the
+    devices D3 Constellation signed in, which name themselves."""
+    _refuse_api_tokens(request)
+    current = _current_session_id(request)
+    rows = (
+        await session.execute(
+            sa.select(RefreshToken)
+            .where(
+                RefreshToken.user_id == user.id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > datetime.now(UTC),
+            )
+            .order_by(RefreshToken.issued_at.desc())
+        )
+    ).scalars()
+    return [
+        SignedInSessionOut(
+            id=row.id,
+            device_name=row.device_name,
+            device_platform=row.device_platform,
+            last_active=row.issued_at,
+            current=row.id == current,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/sessions/{session_id}/end", status_code=status.HTTP_204_NO_CONTENT)
+async def end_session(
+    session_id: uuid.UUID,
+    request: Request,
+    user: AppUser = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Sign one of your own sessions out — the phone you left on a train. Its next request, or
+    its next refresh, finds it ended (`session_revoked` to a native client)."""
+    _refuse_api_tokens(request)
+    row = await session.get(RefreshToken, session_id)
+    # Somebody else's session reads exactly like no session: the id is not a thing to probe.
+    if row is None or row.user_id != user.id or row.revoked_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such session")
+    await service.revoke_session_by_id(session, session_id)
+    await record(
+        session,
+        entity_type="app_user",
+        entity_id=user.id,
+        action="session_ended",
+        actor_type=ActorType.HUMAN,
+        actor_id=user.id,
+        after={"session": str(session_id), "device": row.device_name},
+    )
+    await session.commit()
