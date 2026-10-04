@@ -153,7 +153,7 @@
         "web/src/components/brand",
         "web/src/index.css"
       ],
-      "source_commit": "667c9d27e75959efde9a16393c297c3b21b40ba5"
+      "source_commit": "f1006e43a7fb06485df5554dead7c33a4fd99172"
     },
     {
       "route": "/trust",
