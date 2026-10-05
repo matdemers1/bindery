@@ -97,6 +97,8 @@ NOT_UNDOABLE: dict[str, str] = {
     "login": "a sign-in is an event, not a change; there is nothing to restore.",
     "logout": "ending a session is an event; signing in again is how it comes back, "
               "and restoring a revoked session would be the opposite of the point.",
+    "push_registered": "a device telling Bindery where to send its notifications; registering "
+                       "again replaces it, and ending the session forgets it (BND-T-23.4).",
     "session_ended": "signing a device out from Settings is ending a session; the device signs "
                      "in again to come back, and reviving the session would hand a lost phone "
                      "its access back.",
