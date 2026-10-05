@@ -19,6 +19,7 @@ What survives is the document row, the audit event with the title and hash it
 had, and the ciphertext — so "what happened to that?" stays answerable forever.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -586,6 +587,79 @@ def is_image(media_type: str | None, filename: str | None) -> bool:
     return False
 
 
+def _sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+async def _digest_of(path: Path) -> str:
+    """Hash a file off the event loop: a restored video can be gigabytes."""
+    return await asyncio.to_thread(_sha256_of, path)
+
+
+async def _held_elsewhere(session: AsyncSession, source: SourceFile) -> bool:
+    """Whether a file row other than this one, and outside the vault, holds these bytes."""
+    return bool(
+        await session.scalar(
+            sa.select(
+                sa.exists().where(
+                    SourceFile.sha256 == source.sha256,
+                    SourceFile.id != source.id,
+                    ~sa.exists().where(
+                        Document.source_file_id == SourceFile.id,
+                        Document.vaulted_by.is_not(None),
+                    ),
+                )
+            )
+        )
+    )
+
+
+async def _restore_blob(session: AsyncSession, source: SourceFile, original: bytes) -> None:
+    """Put the plaintext back at its content address without touching anybody else's copy.
+
+    Blobs are shared by content address (BND-T-23.7). While a document is vaulted, another
+    library may have uploaded the same bytes, so the address can already hold *their* original —
+    and an upload can arrive while this restore is in flight. So, under `blobs.lock_for_removal`
+    (the exclusive half of the lock every ingest holds until its row commits), held until the
+    caller's transaction ends:
+
+    - a file already there that verifies is used as it is, never overwritten;
+    - a file already there that does not verify, and that another row holds, is left alone and
+      the restore refused — it is somebody else's, and an integrity check is the next step;
+    - otherwise the bytes are written and verified, and a write that does not verify is removed
+      only after asking again, under the same lock, that nobody else holds the hash.
+    """
+    sha = source.sha256
+    destination = blob_path(sha)
+    await blobs.lock_for_removal(session, sha)
+    if destination.is_file():
+        if await _digest_of(destination) == sha:
+            return  # the same bytes, already there: somebody else's upload, or never removed
+        if await _held_elsewhere(session, source):
+            raise VaultRefused(
+                "a different file is stored where this original belongs, and another library "
+                "holds it, so it was left alone. Run an integrity check before trying again."
+            )
+    _write_atomically(destination, original)
+    if await _digest_of(destination) != sha:
+        # Asked again under the lock, immediately before the unlink.
+        if await _held_elsewhere(session, source):
+            log.error("a restored blob %s did not verify and is held elsewhere; kept", sha[:12])
+            raise VaultRefused(
+                "the restored original did not verify, and another library holds the same "
+                "address, so it was left in place. Run an integrity check."
+            )
+        destination.unlink(missing_ok=True)
+        raise VaultRefused("the restored original did not verify; it has been removed")
+    # Originals are immutable and read-only everywhere else in the archive
+    # (invariant 1), and a file coming back out of the vault is no exception.
+    os.chmod(destination, 0o444)
+
+
 def open_pages(pages: list[VaultPage], data_key: bytes) -> dict[int, str]:
     return {
         page.page_number: crypto.decrypt(page.sealed_text, data_key).decode()
@@ -627,14 +701,7 @@ async def unseal(
             "been changed."
         )
 
-    destination = blob_path(source.sha256)
-    _write_atomically(destination, original)
-    if hashlib.sha256(destination.read_bytes()).hexdigest() != source.sha256:
-        destination.unlink(missing_ok=True)
-        raise VaultRefused("the restored original did not verify; it has been removed")
-    # Originals are immutable and read-only everywhere else in the archive
-    # (invariant 1), and a file coming back out of the vault is no exception.
-    os.chmod(destination, 0o444)
+    await _restore_blob(session, source, original)
 
     meta = open_meta(item, data_key)
     document.title = meta.get("title")

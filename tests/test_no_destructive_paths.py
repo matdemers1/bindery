@@ -288,6 +288,58 @@ def test_the_vault_unlinks_a_plaintext_only_under_the_ingest_lock() -> None:
     )
 
 
+def _function_source(source: str, name: str) -> str:
+    start = source.index(name)
+    after = (source.find("\ndef ", start + 1), source.find("\nasync def ", start + 1))
+    ends = [i for i in after if i > 0]
+    return source[start : min(ends) if ends else len(source)]
+
+
+def test_a_failed_unseal_removes_only_its_own_write_under_the_ingest_lock() -> None:
+    """The unseal's half of the vault path (BND-T-23.7).
+
+    A restore writes the plaintext back to its content address, which another library may have
+    come to hold while the document was vaulted — or may be uploading right now. So the restore
+    takes `blobs.lock_for_removal` before it looks at the address; uses a file already there that
+    verifies rather than writing over it; leaves alone a file there that does not verify when
+    somebody else holds it; and removes a write of its own that did not verify only after asking
+    again, under the same lock, whether anybody else holds the hash.
+    """
+    source = (ROOT / VAULT_EXCEPTION).read_text()
+    restore = _function_source(source, "async def _restore_blob")
+    lock = restore.index("await blobs.lock_for_removal(session, sha)")
+    look = restore.index("destination.is_file()")
+    write = restore.index("_write_atomically(destination, original)")
+    assert lock < look < write, (
+        "the restore looks at or writes the content address before taking the lock an ingest "
+        "of the same bytes holds"
+    )
+    # An existing file is reused when it verifies, and refused (not overwritten) when another
+    # row holds it and it does not.
+    existing = restore[look:write]
+    assert "return" in existing and "_held_elsewhere(session, source)" in existing, (
+        "the restore can write over a blob another library already holds"
+    )
+    # A write that did not verify is removed only after asking again.
+    failed = restore[write:]
+    recheck = failed.index("_held_elsewhere(session, source)")
+    unlink = failed.index("destination.unlink")
+    assert recheck < unlink, (
+        "a restore that did not verify is removed without asking again, under the lock, "
+        "whether anybody else holds the hash"
+    )
+    assert source.count("destination.unlink") == 1, (
+        "a restored original is unlinked somewhere other than under the removal lock"
+    )
+    held = _function_source(source, "async def _held_elsewhere")
+    assert "SourceFile.id != source.id" in held and "Document.vaulted_by.is_not(None)" in held, (
+        "'held elsewhere' must mean another file row, outside the vault"
+    )
+    unseal = _function_source(source, "async def unseal(")
+    assert "await _restore_blob(session, source, original)" in unseal
+    assert "_write_atomically" not in unseal, "the unseal writes a blob outside the locked restore"
+
+
 def test_the_vault_is_reached_only_from_declared_callers() -> None:
     """The exemption is granted by *path*, which is the wrong shape for it.
 
