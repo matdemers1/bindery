@@ -813,6 +813,13 @@ in the archive at all. `api/vault/`, ADR-012.
   whether any file row with no vaulted document holds the hash, and unlinks only if none does —
   otherwise it keeps that copy's original and says so in the seal's warnings.
   `tests/test_vault_seal_race.py` interleaves the two on real connections.
+- **The unseal restores under the same lock** (BND-T-23.7). While a document is vaulted another
+  library may upload the same bytes, so `_restore_blob` takes `blobs.lock_for_removal` before it
+  looks at the address: a file already there that verifies is used as it is, never overwritten;
+  one that does not verify and is held elsewhere is left alone and the restore refused; and a
+  write of its own that does not verify is removed only after asking again under the lock.
+  An upload of the same bytes waits rather than trusting a file about to be judged corrupt
+  (`tests/test_vault_unseal_race.py`).
 - **The read-back must fail closed.** Comparing hashes only catches a ciphertext
   that decrypts to *different* bytes; the likelier corruption is a flipped bit,
   which fails the AEAD tag. That escaped the refusal branch as an unhandled
