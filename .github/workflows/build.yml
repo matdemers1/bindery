@@ -467,6 +467,91 @@ jobs:
             web/test-results
           retention-days: 7
 
+  # The D3 App contract (BND-T-22.5): the conformance suite D3 Constellation's contract publishes,
+  # run against this commit's stack through nginx — manifest, native sign-in, refresh rotation and
+  # reuse, revoke, throttling. Beside the gates rather than in front of `images`: it proves the
+  # native contract, and a contract regression should fail the PR without holding back a fix
+  # elsewhere.
+  #
+  # The suite's image is private while `matdemers1/d3-app-contract` is (the owner's choice), and
+  # this repository's own token cannot read another repository's package. `D3_CONTRACT_TOKEN` — a
+  # token with read:packages — opens it; without that secret the job says so and does nothing,
+  # loudly, rather than pretending to have run.
+  conformance:
+    name: conformance (d3-app-contract)
+    needs: unit
+    runs-on: ubuntu-latest
+    env:
+      D3_CONTRACT_TOKEN: ${{ secrets.D3_CONTRACT_TOKEN }}
+    steps:
+      - name: Without access to the suite, say so
+        if: env.D3_CONTRACT_TOKEN == ''
+        run: |
+          echo "::warning::D3_CONTRACT_TOKEN is not set, so the d3-app-contract suite cannot be pulled and did not run."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.D3_CONTRACT_TOKEN != ''
+      - name: Write a coherent .env
+        if: env.D3_CONTRACT_TOKEN != ''
+        run: |
+          cat > .env <<'ENV'
+          POSTGRES_USER=bindery
+          POSTGRES_PASSWORD=ci
+          POSTGRES_DB=bindery
+          DATABASE_URL=postgresql+asyncpg://bindery:ci@postgres:5432/bindery
+          JWT_SECRET=ci-only-not-a-real-secret
+          JWT_ACCESS_TTL_MINUTES=30
+          JWT_REFRESH_TTL_DAYS=30
+          COOKIE_SECURE=false
+          HOST_DATA_ROOT=/tmp/bindery-ci-data
+          DATA_ROOT=/data
+          INBOX_ROOT=/data/inbox
+          ENV
+          mkdir -p /tmp/bindery-ci-data/inbox
+          sudo chown -R 10001:10001 /tmp/bindery-ci-data
+      - name: Stand up the api and web
+        if: env.D3_CONTRACT_TOKEN != ''
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.yml up -d --build --wait api web
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T api alembic upgrade head
+      - name: A throwaway account with an authenticator
+        # Generated per run; the TOTP secret is a fresh one too, handed to the suite and nowhere else.
+        if: env.D3_CONTRACT_TOKEN != ''
+        run: |
+          PASSWORD="Grebulon-Verdant-$(openssl rand -hex 6)"
+          SECRET="$(python3 -c 'import base64,os; print(base64.b32encode(os.urandom(20)).decode().rstrip("="))')"
+          echo "::add-mask::$PASSWORD"
+          echo "CONFORMANCE_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
+          echo "CONFORMANCE_TOTP=$SECRET" >> "$GITHUB_ENV"
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T api \
+            python -m api.cli create-user --email conformance@example.com --password "$PASSWORD" --library Conformance
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T -e SECRET="$SECRET" api python - <<'PY'
+          import asyncio, os
+          from datetime import UTC, datetime
+          import sqlalchemy as sa
+          from api.db.models import AppUser
+          from api.db.session import SessionFactory
+          async def main():
+              async with SessionFactory() as s:
+                  await s.execute(sa.update(AppUser).where(AppUser.email == "conformance@example.com")
+                                  .values(totp_secret=os.environ["SECRET"], totp_confirmed_at=datetime.now(UTC)))
+                  await s.commit()
+          asyncio.run(main())
+          PY
+      - name: The d3-app-contract suite, through nginx
+        if: env.D3_CONTRACT_TOKEN != ''
+        run: |
+          echo "$D3_CONTRACT_TOKEN" | docker login ghcr.io -u matdemers1 --password-stdin
+          docker run --rm --user "$(id -u)" --network infra_default -v "$PWD:/out" ghcr.io/matdemers1/d3-app-conformance:contract-1 \
+            --base http://web --allow-http --product bindery \
+            --email conformance@example.com --password "$CONFORMANCE_PASSWORD" --totp-secret "$CONFORMANCE_TOTP" \
+            --destructive --junit /out/conformance.xml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && env.D3_CONTRACT_TOKEN != ''
+        with:
+          name: conformance
+          path: conformance.xml
+          if-no-files-found: ignore
+
   images:
     name: publish
     needs: e2e

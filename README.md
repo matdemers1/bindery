@@ -126,9 +126,12 @@ pasted into ZimaOS → Apps → Custom Install.
 Deploy stays a deliberate manual pull-and-restart — nothing auto-updates the
 thing holding your passport.
 
-CI (`.github/workflows/build.yml`) is five gates in series — **lint → unit →
-integration → e2e → images** — cheapest first, and nothing is published until
-every one of them passes.
+CI (`.github/workflows/build.yml`) is six gates — **lint → unit →
+integration → e2e → images** in series, cheapest first, and nothing is published until
+every one of them passes — plus **conformance**, which runs the D3 App contract's suite
+(the native app's sign-in, refresh and revoke) against the stack beside them once `unit`
+passes. It needs a `D3_CONTRACT_TOKEN` secret that can read the suite's private image, and
+says so when it has none.
 
 ## Layout
 

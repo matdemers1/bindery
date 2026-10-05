@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import eventlog
 from api import tokens as api_tokens
+from api.auth import d3auth_bearer
 from api.auth import service as auth_service
 from api.auth.cookies import ACCESS_COOKIE
 from api.auth.tokens import TokenError, decode_access_claims
@@ -95,6 +96,22 @@ async def current_user(
         request.state.api_token = identity
         _refuse_beyond_the_token(request, identity)
         user_id = identity.user_id
+    elif d3auth_bearer.looks_like_provider_token(token):
+        # A D3 Auth token audienced at this Bindery (BND-T-22.3): D3 Constellation's way in for a
+        # person signed in to D3 Auth. Verified against the provider's keys, mapped by the
+        # `(issuer, subject)` link — and there is no Bindery session behind it to check, so its
+        # short lifetime is what bounds it.
+        try:
+            linked = await d3auth_bearer.user_for(
+                session, token, resource=str(request.base_url).rstrip("/")
+            )
+        except d3auth_bearer.IdentityNotLinked as exc:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED, "identity_not_linked"
+            ) from exc
+        except d3auth_bearer.NotD3AuthToken as exc:
+            raise _UNAUTHENTICATED from exc
+        user_id = linked.id
     else:
         try:
             claims = decode_access_claims(token)

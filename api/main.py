@@ -26,6 +26,7 @@ from api.routers import (
     library,
     live,
     logs,
+    native,
     photos,
     pipeline,
     review,
@@ -108,6 +109,8 @@ app.include_router(health.router, prefix="/api")
 app.include_router(badges.router, prefix="/api")
 app.include_router(vault_router.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(native.router, prefix="/api")
+app.include_router(native.well_known)
 app.include_router(oidc_router.router, prefix="/api")
 app.include_router(setup.router, prefix="/api")
 app.include_router(accounts_router.router, prefix="/api")

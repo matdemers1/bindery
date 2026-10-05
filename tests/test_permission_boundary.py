@@ -534,6 +534,8 @@ NOT_LIBRARY_SCOPED = {
     "/api/imports/presets": "returns the inbox path from settings; no library data",
     "/api/health": "liveness only",
     "/api/auth/me": "the caller's own identity",
+    "/api/auth/native/me": "the caller's own identity, in the D3 App contract's shape (BND-T-22.2)",
+    "/api/auth/sessions": "the caller's own sessions (BND-T-22.4)",
     "/api/settings": "instance settings; secrets are masked, never returned",
     "/api/forms": "the known-form registry is global, not per library",
     "/api/shelves": "already covered through /api/archive",

@@ -38,9 +38,21 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def issue_access_token(user_id: uuid.UUID, session_id: uuid.UUID) -> tuple[str, datetime]:
+# The D3 App contract caps a native client's access token at fifteen minutes (BND-T-22.2): a phone
+# is lost more often than a desk, and its refresh token is the one that lives a month.
+NATIVE_ACCESS_TTL_MINUTES = 15
+
+
+def access_ttl_minutes(*, native: bool) -> int:
+    configured = get_settings().jwt_access_ttl_minutes
+    return min(configured, NATIVE_ACCESS_TTL_MINUTES) if native else configured
+
+
+def issue_access_token(
+    user_id: uuid.UUID, session_id: uuid.UUID, *, native: bool = False
+) -> tuple[str, datetime]:
     settings = get_settings()
-    expires_at = _now() + timedelta(minutes=settings.jwt_access_ttl_minutes)
+    expires_at = _now() + timedelta(minutes=access_ttl_minutes(native=native))
     payload = {
         "sub": str(user_id),
         # The refresh token row this session is. Checked against the database on

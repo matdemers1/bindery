@@ -97,6 +97,9 @@ NOT_UNDOABLE: dict[str, str] = {
     "login": "a sign-in is an event, not a change; there is nothing to restore.",
     "logout": "ending a session is an event; signing in again is how it comes back, "
               "and restoring a revoked session would be the opposite of the point.",
+    "session_ended": "signing a device out from Settings is ending a session; the device signs "
+                     "in again to come back, and reviving the session would hand a lost phone "
+                     "its access back.",
     "oidc_linked": "connecting D3 Auth is reversed by disconnecting it in Settings, "
                    "which asks for the local password — not by an undo button that "
                    "would not.",
