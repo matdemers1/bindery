@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     jwt_refresh_ttl_days: int = 30
     jwt_algorithm: str = "HS256"
     cookie_secure: bool = True
+    # Accept a loopback http push relay (BND-T-23.4) — CI's mock relay only; production relays are
+    # https, always.
+    relay_allow_loopback_http: bool = False
 
     # Paths inside the container. HOST_DATA_ROOT is a compose concern only.
     data_root: Path = Path("/data")

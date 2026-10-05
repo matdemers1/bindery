@@ -26,6 +26,7 @@ from api.db.models.offsite_object import OffsiteObject
 from api.db.models.offsite_run import OffsiteRun
 from api.db.models.oidc import OidcIdentity, OidcLogoutEvent
 from api.db.models.page import Page
+from api.db.models.push import RelayRegistration
 from api.db.models.setting import Setting
 from api.db.models.source_file import SourceFile
 from api.db.models.tag import DocumentTag, Tag, live_tag_links
@@ -73,6 +74,7 @@ __all__ = [
     "PasswordResetCode",
     "RecoveryCode",
     "RefreshToken",
+    "RelayRegistration",
     "Rule",
     "SavedSearch",
     "ServiceHeartbeat",

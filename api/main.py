@@ -39,6 +39,7 @@ from api.routers import (
     upload,
 )
 from api.routers import oidc as oidc_router
+from api.routers import push as push_router
 from api.routers import vault as vault_router
 from api.vault import sweep as vault_sweep
 
@@ -111,6 +112,7 @@ app.include_router(vault_router.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(native.router, prefix="/api")
 app.include_router(native.well_known)
+app.include_router(push_router.router, prefix="/api")
 app.include_router(oidc_router.router, prefix="/api")
 app.include_router(setup.router, prefix="/api")
 app.include_router(accounts_router.router, prefix="/api")

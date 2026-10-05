@@ -1,0 +1,30 @@
+{
+  "note": "Test vectors for the D3 relay envelope v1 (relay/src/envelope.ts). The private key is for tests only.",
+  "devicePrivateKeyD": "B92x_kN5yULWCZHwm-Mz9QHAwFawT4HkYtXXm1DXjQQ",
+  "devicePublicKey": "BBLcjZLLcuWSUfKgVDXCzBz6CzP32XT/MaDGJ2H1YdKvOJpFx89yTUiEeTX2bH/eKvjaal3QqTBxsTcSFEfkqkc=",
+  "cases": [
+    {
+      "payload": {
+        "v": 1,
+        "category": "postroom.priority",
+        "title": "Sarah Byrne",
+        "body": "Re: site copy",
+        "thread": "thread-1",
+        "link": "d3constellation://postroom.demo.invalid/postroom/message/m-1",
+        "sentAt": "2026-10-04T12:00:00Z"
+      },
+      "envelope": "AQSLXwOTT7lslTPdE1lGpjZnvguvATqSQBb8oVriWKW+kYUv4c2HhY8gV/xZlNW2xmWz2C8hEWWqlW6c40S/HSZwxbJOj0m4Qygmc4CuNvoifG3jh1FXxocXUtHpLNqkssxvGn6RPjIeH0erj/73qZoe7Rkl+XnAX7DQJxCMr6C3yYR/0eaX8H9jxWg+dk53krA7N+cuvFng/TEpey+7oCsvdyM3oreHUpY3ZNzsgY33q/oWeGS31N5QCgZCO7Ndy9NGHsl0CcNYjG5C4XMCwRSob5KjMi4D6+PS75J00KN8iCDuRWXuLJSGQMeqAT8j0KYPb+gc+zHWr1obvPgRZMdXp/TioV/HNUMImLbHzEQqwLcTxqdrBTbicaeJl06FsplHrz61QL7axxU="
+    },
+    {
+      "payload": {
+        "v": 1,
+        "category": "shipyard.approval",
+        "title": "d3auth is waiting",
+        "body": "Approve 4ff8e0a to go live.",
+        "link": "d3constellation://shipyard.demo.invalid/shipyard/approvals",
+        "sentAt": "2026-10-04T12:01:00Z"
+      },
+      "envelope": "AQRhbOPcBc724hdEqRMfmELH6FFQ2pxQNC6H4lRZLPyby1aMWIQP/oN2RbG9TCzquTOTnEOQuebHH7FjD3xI2HYJigrE5IFtXsbsthxKEux/J0eVjTdeNcr1lpmIy+LZQWFXsAJxKf2b63btAD1TpWpskoGVPgEIBNqWlUR4qAo+2kMuXzIXD7tLh9fJGvmpIOFMsjoJrss1eZ3BdGWlpdKhM6PID/sXyXvvgDM8rseMwKlZi4O7MRGGV0zaK+E9jYEubQX5rUwyp4PSBy5MrE0hmGjJB+zOkfXC/48Tlmq78cd+y5CNj9cSqv3GhK9aNBYN5C7Zrar3RTk+PISgiGDKY3pXgRqwqEcu0bmi7jlm7vt98q6jwEBjJGgTyH5Ra2GZ7Wyl+CYZ"
+    }
+  ]
+}

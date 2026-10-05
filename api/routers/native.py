@@ -106,7 +106,7 @@ async def manifest(request: Request, session: AsyncSession = Depends(get_session
             "link": f"{base}/api/auth/native/link" if sso.enabled else None,
             "inviteAccept": None,
             "deleteAccount": None,
-            "relayRegister": None,
+            "relayRegister": f"{base}/api/push/native/register",
         },
     }
     if sso.enabled:
