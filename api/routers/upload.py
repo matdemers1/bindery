@@ -72,7 +72,7 @@ async def upload(
     if usage.remaining_bytes is not None:
         ceiling = min(ceiling, usage.remaining_bytes)
     try:
-        blob = await store_stream(quota.capped(_chunks(file), ceiling))
+        blob = await store_stream(quota.capped(_chunks(file), ceiling), session=session)
     except quota.TooLarge as full:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, str(full)) from full
 

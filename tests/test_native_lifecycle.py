@@ -429,6 +429,39 @@ async def test_an_administrator_restoring_the_account_cancels_the_deletion(
     assert user.deleted_at is None
 
 
+async def test_the_people_list_says_when_a_scheduled_deletion_runs(
+    client: AsyncClient, session, user_factory
+) -> None:
+    """BND-T-23.5: an account awaiting its purge must not look like an ordinary suspension on the
+    People screen, so the list carries the date, and Restore clears it."""
+    user, _ = await _schedule(client, session, user_factory)
+    user_id, delete_after = user.id, user.delete_after
+    assert delete_after is not None
+    admin, _ = await user_factory()
+    admin.is_admin = True
+    admin_id, admin_email = admin.id, admin.email
+    await session.commit()
+    signed_in = await client.post(
+        "/api/auth/login", json={"email": admin_email, "password": PASSWORD},
+        headers=own_address(),
+    )
+    assert signed_in.status_code == 200, signed_in.text
+
+    def listed(rows: list[dict]) -> dict[str, dict]:
+        return {row["id"]: row for row in rows}
+
+    people = listed((await client.get("/api/admin/accounts")).json())
+    leaving = people[str(user_id)]
+    assert leaving["is_active"] is False
+    assert datetime.fromisoformat(leaving["delete_after"]) == delete_after
+    assert people[str(admin_id)]["delete_after"] is None
+
+    restored = await client.post(f"/api/admin/accounts/{user_id}/restore")
+    assert restored.status_code == 204, restored.text
+    back = listed((await client.get("/api/admin/accounts")).json())[str(user_id)]
+    assert back["is_active"] is True and back["delete_after"] is None
+
+
 def _file(library_id: uuid.UUID, sha: str) -> SourceFile:
     return SourceFile(
         library_id=library_id, sha256=sha, byte_size=5, original_filename="deed.pdf",

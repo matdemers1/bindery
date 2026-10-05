@@ -247,7 +247,7 @@ async def ingest_batch(
             if usage.remaining_bytes is not None:
                 chunks = quota.capped(chunks, usage.remaining_bytes)
             try:
-                blob = await store_stream(chunks)
+                blob = await store_stream(chunks, session=session)
             except quota.TooLarge as full:
                 item.state = ImportItemState.FAILED
                 item.error = str(full)[:500]

@@ -1482,6 +1482,9 @@ class AdminAccountOut(BaseModel):
     is_active: bool
     suspended_at: datetime | None
     locked_until: datetime | None
+    # When the account's own deletion runs, while it waits out its grace period (BND-ADR-015).
+    # Null for every other account; an administrator's Restore clears it.
+    delete_after: datetime | None
     totp_enabled: bool
     storage_quota_bytes: int | None
     used_bytes: int

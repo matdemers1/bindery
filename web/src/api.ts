@@ -1523,6 +1523,8 @@ export interface AdminAccount {
   is_active: boolean;
   suspended_at: string | null;
   locked_until: string | null;
+  /** When the account's own deletion runs (BND-ADR-015); null unless one is scheduled. */
+  delete_after: string | null;
   totp_enabled: boolean;
   storage_quota_bytes: number | null;
   used_bytes: number;

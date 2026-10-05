@@ -111,7 +111,7 @@ async def main() -> None:
                 print(f"{filename} reset to {state.value}")
                 continue
 
-            blob = await _real_blob(_tiny_pdf(filename))
+            blob = await _real_blob(session, _tiny_pdf(filename))
             source = SourceFile(
                 library_id=library_id,
                 sha256=blob.sha256,
@@ -187,7 +187,7 @@ async def _document_awaiting_review(session, library_id) -> None:
         )
     ).scalar_one_or_none()
     if existing is None:
-        blob = await _real_blob(_tiny_pdf(filename))
+        blob = await _real_blob(session, _tiny_pdf(filename))
         existing = SourceFile(
             library_id=library_id,
             sha256=blob.sha256,
@@ -261,7 +261,7 @@ VAULTED = [
 ]
 
 
-async def _real_blob(payload: bytes):
+async def _real_blob(session, payload: bytes):
     """Store bytes and hand back the blob record.
 
     The two fixtures below used to invent a digest with `uuid4().hex * 2`,
@@ -278,7 +278,7 @@ async def _real_blob(payload: bytes):
     async def one_chunk(data: bytes):
         yield data
 
-    return await store_stream(one_chunk(payload))
+    return await store_stream(one_chunk(payload), session=session)
 
 
 def _stamped_png(stamp: str) -> bytes:
@@ -399,7 +399,7 @@ async def _a_vault_with_something_in_it(session, user, library_id) -> None:
             continue
 
         payload = _stamped_png(stamp) if kind == "png" else _tiny_pdf(stamp)
-        blob = await store_stream(one_chunk(payload))
+        blob = await store_stream(one_chunk(payload), session=session)
         source = SourceFile(
             library_id=library_id,
             sha256=blob.sha256,

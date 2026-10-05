@@ -4,7 +4,7 @@ import { Users, UserPlus, Copy, Check, Lock, Ban, RotateCcw, ShieldCheck } from 
 
 import { ApiError, type AdminAccount, type AdminInvitation, accountsApi } from "../../api";
 import { useLiveQuery } from "../../live/LiveProvider";
-import { Alert, Button, IconButton, Input, Link as TextLink, PageHeader } from "@d3cloud/ui";
+import { Alert, Badge, Button, IconButton, Input, Link as TextLink, PageHeader } from "@d3cloud/ui";
 
 const GB = 1024 ** 3;
 
@@ -151,6 +151,13 @@ function Row({
   const [quotaGb, setQuotaGb] = useState("");
   const quotaFieldId = useId();
   const locked = account.locked_until && new Date(account.locked_until) > new Date();
+  // An account whose owner asked to delete it is suspended like any other, and
+  // the purge runs on this date unless somebody restores it first (BND-ADR-015).
+  // Without saying so, Restore on this row looked like an ordinary un-suspend,
+  // and the week in which it can still be undone passed without anyone knowing.
+  const deleting = account.delete_after
+    ? new Date(account.delete_after).toLocaleDateString(undefined, { dateStyle: "medium" })
+    : null;
   const share = account.storage_quota_bytes
     ? Math.min(1, account.used_bytes / account.storage_quota_bytes)
     : 0;
@@ -254,7 +261,14 @@ function Row({
         )}
       </td>
       <td className="px-4 py-3 text-xs">
-        {!account.is_active ? (
+        {deleting ? (
+          <div className="space-y-1">
+            <Badge tone="danger" size="sm">
+              deletion scheduled
+            </Badge>
+            <p className="text-danger">{`Deleting on ${deleting} — Restore cancels it`}</p>
+          </div>
+        ) : !account.is_active ? (
           <span className="text-danger">suspended</span>
         ) : locked ? (
           <span className="text-warning">locked out</span>

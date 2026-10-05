@@ -628,6 +628,16 @@ phase II (BND-P-23) added invites, account deletion, push and "Open in D3 Conste
   The `app_user` row stays as a tombstone (`deleted-<id>@deleted.invalid`, `deleted_at`) because
   attribution and the audit trail point at it. Files go **after** the commit, and a blob is unlinked
   only when no remaining row in any library holds its hash. Never the offsite bucket (ADR-010).
+- **The blob lock** (BND-T-23.5): "nothing holds this hash" is true only until the next upload of
+  the same bytes. `blobs.store_stream(..., session=)` takes `blobs.hold` — a *shared*
+  `pg_advisory_xact_lock` keyed on the hash — before it looks for an existing blob, and keeps it
+  until the caller's transaction ends, i.e. after the row is committed. The purge releases each
+  blob in its own transaction under `blobs.lock_for_removal` (the *exclusive* half), asks again
+  under it, and unlinks before letting go. Shared, so two ingests never wait on each other; one
+  blob per purge transaction, so it never waits while holding one. `session` is required, so a new
+  ingest door cannot skip the hold; `tests/test_blob_release_race.py` interleaves both orders.
+- **The People screen** shows an account awaiting its purge as *deletion scheduled* — "Deleting on
+  <date> — Restore cancels it" — from `delete_after` on `GET /api/admin/accounts`.
   `purge_due(session, now=…)` takes a test clock; re-read the user with `populate_existing`, or a
   cached row hides a restore.
 - **"Open in D3 Constellation"** (BND-T-23.1): `web/src/components/OpenInConstellation.tsx` on the

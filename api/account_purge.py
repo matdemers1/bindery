@@ -16,6 +16,13 @@ host name typed out, a week ago, in a week when any administrator could have res
 worker's purge loop. Rows go first, each account in its own transaction; files go after the
 commit, because an orphaned file is harmless and a row pointing at a missing file is not — the
 backup's ordering rule.
+
+A blob is shared by content address, so "nothing holds this hash any more" is only true until the
+next upload of the same bytes. Each blob is therefore released in a transaction of its own that
+takes `blobs.lock_for_removal` first — the exclusive half of the lock every ingest holds from
+before it looks for an existing blob until its row commits — and asks the question again under it,
+then unlinks before letting go (BND-T-23.5). One blob per transaction, so the purge never waits
+for a lock while holding another, and cannot deadlock against an import holding several.
 """
 
 import logging
@@ -71,6 +78,7 @@ from api.db.models import (
     VaultItem,
     VaultPage,
 )
+from api.storage import blobs
 from api.storage.blobs import blob_path
 from api.vault.store import object_path
 
@@ -124,17 +132,7 @@ async def purge_due(session: AsyncSession, *, now: datetime | None = None) -> Pu
             report.deferred.append(user_id)
             continue
         await session.commit()
-        # Asked after the commit: a blob is another library's original when any row still
-        # holds its hash, whichever library that row is in.
-        held = set(
-            (
-                await session.execute(
-                    sa.select(SourceFile.sha256).where(SourceFile.sha256.in_(list(purged.blobs)))
-                )
-            ).scalars()
-        )
-        await session.rollback()  # end the read's transaction before the disk work
-        _remove_files(purged, held)
+        await _remove_files(session, purged)
         report.purged.append(purged)
         log.warning(
             "account %s purged: %d librar%s and %d document%s removed, %d shared librar%s kept",
@@ -405,26 +403,47 @@ async def _remove_account_rows(session: AsyncSession, user: AppUser) -> None:
         await session.execute(sa.delete(model).where(model.user_id == user.id))
 
 
-def _remove_files(purged: Purged, held: set[str]) -> None:
+async def _remove_files(session: AsyncSession, purged: Purged) -> None:
     """After the commit: blobs nothing holds any more, their derived trees, vault objects.
 
     Errors are logged and never raised — the rows are gone, and a file left behind is an orphan
     the integrity check ignores, not a reference to something missing.
     """
     for name in purged.vault_objects:
-        _unlink(object_path(name))
+        _unlink(object_path(name))  # random names, never shared: nothing else can reach one
     for sha, document_ids in purged.blobs.items():
-        if sha in held:
-            # The same bytes are another library's original: leave the blob and the derived
-            # renders, and take only this account's classification artifacts out of it.
-            classify = derived_for(sha).root / "classify"
-            for document_id in document_ids:
-                for path in _matching(classify, f"{document_id}-"):
-                    _unlink(path)
-            continue
-        _unlink(blob_path(sha))
-        if not purge_derived(sha):
-            log.error("could not remove derived files for a purged blob %s", sha[:12])
+        try:
+            await _release_blob(session, sha, document_ids)
+        except Exception:
+            log.exception("could not release purged blob %s; it stays as an orphan", sha[:12])
+        finally:
+            await session.rollback()  # ends the transaction, which is what lets the lock go
+
+
+async def _release_blob(
+    session: AsyncSession, sha: str, document_ids: set[uuid.UUID]
+) -> None:
+    """Remove one blob if nothing holds it, under the lock an ingest of the same bytes takes.
+
+    The caller ends the transaction, and with it the lock, after this returns: the unlink has to
+    happen while the lock is held, or an upload could find the file in the gap and lose it.
+    """
+    await blobs.lock_for_removal(session, sha)
+    # Asked under the lock, so it sees every row an ingest of these bytes committed before
+    # letting go of its hold: a blob is another library's original when any row holds its hash,
+    # whichever library that row is in.
+    held = await session.scalar(sa.select(sa.exists().where(SourceFile.sha256 == sha)))
+    if held:
+        # Leave the blob and the derived renders, and take only this account's classification
+        # artifacts out of it.
+        classify = derived_for(sha).root / "classify"
+        for document_id in document_ids:
+            for path in _matching(classify, f"{document_id}-"):
+                _unlink(path)
+        return
+    _unlink(blob_path(sha))
+    if not purge_derived(sha):
+        log.error("could not remove derived files for a purged blob %s", sha[:12])
 
 
 def _matching(directory: Path, prefix: str) -> Iterable[Path]:

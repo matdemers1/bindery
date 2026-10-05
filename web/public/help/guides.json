@@ -361,6 +361,13 @@
             "There is no email service, so you get a link to send yourself — by text, or in person. It works once and expires in a fortnight.",
             "A reset code works the same way: you read it out, and they choose their own new password. You never learn what it is."
           ]
+        },
+        {
+          "heading": "When someone deletes their account",
+          "body": [
+            "Deleting an account from D3 Constellation suspends it at once and removes it a week later. Until then its row is marked **deletion scheduled**, names the day it will happen, and says that Restore cancels it — which is exactly what Restore does: the account comes back as it was, and nothing is removed.",
+            "Once the date passes, the account goes, and so does every library only it belonged to. A library anyone else belongs to keeps every document in it, including the ones that account added."
+          ]
         }
       ]
     },

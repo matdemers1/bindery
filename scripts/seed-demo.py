@@ -108,7 +108,7 @@ async def main():
 
         for title, lines in PAGES:
             name = title.replace(" — ", " - ").replace(" ", "_") + ".pdf"
-            blob = await store_stream(one_chunk(make_pdf(title, lines)))
+            blob = await store_stream(one_chunk(make_pdf(title, lines)), session=session)
             result = await ingest.register(
                 session, blob, library_id=library.id,
                 ingest_source=IngestSource.WEB_UPLOAD,
