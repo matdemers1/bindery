@@ -108,8 +108,10 @@ def _retire(path: Path, subdirectory: str) -> Path:
 
 
 async def _ingest_file(path: Path, library: Library) -> None:
-    blob = await store_stream(_file_chunks(path))
+    # The session opens first so the store can hold the content address in it
+    # until the row is committed (BND-T-23.5).
     async with SessionFactory() as session:
+        blob = await store_stream(_file_chunks(path), session=session)
         result = await ingest.register(
             session,
             blob,

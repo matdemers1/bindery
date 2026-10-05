@@ -325,6 +325,7 @@ async def list_accounts(
                 is_active=user.is_active,
                 suspended_at=user.suspended_at,
                 locked_until=user.locked_until,
+                delete_after=user.delete_after,
                 totp_enabled=user.totp_enabled,
                 storage_quota_bytes=user.storage_quota_bytes,
                 used_bytes=int(held.get("used_bytes", 0)),

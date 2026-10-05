@@ -251,8 +251,6 @@ GRANDFATHERED = {
         "finds a deleted account's documents, vaulted ones included, to remove them",
     "api/account_purge.py::_remove_libraries":
         "removes whole libraries nobody else belongs to, by id",
-    "api/account_purge.py::purge_due":
-        "asks whether any library still holds a blob's hash before unlinking it",
 
     "api/backlog/dryrun.py::analyse":
         "a dry run over a folder on disk, before any row is a document",

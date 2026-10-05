@@ -87,7 +87,7 @@
         "web/src/components/brand",
         "web/src/index.css"
       ],
-      "source_commit": "667c9d27e75959efde9a16393c297c3b21b40ba5"
+      "source_commit": "2e3200f134b7027e63fc4093e31336395556bdb9"
     },
     {
       "route": "/photos",

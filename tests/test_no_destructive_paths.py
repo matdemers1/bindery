@@ -299,11 +299,54 @@ def test_the_account_purge_stays_what_its_adr_granted() -> None:
     # Rows, commit, then files: an orphaned file is harmless, a row pointing at
     # a missing one is not.
     commit = source.index("await session.commit()", source.index("async def purge_due"))
-    assert commit < source.index("_remove_files(purged, held)"), (
+    assert commit < source.index("await _remove_files(session, purged)"), (
         "files are removed before the rows that point at them are committed away"
+    )
+    # A blob is shared by content address, so "nothing holds this hash" is true only until the
+    # next upload of the same bytes (BND-T-23.5). The question is asked under the exclusive half
+    # of the lock every ingest holds until its row commits, and the unlink happens before that
+    # lock is let go — the transaction ends in the caller, after `_release_blob` returns.
+    release = source[source.index("async def _release_blob"):]
+    release = release[: release.index("\ndef ") if "\ndef " in release else len(release)]
+    lock = release.index("await blobs.lock_for_removal(session, sha)")
+    question = release.index("SourceFile.sha256 == sha")
+    unlink = release.index("_unlink(blob_path(sha))")
+    assert lock < question < unlink, (
+        "a blob is unlinked without first taking the lock an ingest of the same bytes holds, "
+        "and asking again under it"
+    )
+    assert "_unlink(blob_path(" not in source.replace(release, ""), (
+        "a blob is unlinked somewhere other than under the removal lock"
+    )
+    assert "session.commit()" not in release, (
+        "the removal lock is let go before the blob is unlinked"
     )
     # Shared means another member can reach it, never `library.kind`.
     assert "LibraryKind" not in source, "the purge decides what is shared by a label"
+
+
+def test_every_ingest_holds_the_hash_before_it_looks_for_the_blob() -> None:
+    """The other half of the purge's lock (BND-T-23.5).
+
+    `store_stream` decides whether a blob already exists; a purge must not be able to unlink it
+    between that decision and the row that relies on it. So the hold is taken *before* the
+    existence check, in the session that will commit the row — and the session is a required
+    argument, so a new ingest door cannot simply leave it out.
+    """
+    import inspect
+
+    from api.storage import blobs
+
+    source = inspect.getsource(blobs.store_stream)
+    assert source.index("await hold(session, sha256)") < source.index("destination.exists()"), (
+        "the blob store looks for an existing blob before holding its content address"
+    )
+    parameter = inspect.signature(blobs.store_stream).parameters["session"]
+    assert parameter.default is inspect.Parameter.empty, (
+        "store_stream's session became optional, so an ingest can skip the hold"
+    )
+    assert "pg_advisory_xact_lock_shared" in inspect.getsource(blobs.hold)
+    assert '"pg_advisory_xact_lock"' in inspect.getsource(blobs.lock_for_removal)
 
 
 def test_the_account_purge_is_reached_only_from_declared_callers() -> None:
