@@ -70,6 +70,17 @@ async def _scans(times: int, *, between=None) -> None:
         watched_folder._candidates = original
 
 
+async def _own_library(signed_in):
+    """A library whose name nothing else in the test database shares.
+
+    The watcher maps an inbox directory to a library by the slug of its name, and the test
+    database holds hundreds of libraries called "Test Library" by the end of a full run. With the
+    default name the slug resolved to whichever of them Postgres returned last, so the file was
+    ingested into another test's library and this file failed one full run in three.
+    """
+    return await signed_in(library_name=f"Inbox {uuid.uuid4().hex[:12]}")
+
+
 async def _files(session, library_id) -> list[SourceFile]:
     return list(
         (
@@ -91,7 +102,7 @@ async def test_a_file_still_being_written_is_not_ingested(
     nothing downstream — not the integrity check, not the restore drill — can
     tell it apart from a document that was always that length.
     """
-    _, library = await signed_in()
+    _, library = await _own_library(signed_in)
     directory = inbox / watched_folder._slug(library.name)
     directory.mkdir()
     growing = directory / "scan.pdf"
@@ -108,7 +119,7 @@ async def test_a_file_that_has_stopped_changing_is_ingested(
     session, signed_in, inbox
 ) -> None:
     """And the gate is a delay, not a refusal — the next scan picks it up."""
-    _, library = await signed_in()
+    _, library = await _own_library(signed_in)
     directory = inbox / watched_folder._slug(library.name)
     directory.mkdir()
     settled = directory / f"{uuid.uuid4().hex[:8]}.pdf"
@@ -131,7 +142,7 @@ async def test_an_empty_file_is_never_ingested_however_stable(
     be ingested and never moves is one the watcher re-examines on every scan for
     the life of the archive, and which nothing tells anyone about.
     """
-    _, library = await signed_in()
+    _, library = await _own_library(signed_in)
     directory = inbox / watched_folder._slug(library.name)
     directory.mkdir()
     empty = directory / "nothing.pdf"
