@@ -262,7 +262,9 @@ function Row({
       </td>
       <td className="px-4 py-3 text-xs">
         {deleting ? (
-          <div className="space-y-1">
+          // Narrow, so a long date wraps here rather than widening the column
+          // and pushing every other row's actions onto two lines.
+          <div className="max-w-36 space-y-1">
             <Badge tone="danger" size="sm">
               deletion scheduled
             </Badge>
