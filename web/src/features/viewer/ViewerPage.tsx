@@ -18,6 +18,7 @@ import EditPanel from "../edit/EditPanel";
 import WhyPanel from "../why/WhyPanel";
 import MoveToVault from "../vault/MoveToVault";
 import { Button, EmptyState, Link as TextLink, Tooltip } from "@d3cloud/ui";
+import { OpenInConstellation } from "../../components/OpenInConstellation";
 
 /**
  * Renders a page range as if it were a standalone document (ADR-001), while
@@ -351,6 +352,8 @@ function Viewer({
             {/* Documents only: the vault holds a document, not a whole bundle,
                 because a bundle is usually one vaultable page among fifty. */}
             {mode === "document" && <MoveToVault documentId={routeId} title={title} />}
+            {/* The same document in the native app, on Apple devices (BND-T-23.1). */}
+            {mode === "document" && <OpenInConstellation documentId={routeId} page={localPage} />}
             <Tooltip
               content={
                 mode === "document"
