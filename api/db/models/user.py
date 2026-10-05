@@ -54,6 +54,13 @@ class AppUser(Base):
     # time to reuse one that was shoulder-surfed or captured.
     totp_last_step: Mapped[int | None] = mapped_column(sa.BigInteger)
 
+    # Account deletion (BND-T-23.3, BND-ADR-015). `delete_after` is when the purge may run: set
+    # when the person asks, cleared when an administrator restores the account during the grace
+    # period. `deleted_at` is when it ran — the row is a tombstone from then on, kept because
+    # attribution columns and the audit trail point at it.
+    delete_after: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+
     created_at: Mapped[datetime] = created_at()
 
     @property

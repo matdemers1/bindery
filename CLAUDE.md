@@ -27,6 +27,9 @@ Breaking any of these is a bug, not a tradeoff:
 1. **Originals are never modified.** Content-addressed, immutable, write-once. Exports are derivative artifacts.
 2. **A document is a page range over a source file** — `(source_file_id, page_start, page_end)`. Bundles are sliced virtually. There is no separate segment table.
 3. **Nothing is ever automatically deleted.** No unattended destructive code path may exist.
+   Two named exemptions carry out a person's own decision later — the vault sweep (ADR-012) and
+   the purge that ends a deleted account's grace period (BND-ADR-015) — and
+   `tests/test_no_destructive_paths.py` holds each to its file and its declared callers.
 4. **Library is the access boundary.** Every document belongs to exactly one. Filtering happens at the repository layer, never at individual call sites.
 5. **Auto-file gating reads structural signals, not the model's self-reported confidence.** LLM confidence is poorly calibrated; gate on known-form matches, `existing_ids`-only tags, pre-existing correspondents, labeled dates, and rule hits.
 6. **Reused taxonomy resolves by ID and never passes through normalization or translation.** `existing_ids` and `new_names` are separate response fields.
@@ -563,7 +566,8 @@ never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
 ## The native app contract (Phase 22)
 
 D3 Constellation, the native Apple app, reaches Bindery through the D3 App contract
-(`matdemers1/d3-app-contract`; Foreman CON-ADR-003). `api/routers/native.py` is all of it so far:
+(`matdemers1/d3-app-contract`; Foreman CON-ADR-003). `api/routers/native.py` holds the routes;
+phase II (BND-P-23) added invites, account deletion, push and "Open in D3 Constellation":
 
 - `GET /.well-known/d3-app.json` — the manifest, served by the api and routed by an exact `location`
   in `infra/nginx.conf` (without it the web app's `index.html` answers, which a live run found).
@@ -596,10 +600,44 @@ D3 Constellation, the native Apple app, reaches Bindery through the D3 App contr
   Bindery session behind it. Unlinked answers `identity_not_linked` (problem+json at `native/me`);
   `POST /api/auth/native/link` with the D3 Auth token and `{email, password, totp | recoveryCode}`
   links it once, throttled like a sign-in. Tests replace `d3auth_bearer.fetch_jwks`.
-- **The conformance suite** is `ghcr.io/matdemers1/d3-app-conformance:contract-1`; against a local
-  stack: `docker run --rm --network infra_default <image> --base http://api:8000 --allow-http
-  --product bindery --email … --password … --totp-secret …` (13 checks; the phase II ones skip while
-  their endpoints are `null`).
+- **Invites** (BND-T-23.2): `POST /api/auth/native/invite {token, displayName, password, device}` →
+  `200 {challenge, enrolment}`, then `{challenge, enrolTotp}` → a native session plus `recoveryCodes`.
+  The invitation is spent by the same `accounts.accept` the join page uses (library, name, quota from
+  the invitation; audited `account_created` with `client: native`), and the authenticator is
+  started there and trusted only once a code proves it. The challenge is a fifteen-minute signed JWT
+  (`typ: native-enrol`); a wrong code leaves it valid, an enrolled account makes it dead. Unknown,
+  used, withdrawn and expired are one answer, `410 invite_invalid`; a policy miss is `422
+  weak_password` with `validate_password`'s own words. The throttle key is the web join page's.
+  The admin link is now **`/invite/<token>`** (the contract's invite-named path, which Constellation
+  parses when pasted); `/join/<token>` and `/invite?token=` still open the join page
+  (`web/src/lib/invite.ts`).
+- **Deleting an account** (BND-T-23.3, **BND-ADR-015**): `POST /api/auth/native/delete-account
+  {confirmation, totp}` with a **native session or a D3 Auth token** — an API token or a browser
+  session is `401 session_revoked`. Order: who → body → confirmation against the request's host
+  name (`422`, naming it) → throttle → a current TOTP code, burned (`401 invalid_code`) →
+  `account_deletion.last_owner` (`409 last_owner`: the only standing administrator, or the only owner
+  of a library somebody else belongs to) → `schedule`. The code is checked before the owner rule on
+  purpose. `202 {graceUntil}` is **seven days** out; the account is disabled at once and every
+  session, API token and push registration ends. An administrator's **Restore** during the grace
+  period cancels it (`accounts.restore` clears `delete_after`; a purged tombstone refuses).
+- **The purge** is `api/account_purge.py`, the **second REQ-090 exemption** (the guard names it and
+  its one caller, the worker's hourly `_account_purge` loop). Per account, one transaction: every
+  library in which it is the only member (by membership — `library.kind` is not consulted) and
+  everything in it, every document in its own vault wherever it sits, its credentials, links and
+  memberships; libraries anyone else belongs to keep every document, including the ones it added.
+  The `app_user` row stays as a tombstone (`deleted-<id>@deleted.invalid`, `deleted_at`) because
+  attribution and the audit trail point at it. Files go **after** the commit, and a blob is unlinked
+  only when no remaining row in any library holds its hash. Never the offsite bucket (ADR-010).
+  `purge_due(session, now=…)` takes a test clock; re-read the user with `populate_existing`, or a
+  cached row hides a restore.
+- **"Open in D3 Constellation"** (BND-T-23.1): `web/src/components/OpenInConstellation.tsx` on the
+  document viewer — Apple user agents only, `d3constellation://<host>/bindery/document/<id>?page=<n>`.
+- **The conformance suite** is `ghcr.io/matdemers1/d3-app-conformance:contract-1`. CI seeds the
+  main account as the **only administrator**, a disposable ordinary account with TOTP, and an invite,
+  and passes `--main-is-last-owner --invite-token … --delete-email … --delete-password …
+  --delete-totp-secret … --destructive`. Locally, from the contract checkout: `node
+  conformance/cli.mjs --base http://127.0.0.1:<port> --allow-http --product bindery --email … …
+  --relay-listen 18555` against a fresh database.
 
 ## Sign in with D3 Auth (Phase 20)
 
@@ -751,9 +789,10 @@ could find any document in ten seconds and could not fix one of them.
 A second lock with its own passphrase, for documents that would otherwise not go
 in the archive at all. `api/vault/`, ADR-012.
 
-- **`api/vault/store.py` is the only file allowed to delete anything.**
-  `tests/test_no_destructive_paths.py` names it as the single exemption to
-  REQ-090 and asserts the exemption does not spread. The ordering is the whole
+- **`api/vault/store.py` is one of the two files allowed to delete anything**
+  (the other is the account purge, BND-ADR-015).
+  `tests/test_no_destructive_paths.py` names each exemption to REQ-090 and
+  asserts neither spreads. The ordering is the whole
   feature: encrypt → write → **read back from disk** → compare to the source
   hash → only then unlink. It is asserted structurally, because a test that
   proves it by deleting a real document is a test that can lose one.
@@ -840,7 +879,7 @@ find yourself writing `git add -f` under that path, stop.
 
 ## Planning Corpus
 
-Foreman `BND` — its documents, ADRs, risks and glossary · Glossary · UX Flows & Screen Inventory · Risk Register · Test Strategy · Requirements Register (157 REQs) · Scope of Work (phases 0–18, plus 3.5 and 8.5) · Phase Plans ×14 · ADR-001 … ADR-013
+Foreman `BND` — its documents, ADRs, risks and glossary · Glossary · UX Flows & Screen Inventory · Risk Register · Test Strategy · Requirements Register (157 REQs) · Scope of Work (phases 0–18, plus 3.5 and 8.5) · Phase Plans ×14 · ADR-001 … ADR-015
 
 Start a coding session with `/start-development bindery`.
 

@@ -142,6 +142,11 @@ NOT_UNDOABLE: dict[str, str] = {
     "account_suspended": "an account is brought back by restoring it, which is "
                          "its own decision and its own audit row.",
     "account_restored": "an account is suspended again by suspending it.",
+    "deletion_requested": "a person asking for their own account to be deleted is undone by an "
+                          "administrator restoring it during the grace period — its own "
+                          "decision and its own audit row (BND-ADR-015).",
+    "account_purged": "the grace period is the undo; once it has passed without a restore, what "
+                      "the person asked to have removed is gone (BND-ADR-015).",
     "acknowledge_job": "the same button un-acknowledges it, which is the "
                        "reverse and is itself audited.",
     "unacknowledge_job": "the same button acknowledges it again.",
@@ -181,7 +186,8 @@ NOT_UNDOABLE: dict[str, str] = {
     # undo here would be the one destructive path this project forbids.
     "create": "nothing is ever automatically deleted (invariant 3), so "
               "creating a rule, an asset or a library has no reverse here.",
-    "account_created": "an account is suspended, never deleted (invariant 3).",
+    "account_created": "an account is suspended by an administrator; only its owner can ask for "
+                       "it to be deleted, after a grace period (BND-ADR-015).",
     "library_created": "a library is not deleted (invariant 3).",
     "vault_created": "a vault is not deleted (invariant 3).",
     "attach_asset": "attaching a document to an asset is a person's own "

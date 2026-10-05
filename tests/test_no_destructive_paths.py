@@ -2,7 +2,8 @@
 
 A negative requirement cannot be demonstrated by a feature, so it is enforced
 here: no destructive database path may exist in the application or the worker
-outside the one the vault was granted. Migrations are exempt (they are applied
+outside the two that were granted — the vault (ADR-012) and the purge that ends
+a deleted account's grace period (BND-ADR-015). Migrations are exempt (they are applied
 explicitly by a human) and so are the tests themselves.
 
 Four things are guarded, because the requirement has more halves than it looks.
@@ -145,6 +146,27 @@ ORM_CASCADES: dict[str, str] = {}
 # was added instead.
 VAULT_EXCEPTION = "api/vault/store.py"
 
+# The second exemption (BND-ADR-015, BND-T-23.3). A person deleting their own
+# account from D3 Constellation — with a current code and their host name typed
+# out — asks for it and everything only it could see to be removed; this purge
+# carries that out once a week's grace period has passed without an
+# administrator restoring the account. Unattended in the way the vault sweep is:
+# the *timer* runs it, a *person* decided it. Shared libraries are never touched.
+#
+# The same three guards as the vault's: one file, which keeps citing the ADR
+# that granted it; reached only from the declared callers below; and rows before
+# files, asserted structurally.
+ACCOUNT_PURGE_EXCEPTION = "api/account_purge.py"
+EXEMPT = {VAULT_EXCEPTION, ACCOUNT_PURGE_EXCEPTION}
+
+PURGE_CALLERS = {
+    "worker/runner.py": (
+        "the hourly purge loop: it carries out deletions people asked for, once "
+        "their grace period has passed and nobody restored the account"
+    ),
+}
+_PURGES = re.compile(r"\baccount_purge\.purge_due\(|^\s*from api\.account_purge import")
+
 # Every file that may destroy a plaintext original by calling into the exempt
 # module, and the human decision that stands behind it.
 SEALING_CALLERS = {
@@ -168,7 +190,7 @@ def test_no_destructive_database_path() -> None:
     offences: list[str] = []
     for package in SEARCHED:
         for path in sorted((ROOT / package).rglob("*.py")):
-            if str(path.relative_to(ROOT)) == VAULT_EXCEPTION:
+            if str(path.relative_to(ROOT)) in EXEMPT:
                 continue
             for lineno, line in enumerate(path.read_text().splitlines(), start=1):
                 if line.lstrip().startswith("@"):
@@ -263,6 +285,47 @@ def test_the_vault_is_reached_only_from_declared_callers() -> None:
     assert not unused, f"declared as a caller but no longer calls anything: {sorted(unused)}"
 
 
+def test_the_account_purge_stays_what_its_adr_granted() -> None:
+    """The second door (BND-ADR-015), held to what the ADR says it removes."""
+    exempt = ROOT / ACCOUNT_PURGE_EXCEPTION
+    assert exempt.is_file(), f"{ACCOUNT_PURGE_EXCEPTION} is gone; drop the exception with it"
+    source = exempt.read_text()
+    assert "BND-ADR-015" in source, "the exception must point at the decision that granted it"
+    assert "DELETE FROM" not in source.upper(), "raw SQL deletion is not what was granted"
+    # BND-ADR-010: Bindery never deletes an S3 object, and this ADR does not change that.
+    assert "offsite" not in source and "delete_object" not in source, (
+        "the purge reaches the offsite copy, which BND-ADR-010 forbids"
+    )
+    # Rows, commit, then files: an orphaned file is harmless, a row pointing at
+    # a missing one is not.
+    commit = source.index("await session.commit()", source.index("async def purge_due"))
+    assert commit < source.index("_remove_files(purged, held)"), (
+        "files are removed before the rows that point at them are committed away"
+    )
+    # Shared means another member can reach it, never `library.kind`.
+    assert "LibraryKind" not in source, "the purge decides what is shared by a label"
+
+
+def test_the_account_purge_is_reached_only_from_declared_callers() -> None:
+    """As with the vault: the exemption is a path, the question is who calls it."""
+    found: dict[str, list[int]] = {}
+    for package in SEARCHED:
+        for path in sorted((ROOT / package).rglob("*.py")):
+            relative = path.relative_to(ROOT).as_posix()
+            if relative == ACCOUNT_PURGE_EXCEPTION:
+                continue
+            for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+                if _PURGES.search(line):
+                    found.setdefault(relative, []).append(lineno)
+    undeclared = {name: lines for name, lines in found.items() if name not in PURGE_CALLERS}
+    assert not undeclared, (
+        f"a new caller reaches the account purge and is not declared (BND-ADR-015): "
+        f"{undeclared}. Add it to PURGE_CALLERS with the decision behind it."
+    )
+    unused = set(PURGE_CALLERS) - set(found)
+    assert not unused, f"declared as a caller but no longer calls anything: {sorted(unused)}"
+
+
 # ---------------------------------------------------------------------------
 # Filesystem deletion and ORM cascades (CR-125)
 # ---------------------------------------------------------------------------
@@ -322,7 +385,7 @@ def _scan_destructive() -> tuple[dict[str, str], dict[str, str], int]:
     for package in SEARCHED:
         for path in sorted((ROOT / package).rglob("*.py")):
             relative = path.relative_to(ROOT).as_posix()
-            if relative == VAULT_EXCEPTION:
+            if relative in EXEMPT:
                 continue
             read += 1
             found_fs, found_cascade = _destructive_sites(path.read_text(), relative)

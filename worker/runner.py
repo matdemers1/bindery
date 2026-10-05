@@ -21,6 +21,7 @@ from pathlib import Path
 import sqlalchemy as sa
 
 from api import (
+    account_purge,
     eventlog,
     events,
     health_panel,
@@ -61,6 +62,9 @@ HEALTH_INTERVAL_SECONDS = 300.0
 # queries; the run happens when the cadence in `offsite_runs` says it is due,
 # which is at most twice a day.
 OFFSITE_INTERVAL_SECONDS = 600.0
+# Accounts whose deletion grace period has passed (BND-ADR-015). The grace period is a week, so
+# an hour's lateness is nothing; checking is one indexed query.
+ACCOUNT_PURGE_INTERVAL_SECONDS = 3600.0
 # A `running` row held longer than this belongs to a worker that is gone. It
 # blocks every future run — the partial unique index sees to that — so an
 # abandoned row is an outage, not untidiness.
@@ -568,6 +572,26 @@ async def _offsite_replication(stopping: asyncio.Event) -> None:
             await asyncio.wait_for(stopping.wait(), timeout=OFFSITE_INTERVAL_SECONDS)
 
 
+async def _account_purge(stopping: asyncio.Event) -> None:
+    """Purge accounts whose owners asked for them to be deleted, once the week is up.
+
+    The one unattended deletion REQ-090 allows besides the vault sweep, and for the same reason:
+    a person decided — with a current code and their host name typed out — and this only carries
+    the decision out after the grace period an administrator could have used to stop it
+    (BND-ADR-015). The purge module is the declared exemption; this loop is its declared caller.
+    """
+    while not stopping.is_set():
+        try:
+            async with SessionFactory() as session:
+                report = await account_purge.purge_due(session)
+            if report.failed:
+                log.error("account purge failed for %d account(s)", len(report.failed))
+        except Exception:
+            log.exception("account purge pass failed")
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stopping.wait(), timeout=ACCOUNT_PURGE_INTERVAL_SECONDS)
+
+
 async def main() -> None:
     settings = get_settings()
     worker_id = f"{os.uname().nodename}:{os.getpid()}"
@@ -636,6 +660,7 @@ async def main() -> None:
             eventlog.drain_forever(stopping, SessionFactory), name="log-drain"
         )
     )
+    tasks.append(asyncio.create_task(_account_purge(stopping), name="account-purge"))
     # Fire-and-forget: LibreOffice's first start builds a profile and takes
     # several seconds. Doing it now means the first office document someone
     # adds is not the one that waits for it. Never blocks boot.

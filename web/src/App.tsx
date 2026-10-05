@@ -16,6 +16,7 @@ import ViewerPage from "./features/viewer/ViewerPage";
 import RouteFocus from "./components/RouteFocus";
 import Shell from "./components/Shell";
 import { LiveProvider } from "./live/LiveProvider";
+import { invitationToken } from "./lib/invite";
 import Login from "./pages/Login";
 import AccountPage from "./features/accounts/AccountPage";
 import JoinPage from "./features/accounts/JoinPage";
@@ -92,9 +93,11 @@ export default function App() {
   // An invitation link has to work before there is a session — it is how the
   // session comes to exist. Read straight from the path rather than through the
   // router, because the router lives inside the signed-in tree.
-  const joinToken = window.location.pathname.startsWith("/join/")
-    ? decodeURIComponent(window.location.pathname.slice("/join/".length))
-    : null;
+  //
+  // `/invite/<token>` is the link an administrator copies now — an invite-named
+  // path is how D3 Constellation recognises a pasted invite (BND-T-23.2) — and
+  // `/join/<token>` is every link sent before that, which must keep working.
+  const joinToken = invitationToken(window.location.pathname, window.location.search);
   if (joinToken && state.status !== "in") {
     return <JoinPage token={joinToken} />;
   }
@@ -193,6 +196,7 @@ export default function App() {
           {/* Someone already signed in who opens an invitation link should end
               up somewhere sensible rather than at a form they cannot use. */}
           <Route path="/join/*" element={<Navigate to="/" replace />} />
+          <Route path="/invite/*" element={<Navigate to="/" replace />} />
           <Route path="/rules" element={<RulesPage libraries={libraries} />} />
           <Route path="/pipeline" element={<PipelinePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

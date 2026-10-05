@@ -464,9 +464,19 @@ async def suspend(session: AsyncSession, *, user: AppUser, by: AppUser) -> int:
     return revoked
 
 
-async def restore(session: AsyncSession, *, user: AppUser) -> None:
+async def restore(session: AsyncSession, *, user: AppUser) -> bool:
+    """Re-enable an account. Returns whether that cancelled a scheduled deletion.
+
+    Restoring during the grace period is how an account's own deletion is undone (BND-ADR-015);
+    once the purge has run the row is a tombstone, and there is nothing left to restore.
+    """
+    if user.deleted_at is not None:
+        raise AccountError("this account has been deleted; there is nothing left to restore")
+    cancelled = user.delete_after is not None
     user.suspended_at = None
     user.suspended_by_id = None
     user.is_active = True
+    user.delete_after = None
     await session.flush()
-    log.info("restored %s", user.email)
+    log.info("restored %s%s", user.email, ", deletion cancelled" if cancelled else "")
+    return cancelled

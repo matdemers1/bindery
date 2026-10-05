@@ -354,6 +354,17 @@ characters on read, database-over-environment precedence.
   because one-time setup is what root is for. The host gets `bindery-offsite`
   and nothing else.
 
+## A deleted account's bytes stay in the bucket
+
+When someone deletes their own account from D3 Constellation, the purge a week
+later removes their private libraries from the live archive (BND-ADR-015) — and
+leaves this bucket alone, because Bindery never deletes an S3 object (ADR-010).
+Their blobs and vault objects stay here, encrypted, and the local backup sets
+keep them until they age out. Nothing records afterwards which objects were
+theirs — that is the point of the purge — so a person who needs the offsite copy
+gone too has to be told before the grace period ends, while their rows still
+name the hashes. It is deliberately not something the host can do on its own.
+
 ## The drill
 
 A backup nobody has restored from is a hypothesis, and that applies to this copy
