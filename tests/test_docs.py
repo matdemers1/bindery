@@ -29,6 +29,7 @@ UNDOCUMENTED_ON_PURPOSE = {
     "/ask": "a redirect kept so old links still work",
     "*": "the catch-all",
     "/join/*": "an invitation link, and the join page explains itself",
+    "/invite/*": "the same invitation link under the name D3 Constellation recognises",
     "/document/:documentId": "redirects into the viewer",
     "/document/:documentId/page/:pageNumber": "the viewer, reached from a result",
     "/file/:fileId": "redirects into the viewer",

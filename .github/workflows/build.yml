@@ -513,30 +513,53 @@ jobs:
         run: |
           docker compose --env-file .env -f infra/docker-compose.yml up -d --build --wait api web
           docker compose --env-file .env -f infra/docker-compose.yml exec -T api alembic upgrade head
-      - name: A throwaway account with an authenticator
-        # Generated per run; the TOTP secret is a fresh one too, handed to the suite and nowhere else.
+      - name: Throwaway accounts with authenticators, and an invite
+        # Generated per run; every secret is a fresh one, handed to the suite and nowhere else.
+        # The main account is the instance's only administrator, so `deletion.last-owner` has
+        # something to refuse; the disposable one is an ordinary account `deletion.schedules`
+        # deletes; the invite is the one `invite.accept` spends (BND-T-23.2, BND-T-23.3).
         if: env.D3_CONTRACT_TOKEN != ''
         run: |
           PASSWORD="Grebulon-Verdant-$(openssl rand -hex 6)"
+          DELETE_PASSWORD="Tamarisk-Ochre-$(openssl rand -hex 6)"
           SECRET="$(python3 -c 'import base64,os; print(base64.b32encode(os.urandom(20)).decode().rstrip("="))')"
+          DELETE_SECRET="$(python3 -c 'import base64,os; print(base64.b32encode(os.urandom(20)).decode().rstrip("="))')"
           echo "::add-mask::$PASSWORD"
+          echo "::add-mask::$DELETE_PASSWORD"
           echo "CONFORMANCE_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
           echo "CONFORMANCE_TOTP=$SECRET" >> "$GITHUB_ENV"
+          echo "CONFORMANCE_DELETE_PASSWORD=$DELETE_PASSWORD" >> "$GITHUB_ENV"
+          echo "CONFORMANCE_DELETE_TOTP=$DELETE_SECRET" >> "$GITHUB_ENV"
           docker compose --env-file .env -f infra/docker-compose.yml exec -T api \
             python -m api.cli create-user --email conformance@example.com --password "$PASSWORD" --library Conformance
-          docker compose --env-file .env -f infra/docker-compose.yml exec -T -e SECRET="$SECRET" api python - <<'PY'
+          docker compose --env-file .env -f infra/docker-compose.yml exec -T api \
+            python -m api.cli create-user --email disposable@example.com --password "$DELETE_PASSWORD" --library Disposable
+          INVITE="$(docker compose --env-file .env -f infra/docker-compose.yml exec -T \
+            -e SECRET="$SECRET" -e DELETE_SECRET="$DELETE_SECRET" api python - <<'PY'
           import asyncio, os
           from datetime import UTC, datetime
           import sqlalchemy as sa
+          from api import accounts
           from api.db.models import AppUser
           from api.db.session import SessionFactory
           async def main():
               async with SessionFactory() as s:
+                  now = datetime.now(UTC)
                   await s.execute(sa.update(AppUser).where(AppUser.email == "conformance@example.com")
-                                  .values(totp_secret=os.environ["SECRET"], totp_confirmed_at=datetime.now(UTC)))
+                                  .values(totp_secret=os.environ["SECRET"], totp_confirmed_at=now, is_admin=True))
+                  await s.execute(sa.update(AppUser).where(AppUser.email == "disposable@example.com")
+                                  .values(totp_secret=os.environ["DELETE_SECRET"], totp_confirmed_at=now))
+                  main_account = (await s.execute(sa.select(AppUser).where(AppUser.email == "conformance@example.com"))).scalar_one()
+                  issued = await accounts.invite(s, email="invited@example.com", library_name="Invited", created_by=main_account)
                   await s.commit()
+                  print(f"INVITE={issued.token}")
           asyncio.run(main())
           PY
+          )"
+          INVITE="$(printf '%s\n' "$INVITE" | sed -n 's/^INVITE=//p')"
+          test -n "$INVITE"
+          echo "::add-mask::$INVITE"
+          echo "CONFORMANCE_INVITE=$INVITE" >> "$GITHUB_ENV"
       - name: The d3-app-contract suite, through nginx
         if: env.D3_CONTRACT_TOKEN != ''
         run: |
@@ -544,6 +567,9 @@ jobs:
           docker run --rm --user "$(id -u)" --network infra_default -v "$PWD:/out" ghcr.io/matdemers1/d3-app-conformance:contract-1 \
             --base http://web --allow-http --product bindery \
             --email conformance@example.com --password "$CONFORMANCE_PASSWORD" --totp-secret "$CONFORMANCE_TOTP" \
+            --main-is-last-owner --invite-token "$CONFORMANCE_INVITE" \
+            --delete-email disposable@example.com --delete-password "$CONFORMANCE_DELETE_PASSWORD" \
+            --delete-totp-secret "$CONFORMANCE_DELETE_TOTP" \
             --destructive --junit /out/conformance.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && env.D3_CONTRACT_TOKEN != ''

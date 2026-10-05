@@ -303,8 +303,14 @@ async def list_accounts(
 ) -> list[AdminAccountOut]:
     """Every account, with what it holds — counts and bytes, never contents."""
     usage = {row["user_id"]: row for row in await quota.usage_by_account(session)}
+    # A purged account is a tombstone kept for attribution (BND-ADR-015), not a
+    # person to administer.
     users = (
-        await session.execute(sa.select(AppUser).order_by(AppUser.created_at))
+        await session.execute(
+            sa.select(AppUser)
+            .where(AppUser.deleted_at.is_(None))
+            .order_by(AppUser.created_at)
+        )
     ).scalars().all()
 
     out = []
@@ -359,7 +365,11 @@ async def create_invitation(
         "expires_at": issued.invitation.expires_at.isoformat(),
         # The caller builds the link; the API does not know the public hostname
         # and guessing it would produce a link that silently goes nowhere.
-        "path": f"/join/{issued.token}",
+        #
+        # `/invite/`, because the D3 App contract has clients recognise a pasted
+        # invite by an invite-named path (BND-T-23.2); `/join/` links already
+        # sent still open the same page.
+        "path": f"/invite/{issued.token}",
     }
 
 
@@ -457,10 +467,15 @@ async def restore_account(
     user = await session.get(AppUser, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
-    await accounts.restore(session, user=user)
+    try:
+        cancelled = await accounts.restore(session, user=user)
+    except accounts.AccountError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     await record(
         session, entity_type="app_user", entity_id=user.id, action="account_restored",
         actor_type=ActorType.HUMAN, actor_id=admin.id,
+        # Restoring an account its owner asked to delete is what cancels it (BND-ADR-015).
+        after={"deletion_cancelled": True} if cancelled else None,
     )
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

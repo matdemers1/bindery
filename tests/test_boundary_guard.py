@@ -241,6 +241,19 @@ MUST_BE_SCANNED = (
 # This list may shrink and must never grow: a new entry means a new boundary
 # written by hand, which is the thing the file exists to stop.
 GRANDFATHERED = {
+    # Not a person reading through the boundary: the purge works out what only a
+    # deleted account could reach — which means seeing vaulted rows and every
+    # member of a library — and removes it (BND-ADR-015). A Scope would hide
+    # exactly the rows it has to find.
+    "api/account_purge.py::_private_libraries":
+        "decides which libraries anyone else can reach; it must see every membership",
+    "api/account_purge.py::_purge_one":
+        "finds a deleted account's documents, vaulted ones included, to remove them",
+    "api/account_purge.py::_remove_libraries":
+        "removes whole libraries nobody else belongs to, by id",
+    "api/account_purge.py::purge_due":
+        "asks whether any library still holds a blob's hash before unlinking it",
+
     "api/backlog/dryrun.py::analyse":
         "a dry run over a folder on disk, before any row is a document",
 
