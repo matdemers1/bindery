@@ -628,6 +628,8 @@ phase II (BND-P-23) added invites, account deletion, push and "Open in D3 Conste
   The `app_user` row stays as a tombstone (`deleted-<id>@deleted.invalid`, `deleted_at`) because
   attribution and the audit trail point at it. Files go **after** the commit, and a blob is unlinked
   only when no remaining row in any library holds its hash. Never the offsite bucket (ADR-010).
+  `purge_due(session, now=…)` takes a test clock; re-read the user with `populate_existing`, or a
+  cached row hides a restore.
 - **The blob lock** (BND-T-23.5): "nothing holds this hash" is true only until the next upload of
   the same bytes. `blobs.store_stream(..., session=)` takes `blobs.hold` — a *shared*
   `pg_advisory_xact_lock` keyed on the hash — before it looks for an existing blob, and keeps it
@@ -636,10 +638,9 @@ phase II (BND-P-23) added invites, account deletion, push and "Open in D3 Conste
   under it, and unlinks before letting go. Shared, so two ingests never wait on each other; one
   blob per purge transaction, so it never waits while holding one. `session` is required, so a new
   ingest door cannot skip the hold; `tests/test_blob_release_race.py` interleaves both orders.
+  The vault seal takes the same lock before it removes a plaintext original (BND-T-23.6).
 - **The People screen** shows an account awaiting its purge as *deletion scheduled* — "Deleting on
   <date> — Restore cancels it" — from `delete_after` on `GET /api/admin/accounts`.
-  `purge_due(session, now=…)` takes a test clock; re-read the user with `populate_existing`, or a
-  cached row hides a restore.
 - **"Open in D3 Constellation"** (BND-T-23.1): `web/src/components/OpenInConstellation.tsx` on the
   document viewer — Apple user agents only, `d3constellation://<host>/bindery/document/<id>?page=<n>`.
 - **The conformance suite** is `ghcr.io/matdemers1/d3-app-conformance:contract-1`. CI seeds the
@@ -806,6 +807,12 @@ in the archive at all. `api/vault/`, ADR-012.
   feature: encrypt → write → **read back from disk** → compare to the source
   hash → only then unlink. It is asserted structurally, because a test that
   proves it by deleting a real document is a test that can lose one.
+- **The plaintext goes under the blob lock** (BND-T-23.6). `_refuse_if_blob_is_shared` asks up
+  front, but an upload of the same bytes into another library can land while the seal encrypts.
+  So after the seal commits, `_remove_plaintext` takes `blobs.lock_for_removal`, asks again
+  whether any file row with no vaulted document holds the hash, and unlinks only if none does —
+  otherwise it keeps that copy's original and says so in the seal's warnings.
+  `tests/test_vault_seal_race.py` interleaves the two on real connections.
 - **The read-back must fail closed.** Comparing hashes only catches a ciphertext
   that decrypts to *different* bytes; the likelier corruption is a flipped bit,
   which fails the AEAD tag. That escaped the refusal branch as an unhandled
