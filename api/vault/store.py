@@ -46,6 +46,7 @@ from api.db.models import (
     VaultItem,
     VaultPage,
 )
+from api.storage import blobs
 from api.storage.blobs import blob_path
 from api.vault import chunked, crypto
 
@@ -388,17 +389,73 @@ async def seal(
     # cost the document, which is not.
     await session.commit()
 
-    warnings: list[str] = []
-    # Derived renders and thumbnails are reproducible from the original, and the
-    # original is about to be ciphertext — so they are plaintext copies of a
-    # vaulted document and must go.
-    removed = artifacts.purge_derived(source.sha256)
-    if removed is False:
-        warnings.append("some derived renders could not be removed; check the data root")
-
-    plaintext_path.unlink(missing_ok=True)
+    warnings = await _remove_plaintext(session, source.sha256)
     log.info("vaulted document %s (%s bytes)", document.id, len(original))
     return Sealed(document.id, object_name, len(original), len(pages), warnings)
+
+
+async def _remove_plaintext(session: AsyncSession, sha256: str) -> list[str]:
+    """Unlink the plaintext original and its derived renders, unless someone else now holds them.
+
+    `_refuse_if_blob_is_shared` asked at the start, but the blob is shared by content address, so
+    the answer holds only until the next upload of the same bytes (BND-T-23.6). An upload into
+    another library that found this blob on disk while the seal was encrypting would otherwise
+    commit a row pointing at a file this removes. So the question is asked again under
+    `blobs.lock_for_removal` — the exclusive half of the lock every ingest holds from before it
+    looks for a blob until its row commits — and the unlink happens before the lock is let go:
+    the same lock → check → unlink as the account purge's `_release_blob`.
+
+    Runs in a transaction of its own, after the seal's commit, and ends it here: the lock goes
+    with it, and nothing the caller writes next (its audit row) waits on a file operation.
+    Failures become warnings rather than errors — the document is already sealed and committed,
+    and a plaintext left behind is reported, not hidden.
+    """
+    warnings: list[str] = []
+    plaintext_path = blob_path(sha256)
+    try:
+        await blobs.lock_for_removal(session, sha256)
+        # Asked under the lock. "Outside the vault" is any file row with these bytes that has no
+        # vaulted document on it — including one ingested a moment ago with no document yet.
+        # The row just sealed carries a vaulted document as of the commit above.
+        held_elsewhere = await session.scalar(
+            sa.select(
+                sa.exists().where(
+                    SourceFile.sha256 == sha256,
+                    ~sa.exists().where(
+                        Document.source_file_id == SourceFile.id,
+                        Document.vaulted_by.is_not(None),
+                    ),
+                )
+            )
+        )
+        if held_elsewhere:
+            # The same bytes are now somebody else's original. Theirs is not ours to destroy;
+            # the vaulted copy is encrypted regardless.
+            log.warning(
+                "kept the plaintext of a sealed blob %s: an upload of the same bytes landed "
+                "while it was being sealed",
+                sha256[:12],
+            )
+            warnings.append(
+                "these exact bytes were added elsewhere in the archive while this was being "
+                "sealed, so that copy's original was kept; the vaulted copy is encrypted"
+            )
+        else:
+            # Derived renders and thumbnails are reproducible from the original, and the
+            # original is about to be ciphertext — so they are plaintext copies of a vaulted
+            # document and must go.
+            if artifacts.purge_derived(sha256) is False:
+                warnings.append("some derived renders could not be removed; check the data root")
+            plaintext_path.unlink(missing_ok=True)
+    except Exception:
+        log.exception("could not remove the plaintext of sealed blob %s", sha256[:12])
+        await session.rollback()
+        warnings.append(
+            "the plaintext original could not be removed after sealing; check the data root"
+        )
+        return warnings
+    await session.commit()  # ends the transaction, and with it the lock
+    return warnings
 
 
 def _is_v2(path: Path) -> bool:

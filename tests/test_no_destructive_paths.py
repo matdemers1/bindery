@@ -251,6 +251,43 @@ def test_the_vault_verifies_before_it_destroys() -> None:
     )
 
 
+def test_the_vault_unlinks_a_plaintext_only_under_the_ingest_lock() -> None:
+    """The seal's last step, held to the account purge's shape (BND-T-23.6).
+
+    `_refuse_if_blob_is_shared` asks up front whether anyone else holds these bytes, but a blob
+    is shared by content address, so the answer holds only until the next upload of the same
+    bytes. The plaintext is therefore removed under `blobs.lock_for_removal` — the exclusive half
+    of the lock every ingest holds until its row commits — after asking again under it, and
+    before the transaction that holds the lock ends. Structural, for the same reason as the
+    verify ordering above: proving it by destroying a real original is a test that can lose one.
+    """
+    source = (ROOT / VAULT_EXCEPTION).read_text()
+    start = source.index("async def _remove_plaintext")
+    ends = [i for i in (source.find("\ndef ", start), source.find("\nasync def ", start)) if i > 0]
+    remove = source[start : min(ends) if ends else len(source)]
+
+    lock = remove.index("await blobs.lock_for_removal(session, sha256)")
+    question = remove.index("SourceFile.sha256 == sha256")
+    unlink = remove.index("plaintext_path.unlink")
+    assert lock < question < unlink, (
+        "the vault removes a plaintext original without first taking the lock an ingest of the "
+        "same bytes holds, and asking again under it whether anyone else holds them"
+    )
+    # Asked about rows outside the vault: the row just sealed must not count as a holder, and a
+    # freshly ingested row with no document yet must.
+    assert "Document.vaulted_by.is_not(None)" in remove[question:unlink]
+    assert "session.commit()" not in remove[lock:unlink], (
+        "the removal lock is let go before the plaintext is unlinked"
+    )
+    assert source.count("plaintext_path.unlink") == 1, (
+        "the plaintext original is unlinked somewhere other than under the removal lock"
+    )
+    seal = source[source.index("async def seal(") : start]
+    assert seal.index("await session.commit()") < seal.index("await _remove_plaintext(session"), (
+        "the plaintext is removed before the vault row naming its ciphertext is committed"
+    )
+
+
 def test_the_vault_is_reached_only_from_declared_callers() -> None:
     """The exemption is granted by *path*, which is the wrong shape for it.
 
