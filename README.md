@@ -147,12 +147,13 @@ from — and `schema`, the database's current alembic revision
 name the release you meant; `GET /api/version` adds the worker's build and whether
 the services agree.
 
-CI (`.github/workflows/build.yml`) is six gates — **lint → unit →
+CI (`.github/workflows/build.yml`) is seven gates — **lint → unit →
 integration → e2e → images** in series, cheapest first, and nothing is published until
 every one of them passes — plus **conformance**, which runs the D3 App contract's suite
 (the native app's sign-in, refresh and revoke) against the stack beside them once `unit`
-passes. It needs a `D3_CONTRACT_TOKEN` secret that can read the suite's private image, and
-says so when it has none.
+passes, and **contract-suite**, which checks first that the suite can be fetched. The suite's
+image is public and pulled with no token; when it cannot be pulled, `contract-suite` says why in
+its summary and `conformance` is skipped, never green.
 
 ## Layout
 
