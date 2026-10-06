@@ -49,6 +49,10 @@ def _job(stage: JobStage, source_file_id: uuid.UUID) -> ClaimedJob:
 @pytest.fixture
 async def ingested(session, tmp_path):
     """A synthetic scan sitting in the blob store, ready to normalize."""
+    return await _ingest_scan(session, tmp_path, CLEAN_SCAN)
+
+
+async def _ingest_scan(session, tmp_path, body: str) -> SourceFile:
     library = Library(name=f"Pipeline {uuid.uuid4().hex[:6]}", kind=LibraryKind.PERSONAL)
     session.add(library)
     await session.flush()
@@ -56,7 +60,7 @@ async def ingested(session, tmp_path):
     # A nonce per test: the fixture is otherwise byte-identical every time, and
     # content-addressed storage would (correctly) treat the second one as a
     # duplicate of the first.
-    text = f"{CLEAN_SCAN}\nFixture reference {uuid.uuid4().hex[:12]}"
+    text = f"{body}\nFixture reference {uuid.uuid4().hex[:12]}"
     scan = render_text_page(text, tmp_path / "scan.png")
     payload = scan.read_bytes()
     import hashlib
@@ -226,6 +230,142 @@ async def test_replaying_both_stages_reaches_an_identical_end_state(
     # And no duplicate rows: the upsert is keyed on (source_file_id, page_number).
     assert len(second) == 1
 
+
+
+# Every letter pair a typesetter fuses into one glyph: ff, fi, fl, ffi, ffl.
+LIGATURE_WORDS = (
+    "office", "affidavit", "effective", "flexion", "Northfield", "waffle", "sufficient",
+)
+
+
+async def test_ligature_letters_survive_into_text_boxes_and_index(
+    session, tmp_path
+) -> None:
+    """BND-T-006. Tesseract read these words correctly and the stored text did not.
+
+    OCRmyPDF 17's default renderer writes "office" as o + an `ff` ligature
+    glyph + ice; Ghostscript's PDF/A rewrite drops the glyph's two-letter
+    ToUnicode entry, and pdftotext then reads "o ce". The sidecar was right
+    throughout, so this asserts on what the page stage actually stores — the
+    text, the word boxes and the index — never on the sidecar.
+    """
+    scan = await _ingest_scan(session, tmp_path, " ".join(LIGATURE_WORDS))
+    await run_normalize(session, _job(JobStage.NORMALIZE, scan.id))
+    await run_page(session, _job(JobStage.PAGE, scan.id))
+    await session.commit()
+
+    boxes = json.loads(derived_for(scan.sha256).word_boxes.read_text())
+    boxed = {w["t"] for page in boxes["pages"] for line in page["lines"] for w in line["words"]}
+    text = (
+        await session.execute(sa.select(Page.text).where(Page.source_file_id == scan.id))
+    ).scalar_one()
+
+    for word in LIGATURE_WORDS:
+        assert word in boxed, f"{word!r} is not one word box: {sorted(boxed)}"
+        assert word in text.split(), f"{word!r} is broken in the stored page text: {text!r}"
+        hit = (
+            await session.execute(
+                sa.select(Page.page_number).where(
+                    Page.source_file_id == scan.id,
+                    Page.text_tsv.op("@@")(sa.func.websearch_to_tsquery("english", word)),
+                )
+            )
+        ).scalar_one_or_none()
+        assert hit == 1, f"a search for {word!r} does not find the page"
+
+
+async def test_rereading_mends_the_text_and_keeps_every_document(
+    session, tmp_path, monkeypatch
+) -> None:
+    """BND-T-006's replay. A file stored with the broken text layer is read
+    again by `worker.reread`: its pages, boxes and index come back whole, and
+    nothing a person or the gate decided about it moves. A requeued `normalize`
+    would have cascaded into `segment`, retired every document and sent the
+    lot back to "waiting for classification"."""
+    from api.db.enums import ReviewState
+    from api.db.models import AuditEvent
+    from worker import reread
+    from worker.stages import normalize
+    from worker.stages.embed import run_embed
+    from worker.stages.segment import run_segment
+
+    fixed = normalize._ocr_argv
+
+    def as_it_was(*args, **kwargs):  # the default renderer, before BND-T-006
+        argv = fixed(*args, **kwargs)
+        at = argv.index("--pdf-renderer")
+        return argv[:at] + argv[at + 2:]
+
+    monkeypatch.setattr(normalize, "_ocr_argv", as_it_was)
+    scan = await _ingest_scan(session, tmp_path, " ".join(LIGATURE_WORDS))
+    for stage, run in (
+        (JobStage.NORMALIZE, run_normalize), (JobStage.PAGE, run_page),
+        (JobStage.SEGMENT, run_segment), (JobStage.EMBED, run_embed),
+    ):
+        await run(session, _job(stage, scan.id))
+    [document] = (
+        await session.execute(sa.select(Document).where(Document.source_file_id == scan.id))
+    ).scalars().all()
+    document.review_state = ReviewState.FILED
+    await session.commit()
+    # Plain values: everything is expired after the re-read, and an expired
+    # attribute cannot be lazy-loaded on an async session.
+    file_id, document_id = scan.id, document.id
+
+    async def stored_text() -> str:
+        return (
+            await session.execute(sa.select(Page.text).where(Page.source_file_id == file_id))
+        ).scalar_one()
+
+    assert "office" not in (await stored_text()).split(), "the old renderer no longer breaks it"
+    jobs_before = (
+        await session.execute(
+            sa.select(Job.stage, Job.state, Job.attempts).where(Job.source_file_id == file_id)
+            .order_by(Job.stage)
+        )
+    ).all()
+
+    monkeypatch.setattr(normalize, "_ocr_argv", fixed)
+    changed = await reread.reread(session, file_id)
+    await session.commit()
+    session.expire_all()
+
+    assert changed == [1]
+    for word in LIGATURE_WORDS:
+        assert word in (await stored_text()).split()
+    hit = (
+        await session.execute(
+            sa.select(Page.page_number).where(
+                Page.source_file_id == file_id,
+                Page.text_tsv.op("@@")(sa.func.websearch_to_tsquery("english", "affidavit")),
+            )
+        )
+    ).scalar_one_or_none()
+    assert hit == 1
+
+    # The same document, still filed, still live; the file back where it was.
+    [after] = (
+        await session.execute(sa.select(Document).where(Document.source_file_id == file_id))
+    ).scalars().all()
+    assert (after.id, after.superseded_at, after.review_state) == (
+        document_id, None, ReviewState.FILED,
+    )
+    assert (await session.get(SourceFile, file_id)).state is SourceFileState.PROCESSED
+    # No stage was queued again: nothing will re-cut or re-classify it later.
+    assert (
+        await session.execute(
+            sa.select(Job.stage, Job.state, Job.attempts).where(Job.source_file_id == file_id)
+            .order_by(Job.stage)
+        )
+    ).all() == jobs_before
+    audit = (
+        await session.execute(
+            sa.select(AuditEvent).where(
+                AuditEvent.entity_id == file_id, AuditEvent.action == "text_reread"
+            )
+        )
+    ).scalar_one()
+    assert audit.after["changed_pages"] == [1]
 
 
 # --------------------------------------------------------------------------

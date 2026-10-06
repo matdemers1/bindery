@@ -111,11 +111,9 @@ OCR accuracy is measured in CI, but **not on the real archive**:
 - **The synthetic corpus** (`tests/synthetic_corpus.py`, BND-T-005): invented documents
   in the archive's shapes, damaged like real scans, with exact ground truth.
   The integration job scores them on every push and writes the figure to its
-  summary: **82.0% word accuracy in stored order and 94.4% with reading order
-  forgiven**, on first measurement. Most of that gap is reading order, on a
-  two-column statement and a boxed DD-214-style form. The rest includes
-  BND-T-006: the OCRmyPDF 17 text layer loses ff/fl/ffi/ffl under pdftotext, so
-  stored text reads "o ce" for "office". The gate is
+  summary: **90.2% word accuracy in stored order and 98.0% with reading order
+  forgiven** since BND-T-006 (82.0% / 94.4% on first measurement). Most of the
+  remaining gap is reading order on a two-column statement. The gate is
   `tests/synthetic_corpus_baseline.json`: a fixture may not gain errors, and
   when one loses them, lower its number. This figure does **not** clear R-01.
 - **R-01 itself** still needs the real corpus: `make ocr-report` against
@@ -381,6 +379,20 @@ overwrite a person's work.
 - **`GET /api/files/{id}/text` is the raw extraction**, verbatim. A search
   finding nothing is ambiguous until you can see whether the word was ever read
   correctly — which matters most on handwriting, where it is least likely.
+- **OCR uses `--pdf-renderer sandwich`, and the sidecar is not the stored
+  text.** OCRmyPDF 17's default renderer writes ligature glyphs (ff, fi, fl,
+  ffi, ffl) whose two-letter ToUnicode entries Ghostscript's PDF/A rewrite
+  drops, so every scanned page stored "o ce" for "office" while `ocr.txt` read
+  it perfectly (BND-T-006). Page text, word boxes and the index all come from
+  pdftotext over the normalized PDF, so test what *they* hold. A digital PDF
+  passed through with `--skip-text` still goes through that rewrite and can
+  lose ligatures the same way; that is a separate defect.
+- **`make reread-text` replays text, not the file.** `worker/reread.py` runs
+  `normalize` → `page` → embed with the cascade switched off, and puts the
+  file's state back. A rescan of every file would re-segment, and a machine
+  re-segmentation retires every document and recreates it unfiled. Files
+  holding a vaulted document are skipped: re-reading one would write its sealed
+  text back to `page.text`. Run `dry=1` first, then one `file=<id>`.
 
 ## Choosing a model
 

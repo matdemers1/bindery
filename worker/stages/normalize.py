@@ -120,6 +120,15 @@ def _ocr_argv(
         # the far end with no text and nothing reported. See `_run_ocr`.
         "--force-ocr" if force else "--skip-text",
         "--sidecar", str(sidecar),
+        # Tesseract's own text layer, not OCRmyPDF 17's default fpdf2 one
+        # (BND-T-006). fpdf2 shapes text with HarfBuzz, so "office" is written
+        # as o + an `ff` ligature glyph + ice, and the glyph's ToUnicode entry
+        # maps one glyph to two letters. Ghostscript's PDF/A rewrite keeps only
+        # single-letter mappings, so every ff/fi/fl/ffi/ffl came back from
+        # pdftotext as "o ce", "a davit", "North eld" — the sidecar was right
+        # and the stored page text, word boxes and index were not. Sandwich
+        # draws one glyph per character, which survives the rewrite.
+        "--pdf-renderer", "sandwich",
         "--output-type", "pdfa" if pdfa else "pdf",
         "--jobs", "1",  # parallelism is the queue's job, not ocrmypdf's
         "--quiet",
@@ -443,7 +452,14 @@ async def _write_sidecar(pdf: Path, sidecar: Path) -> None:
     sidecar.write_bytes(stdout)
 
 
-async def run_normalize(session: AsyncSession, job: ClaimedJob) -> None:
+async def run_normalize(
+    session: AsyncSession, job: ClaimedJob, *, cascade: bool = True
+) -> None:
+    """OCR the original into the derived artifacts, then queue paging.
+
+    `cascade=False` stops after the artifacts, for `worker.reread`, which
+    re-reads text without letting a replay re-cut the file's documents.
+    """
     source_file = await session.get(SourceFile, job.source_file_id)
     if source_file is None:
         raise ValueError(f"source file {job.source_file_id} no longer exists")
@@ -569,7 +585,8 @@ async def run_normalize(session: AsyncSession, job: ClaimedJob) -> None:
     # already succeeded, so `enqueue` is a no-op and the replay stops dead here
     # — the file gets re-OCR'd and nothing downstream ever sees the new text.
     # On a first run there is no existing job, so the two behave identically.
-    await queue.requeue_stage(session, JobStage.PAGE, source_file_id=source_file.id)
+    if cascade:
+        await queue.requeue_stage(session, JobStage.PAGE, source_file_id=source_file.id)
     log.info("normalized %s (%s pages)", source_file.original_filename, page_count)
 
 

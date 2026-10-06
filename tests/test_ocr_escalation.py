@@ -62,6 +62,21 @@ def test_the_escalation_keeps_everything_else_identical() -> None:
     ]
 
 
+def test_every_ocr_pass_uses_the_renderer_that_keeps_ligatures() -> None:
+    """BND-T-006. The default renderer's text layer loses ff/fi/fl through PDF/A,
+    so "office" was stored as "o ce". The slow tier proves the effect; this keeps
+    the flag from quietly falling out of any variant of the argv."""
+    for pdfa in (True, False):
+        for force in (True, False):
+            for scanned in (True, False):
+                argv = _ocr_argv(
+                    Path("i"), Path("o"), Path("s"),
+                    pdfa=pdfa, image=False, force=force, scanned=scanned,
+                )
+                at = argv.index("--pdf-renderer")
+                assert argv[at + 1] == "sandwich"
+
+
 # --------------------------------------------------------------------------
 # Seeing what OCR actually read
 # --------------------------------------------------------------------------
