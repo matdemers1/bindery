@@ -107,7 +107,7 @@ below is the short version.
 | `make contract` | `web/src/api.ts` against the server's response models |
 | `make lint-web` | eslint and `tsc --noEmit` for the web app and the e2e specs |
 | `make screenshots` | recapture the documentation screenshots `tests/test_docs.py` gates |
-| `make ocr-report` | golden-corpus word accuracy — the R-01 gate |
+| `make ocr-report` | OCR word accuracy: the synthetic corpus, plus the R-01 gate on a real corpus you supply |
 | `make seed-forms` | load the known-form registry from `api/forms/seed/*.yaml` |
 | `make backup` / `make drill` | take a backup; then restore it and find the DD-214 |
 | `make drill-offsite` | the same from S3 alone — no local backup, no live stack |
@@ -169,7 +169,7 @@ docs/       Operator runbooks: deploy, backup and restore, offsite replication
 
 ## ⚠️ The golden corpus is real, and is never committed
 
-This repository is public under Apache-2.0 (BND-ADR-014). `tests/corpus/` is the golden corpus used to score OCR and classification quality, and it holds **real personal documents** — a DD-214, VA medical records, financial statements. They are **not in this repository and never have been**: everything under that path is gitignored except the harness. The fixtures stay on the maintainer's machine, so `make ocr-report` is reproducible only against a corpus you supply yourself.
+This repository is public under Apache-2.0 (BND-ADR-014). `tests/corpus/` is the golden corpus used to score OCR and classification quality, and it holds **real personal documents** — a DD-214, VA medical records, financial statements. They are **not in this repository and never have been**: everything under that path is gitignored except the harness. The fixtures stay on the maintainer's machine, so the R-01 figure is reproducible only against a corpus you supply yourself. What anyone can reproduce is the **synthetic corpus** (`tests/synthetic_corpus.py`): invented documents rendered and damaged at test time, which CI scores on every push.
 
 Keep it that way. Never `git add -f` anything under `tests/corpus/`, and never commit a document, screenshot or log excerpt taken from the real archive.
 

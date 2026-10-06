@@ -1,25 +1,32 @@
 """T-1.12 — the golden corpus and the OCR accuracy report (REQ-018).
 
-**This is the R-01 gate.** If corpus word accuracy on the real military and
-house bundles comes in below 90%, the Phase 3 classification design is built on
-unreliable text and gets re-planned before any of it is written.
+Two corpora, measured by the same metric and never mixed:
 
-Real fixtures live in `tests/corpus/<name>/` as `source.<ext>` + `expected.txt`
-and are genuine personal records, so they exist only in this private repo. When
-none are present the suite still runs — against synthetic pages, which verify
-the *harness* and nothing about the real archive. The distinction is printed
-loudly, because a green synthetic run is not the gate.
+- **The synthetic corpus** (`tests/synthetic_corpus.py`, BND-T-005) — invented
+  documents in the archive's real shapes, rendered and damaged at test time,
+  with exact ground truth. It runs in CI on every push, and its figure is
+  written to the integration job's summary. It is gated against a committed
+  per-fixture baseline (`tests/synthetic_corpus_baseline.json`): a fixture may
+  not gain errors. It does **not** clear R-01.
+- **The real golden corpus** (`tests/corpus/<name>/`) — the maintainer's own
+  records, never committed (BND-ADR-014). **This is the R-01 gate**: below 90%,
+  the Phase 3 classification design is built on unreliable text. Where it is
+  absent — every CI runner — the gate is *skipped*, with its reason in the
+  integration job's summary, never reported as a pass.
 
     make ocr-report
 """
 
+import json
+import os
 import shutil
 from pathlib import Path
 
 import pytest
 
 from tests.corpus.fixtures import CLEAN_SCAN, render_text_page
-from tests.ocr_scoring import Score, corpus_accuracy, report, score
+from tests.ocr_scoring import Score, corpus_accuracy, report, report_markdown, score
+from tests.synthetic_corpus import FIXTURES, render
 
 pytestmark = [
     pytest.mark.slow,
@@ -31,6 +38,18 @@ pytestmark = [
 
 CORPUS_ROOT = Path(__file__).parent / "corpus"
 GATE = 0.90
+SYNTHETIC_BASELINE = Path(__file__).parent / "synthetic_corpus_baseline.json"
+# A fixture may drift this far before it counts as a regression: Tesseract on a
+# different CPU or a patch release of Leptonica moves a word or two.
+SYNTHETIC_TOLERANCE = 0.03
+
+UNMEASURED = (
+    "R-01 UNMEASURED: tests/corpus/ holds no real fixtures, so OCR accuracy on "
+    "the real archive has not been scored and REQ-058 and REQ-035 stay unscored. "
+    "The real corpus is never committed (BND-ADR-014); stage fixtures in a working "
+    "copy (scripts/stage-corpus-fixture.py), hand-correct them, and run "
+    "`make ocr-report`. The synthetic corpus figure in this run does not clear R-01."
+)
 
 
 def real_fixtures() -> list[Path]:
@@ -94,7 +113,7 @@ async def test_ocr_reads_a_clean_synthetic_page(workspace) -> None:
     text = await _ocr_to_text(source, workspace / "out")
 
     result = score("clean-synthetic", CLEAN_SCAN, text)
-    print(report([result]))
+    print(report([result], r01=False))
     assert result.accuracy >= GATE, "OCR cannot read a clean rendered page"
 
 
@@ -110,41 +129,77 @@ async def test_deskew_and_clean_help_a_bad_scan(workspace) -> None:
     text = await _ocr_to_text(source, workspace / "out")
 
     result = score("bad-scan-synthetic", CLEAN_SCAN, text)
-    print(report([result]))
+    print(report([result], r01=False))
     # Deliberately below the corpus gate: this fixture is meant to be hard, and
     # the point is to notice the day it gets harder.
     assert result.accuracy >= 0.70, "preprocessing no longer rescues a bad scan"
 
 
-@pytest.mark.xfail(
-    condition=not real_fixtures(),
-    reason=(
-        "R-01 HAS NEVER BEEN MEASURED. tests/corpus/ holds no real fixtures, so "
-        "this gate is reported as a known failure rather than as a pass. It was "
-        "a `pytest.skip` for three phases, and a skip in a run of a thousand "
-        "passes is invisible — which is how Phase 3 shipped with REQ-058 "
-        "unscored. Add tests/corpus/<name>/source.* plus a hand-corrected "
-        "expected.txt (the real military and house bundles) and this becomes a "
-        "real measurement; there is nothing to fabricate here."
-    ),
-    strict=True,
-    run=True,
-)
+async def test_synthetic_corpus_word_accuracy(workspace) -> None:
+    """The measured figure CI can produce (BND-T-005, REQ-018).
+
+    Every fixture in `tests/synthetic_corpus.py` is rendered, OCR'd by the real
+    normalize stage, and scored. The report goes to stdout and, when CI sets
+    `OCR_REPORT_DIR`, to a Markdown file the integration job puts in its summary.
+
+    Gated against the committed baseline rather than a threshold: the damaged
+    fixtures are meant to be hard, and a gate red on arrival is a gate somebody
+    switches off. A fixture that gains errors fails; one that loses them passes
+    and says so, so the baseline can be tightened.
+    """
+    baseline: dict[str, int] = json.loads(SYNTHETIC_BASELINE.read_text())["errors"]
+    assert sorted(baseline) == sorted(f.name for f in FIXTURES), (
+        "tests/synthetic_corpus_baseline.json does not cover exactly the fixtures in "
+        "tests/synthetic_corpus.py — a new fixture needs a measured baseline, and a "
+        "removed one must leave it"
+    )
+
+    scores: list[Score] = []
+    for fixture in FIXTURES:
+        source = render(fixture, workspace / fixture.name / "source")
+        text = await _ocr_to_text(source, workspace / fixture.name / "ocr")
+        scores.append(score(fixture.name, fixture.expected, text))
+
+    print(report(scores, r01=False))
+    if directory := os.environ.get("OCR_REPORT_DIR"):
+        Path(directory, "ocr-report.md").write_text(
+            report_markdown(scores, title="OCR word accuracy — synthetic corpus (not R-01)")
+        )
+
+    regressions, improvements = [], []
+    for result in scores:
+        slack = max(2, round(result.reference_words * SYNTHETIC_TOLERANCE))
+        allowed = baseline[result.name] + slack
+        if result.errors > allowed:
+            regressions.append(
+                f"{result.name}: {result.errors} errors, baseline {baseline[result.name]} "
+                f"(at most {allowed} allowed)"
+            )
+        elif result.errors < baseline[result.name]:
+            improvements.append(f"{result.name}: {baseline[result.name]} -> {result.errors}")
+    if improvements:
+        print(
+            "\nFewer OCR errors than the baseline — tighten "
+            "tests/synthetic_corpus_baseline.json:\n  " + "\n  ".join(improvements)
+        )
+    assert not regressions, "OCR got worse on the synthetic corpus:\n  " + "\n  ".join(
+        regressions
+    )
+
+
+@pytest.mark.skipif(not real_fixtures(), reason=UNMEASURED)
 async def test_golden_corpus_word_accuracy(workspace) -> None:
     """The report. **This is the R-01 gate.**
 
-    The gate no longer passes while measuring nothing. With no corpus it fails
-    on the assertion below and is reported as `xfailed`; the moment real
-    fixtures land the marker's condition is false, the gate runs for real, and
-    a corpus that scores under 90% fails the build outright.
+    Skipped — declared, with its reason, never passed — when no real fixtures
+    are staged, which is every CI runner: the corpus is never committed. CI
+    lists every skip and its reason in the integration job's summary
+    (`scripts/ci_test_summary.py`), so the absence is read rather than buried
+    in a count. With fixtures present it runs for real, and a corpus under 90%
+    fails the build outright.
     """
     fixtures = real_fixtures()
-    assert fixtures, (
-        "the R-01 gate has no corpus: tests/corpus/ contains no directory with "
-        "source.* plus expected.txt, so this test measures nothing. A synthetic "
-        "run does not clear R-01 — REQ-058 and REQ-035 stay unscored until real "
-        "fixtures are staged (scripts/stage-corpus-fixture.py)."
-    )
+    assert fixtures, UNMEASURED
 
     scores: list[Score] = []
     for directory in fixtures:

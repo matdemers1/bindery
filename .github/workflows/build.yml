@@ -234,9 +234,20 @@ jobs:
           OCR_LANGUAGES=eng
           ENV
           mkdir -p /tmp/bindery-ci-data/inbox/household
+          # Results land on the runner, outside the container, so the summary
+          # step below can read them after the container is gone.
+          mkdir -m 777 -p test-results
           docker compose --env-file .env -f infra/docker-compose.yml \
-            --profile test run --rm test-worker \
-            python -m pytest -m slow --no-header
+            --profile test run --rm -v "$PWD/test-results:/out" -e OCR_REPORT_DIR=/out \
+            test-worker python -m pytest -m slow --no-header --junitxml=/out/integration.xml
+      - name: Skips and the OCR figure, on the summary page
+        # Every skipped or xfailed test, by name and reason — the real-corpus
+        # R-01 gate is one on every runner, since that corpus is never
+        # committed — then the synthetic corpus's measured OCR figure
+        # (BND-T-005). A skip counted inside a green run is how R-01 went
+        # unmeasured for three phases (BND-CR-037); this is where it is read.
+        if: always()
+        run: python3 scripts/ci_test_summary.py test-results/integration.xml test-results/ocr-report.md >> "$GITHUB_STEP_SUMMARY"
 
   e2e:
     name: e2e (playwright)
