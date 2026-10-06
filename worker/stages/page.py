@@ -75,7 +75,7 @@ async def _render_page(pdf: Path, number: int, render: Path, thumb: Path) -> Non
         await asyncio.to_thread(_convert)
 
 
-async def run_page(session: AsyncSession, job: ClaimedJob) -> None:
+async def run_page(session: AsyncSession, job: ClaimedJob, *, cascade: bool = True) -> None:
     source_file = await session.get(SourceFile, job.source_file_id)
     if source_file is None:
         raise ValueError(f"source file {job.source_file_id} no longer exists")
@@ -129,5 +129,6 @@ async def run_page(session: AsyncSession, job: ClaimedJob) -> None:
     # already succeeded, so `enqueue` is a no-op and the replay stops dead here
     # — the file gets re-OCR'd and nothing downstream ever sees the new text.
     # On a first run there is no existing job, so the two behave identically.
-    await queue.requeue_stage(session, JobStage.SEGMENT, source_file_id=source_file.id)
+    if cascade:
+        await queue.requeue_stage(session, JobStage.SEGMENT, source_file_id=source_file.id)
     log.info("paged %s into %s rows", source_file.original_filename, len(pages))

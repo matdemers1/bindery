@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: help up down build lock logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite e2e lint-web typecheck contract lifecycle-check ocr-report seed-forms enqueue-stage reprocess shell psql create-user tunnel screenshots
+.PHONY: help up down build lock logs ps migrate revision test test-pipeline integrity backup export mirror drill drill-offsite e2e lint-web typecheck contract lifecycle-check ocr-report seed-forms enqueue-stage reread-text reprocess shell psql create-user tunnel screenshots
 
 build:            ## build all images
 	$(COMPOSE) build
@@ -114,6 +114,9 @@ seed-forms:       ## load the known-form registry from api/forms/seed/*.yaml
 
 enqueue-stage:    ## re-run a stage over every file: make enqueue-stage stage=segment
 	$(COMPOSE) exec api python -m api.cli enqueue-stage "$(stage)"
+
+reread-text:      ## re-read stored text after an OCR fix, keeping every document: make reread-text [dry=1] [file=<id>]
+	$(COMPOSE) exec worker python -m worker.reread $(if $(dry),--dry-run,) $(if $(file),--source-file "$(file)",)
 
 reprocess:        ## re-classify documents left on an older prompt: make reprocess prompt=v1
 	$(COMPOSE) exec api python -m api.cli reprocess --prompt-version "$(prompt)"

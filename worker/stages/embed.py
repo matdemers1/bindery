@@ -38,7 +38,7 @@ async def _document_text(session: AsyncSession, document: Document) -> str:
     return "\n".join(text or "" for text in rows)[:MAX_CHARS]
 
 
-async def run_embed(session: AsyncSession, job: ClaimedJob) -> None:
+async def run_embed(session: AsyncSession, job: ClaimedJob, *, cascade: bool = True) -> None:
     """Embed every live document of a source file, then queue classification."""
     documents = list(
         (
@@ -61,6 +61,8 @@ async def run_embed(session: AsyncSession, job: ClaimedJob) -> None:
         # reach it by the obvious route.
         # See the note on the other cascade points: a replay has to reset the
         # next stage, and on a first run this is identical to `enqueue`.
+        if not cascade:
+            continue
         await queue.requeue_stage(
             session,
             JobStage.CLASSIFY,

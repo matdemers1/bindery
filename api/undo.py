@@ -134,6 +134,9 @@ NOT_UNDOABLE: dict[str, str] = {
                         "carry an undo.",
     "reclassify_requested": "the classification it produces is undoable; the "
                             "request to produce one is not a change to reverse.",
+    "text_reread": "re-reading a file's text after an OCR fix rebuilds derived "
+                   "artifacts from the untouched original and leaves every document, "
+                   "filing and correction where it was; the old text was the defect.",
     # Each other's reverse, deliberately as a second deliberate act rather than
     # a one-click undo.
     "enable": "a rule is switched off again on the rule screen; both "
