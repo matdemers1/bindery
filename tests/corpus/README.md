@@ -58,3 +58,17 @@ Corpus word accuracy must be **≥ 90%** (R-01). Below that, the Phase 3
 classification design is built on unreliable text and gets re-planned before any
 of it is written. A synthetic run does not clear this gate — only real documents
 do.
+
+With no fixtures here, which is every CI runner, the gate is **skipped**, and the
+integration job lists it on its summary page with the reason. It is never
+reported as a pass.
+
+## The synthetic corpus, next door
+
+`tests/synthetic_corpus.py` is the corpus that *can* be committed: invented
+documents (a DD-214-style form, a clinic note, a bill, a two-column statement, a
+deed, a W-2, a letter of dates, a fax) rendered and damaged at test time. Ground
+truth is exact because it is the text that was drawn. CI scores it on every push
+against `tests/synthetic_corpus_baseline.json`. It lives **outside** this
+directory on purpose, so that nothing under `tests/corpus/` is ever meant to be
+committed.
