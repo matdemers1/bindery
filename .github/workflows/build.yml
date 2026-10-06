@@ -473,25 +473,17 @@ jobs:
   # native contract, and a contract regression should fail the PR without holding back a fix
   # elsewhere.
   #
-  # The suite's image is private while `matdemers1/d3-app-contract` is (the owner's choice), and
-  # this repository's own token cannot read another repository's package. `D3_CONTRACT_TOKEN` — a
-  # token with read:packages — opens it; without that secret the job says so and does nothing,
-  # loudly, rather than pretending to have run.
+  # The suite's image is public, as matdemers1/d3-app-contract is, so it is pulled with no token.
+  # `contract-suite` checks first that it can be: when it cannot, this job is skipped — never
+  # green having run nothing — and that job's summary carries the reason (CON-T-002).
   conformance:
     name: conformance (d3-app-contract)
-    needs: unit
+    needs: [unit, contract-suite]
+    if: needs.contract-suite.outputs.available == 'true'
     runs-on: ubuntu-latest
-    env:
-      D3_CONTRACT_TOKEN: ${{ secrets.D3_CONTRACT_TOKEN }}
     steps:
-      - name: Without access to the suite, say so
-        if: env.D3_CONTRACT_TOKEN == ''
-        run: |
-          echo "::warning::D3_CONTRACT_TOKEN is not set, so the d3-app-contract suite cannot be pulled and did not run."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.D3_CONTRACT_TOKEN != ''
       - name: Write a coherent .env
-        if: env.D3_CONTRACT_TOKEN != ''
         run: |
           cat > .env <<'ENV'
           POSTGRES_USER=bindery
@@ -509,7 +501,6 @@ jobs:
           mkdir -p /tmp/bindery-ci-data/inbox
           sudo chown -R 10001:10001 /tmp/bindery-ci-data
       - name: Stand up the api and web
-        if: env.D3_CONTRACT_TOKEN != ''
         run: |
           docker compose --env-file .env -f infra/docker-compose.yml up -d --build --wait api web
           docker compose --env-file .env -f infra/docker-compose.yml exec -T api alembic upgrade head
@@ -518,7 +509,6 @@ jobs:
         # The main account is the instance's only administrator, so `deletion.last-owner` has
         # something to refuse; the disposable one is an ordinary account `deletion.schedules`
         # deletes; the invite is the one `invite.accept` spends (BND-T-23.2, BND-T-23.3).
-        if: env.D3_CONTRACT_TOKEN != ''
         run: |
           PASSWORD="Grebulon-Verdant-$(openssl rand -hex 6)"
           DELETE_PASSWORD="Tamarisk-Ochre-$(openssl rand -hex 6)"
@@ -561,9 +551,7 @@ jobs:
           echo "::add-mask::$INVITE"
           echo "CONFORMANCE_INVITE=$INVITE" >> "$GITHUB_ENV"
       - name: The d3-app-contract suite, through nginx
-        if: env.D3_CONTRACT_TOKEN != ''
         run: |
-          echo "$D3_CONTRACT_TOKEN" | docker login ghcr.io -u matdemers1 --password-stdin
           docker run --rm --user "$(id -u)" --network infra_default -v "$PWD:/out" ghcr.io/matdemers1/d3-app-conformance:contract-1 \
             --base http://web --allow-http --product bindery \
             --email conformance@example.com --password "$CONFORMANCE_PASSWORD" --totp-secret "$CONFORMANCE_TOTP" \
@@ -572,11 +560,47 @@ jobs:
             --delete-totp-secret "$CONFORMANCE_DELETE_TOTP" \
             --destructive --junit /out/conformance.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always() && env.D3_CONTRACT_TOKEN != ''
+        if: always()
         with:
           name: conformance
           path: conformance.xml
           if-no-files-found: ignore
+
+  # Whether the d3-app-contract suite can be fetched at all (BND-T-22.5, CON-T-002). The contract repo
+  # and its image are public, so this pulls with no token. When the image cannot be pulled — made
+  # private again, a renamed tag, GHCR down — `conformance` is skipped rather than reported as a pass
+  # that measured nothing, and this job's summary says why.
+  contract-suite:
+    name: d3-app-contract suite available
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.probe.outputs.available }}
+    steps:
+      - name: Can the suite's image be pulled anonymously?
+        id: probe
+        env:
+          IMAGE: ghcr.io/matdemers1/d3-app-conformance:contract-1
+        run: |
+          if out="$(docker manifest inspect "$IMAGE" 2>&1)"; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "The d3-app-contract suite (\`$IMAGE\`) is pullable, so \`conformance\` runs it." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          echo "::warning title=d3-app-contract suite skipped::$IMAGE cannot be pulled, so conformance is skipped: it did not run and did not pass."
+          {
+            echo "## d3-app-contract conformance: SKIPPED"
+            echo
+            echo "The suite did **not** run, so this run says nothing about the D3 App contract."
+            echo
+            echo "**Reason:** \`$IMAGE\` cannot be pulled anonymously:"
+            echo
+            echo '```'
+            printf '%s\n' "$out"
+            echo '```'
+            echo
+            echo "The package must be public: https://github.com/users/matdemers1/packages/container/d3-app-conformance/settings"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   images:
     name: publish

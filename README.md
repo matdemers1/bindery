@@ -130,8 +130,8 @@ CI (`.github/workflows/build.yml`) is six gates — **lint → unit →
 integration → e2e → images** in series, cheapest first, and nothing is published until
 every one of them passes — plus **conformance**, which runs the D3 App contract's suite
 (the native app's sign-in, refresh and revoke) against the stack beside them once `unit`
-passes. It needs a `D3_CONTRACT_TOKEN` secret that can read the suite's private image, and
-says so when it has none.
+passes. The suite's image is public and pulled with no token; when it cannot be pulled, the
+`contract-suite` job says why in its summary and `conformance` is skipped, never green.
 
 ## Layout
 
