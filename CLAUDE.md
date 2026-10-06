@@ -107,10 +107,22 @@ is still carried:
 > decision can be re-derived once a figure exists — but until then this is
 > carried debt, not resolved risk.
 
-Still open:
-- **T-1.12** — the golden-corpus OCR figure. `make ocr-report`; add real
-  fixtures to `tests/corpus/<name>/`. **This gates Phase 3's REQ-058 and
-  Phase 2's REQ-035 boundary F1.**
+OCR accuracy is measured in CI, but **not on the real archive**:
+- **The synthetic corpus** (`tests/synthetic_corpus.py`, BND-T-005): invented documents
+  in the archive's shapes, damaged like real scans, with exact ground truth.
+  The integration job scores them on every push and writes the figure to its
+  summary: **82.0% word accuracy in stored order and 94.4% with reading order
+  forgiven**, on first measurement. Most of that gap is reading order, on a
+  two-column statement and a boxed DD-214-style form. The rest includes
+  BND-T-006: the OCRmyPDF 17 text layer loses ff/fl/ffi/ffl under pdftotext, so
+  stored text reads "o ce" for "office". The gate is
+  `tests/synthetic_corpus_baseline.json`: a fixture may not gain errors, and
+  when one loses them, lower its number. This figure does **not** clear R-01.
+- **R-01 itself** still needs the real corpus: `make ocr-report` against
+  hand-corrected fixtures in a working copy's `tests/corpus/<name>/`. On every
+  runner that gate is a declared skip, and `scripts/ci_test_summary.py` puts it
+  on the integration job's summary by name with its reason, never as a pass.
+  **This still gates Phase 3's REQ-058 and Phase 2's REQ-035 boundary F1.**
 - **T-1.13** — the Brother Scan-to-SMB spike. Needs the scanner.
 - **No live Claude API call has ever been made.** Prompt quality, cost per
   document and cache hit rate are unmeasured. With `ANTHROPIC_API_KEY` unset the

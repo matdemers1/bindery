@@ -2,43 +2,40 @@
 
 `tests/test_ocr_accuracy.py::test_golden_corpus_word_accuracy` is the gate that
 decides whether Phase 3's classification design is built on text good enough to
-classify. It has never run. `tests/corpus/` holds a README, an `__init__.py` and
-a synthetic-fixture helper, and no real documents at all, so the gate called
-`pytest.skip` unconditionally and the CI `integration` job reported green having
-measured nothing. That is what let Phase 3 ship with REQ-058 unscored.
+classify. Its corpus is the owner's real DD-214, VA medical records and
+financial statements, which are never committed (BND-ADR-014) — so on every CI
+runner it has nothing to measure.
 
-**The corpus cannot be fixed here.** The fixtures are the owner's real DD-214,
-VA medical records and financial statements; they are why this repository must
-never be public, and inventing stand-ins would replace an honest absence with a
-dishonest number. What *can* be fixed — and is, by this file — is the reporting:
-an unmeasured gate must be loud, and it must be loud in the **fast** tier, where
-someone actually reads the output. The gate itself only runs in the worker image
-behind `-m slow`, so a defect in how it reports would otherwise be discovered by
-nobody.
+It once called `pytest.skip` from inside its body, and the CI `integration` job
+reported green having measured nothing; that is what let Phase 3 ship with
+REQ-058 unscored. It was then a strict xfail, which was counted but still read
+as one number inside a green run. Now (BND-T-005) it is a **declared skip**
+whose reason is put, by name, on the integration job's summary page by
+`scripts/ci_test_summary.py` — and a synthetic corpus beside it produces a
+figure CI *can* measure, without pretending to be the real one.
 
-So this file asserts three things about the gate, structurally, on every run:
+So this file asserts, structurally and on every run:
 
-1. it cannot be a silent skip again,
-2. with no corpus it is a **strict xfail** — reported as a known failure, never
-   as a pass, and turning into a hard failure the moment it starts passing,
-3. any fixture that *is* staged is complete and hand-corrected, so a half-staged
+1. the gate's absence is a declared skip with a reason that names R-01, never
+   a skip from inside the body and never an xfail,
+2. that skip goes away by itself the moment real fixtures are staged,
+3. CI writes every skip and its reason to the job summary,
+4. any fixture that *is* staged is complete and hand-corrected, so a half-staged
    corpus fails in seconds rather than after a full OCR run.
 """
 
+import importlib.util
 from pathlib import Path
 
 from tests import test_ocr_accuracy as gate
 from tests.ocr_scoring import UNVERIFIED_MARKER
 
+REPO = Path(__file__).resolve().parent.parent
 CORPUS_ROOT = Path(__file__).resolve().parent / "corpus"
 
 
-def _markers(function) -> list:
-    return list(getattr(function, "pytestmark", []))
-
-
-def _xfail(function):
-    return next((mark for mark in _markers(function) if mark.name == "xfail"), None)
+def _markers(function, name: str) -> list:
+    return [mark for mark in getattr(function, "pytestmark", []) if mark.name == name]
 
 
 def test_the_gate_is_the_test_this_file_thinks_it_is() -> None:
@@ -57,60 +54,103 @@ def test_the_gate_is_the_test_this_file_thinks_it_is() -> None:
     assert callable(gate.real_fixtures)
 
 
-def test_an_empty_corpus_is_never_reported_as_a_pass() -> None:
-    """The whole finding, in one assertion.
+def test_an_empty_corpus_is_a_declared_skip_never_a_pass() -> None:
+    """The whole finding, in one place.
 
-    With no fixtures the gate must fail and be *declared* to fail. `strict=True`
-    is what makes the declaration self-retiring: on the day real fixtures land
-    and the gate passes, the marker turns the pass into an error until somebody
-    removes it, so the xfail cannot become the new permanent green.
+    With no fixtures the gate is skipped by its marker, so the skip and its
+    reason exist at collection time, where the junit report and the job summary
+    see them. With fixtures, the marker's condition is false and the gate runs.
     """
-    marker = _xfail(gate.test_golden_corpus_word_accuracy)
+    gate_function = gate.test_golden_corpus_word_accuracy
+    assert not _markers(gate_function, "xfail"), (
+        "the R-01 gate is an xfail again — it reads as one more number in a green "
+        "run. With no corpus it is a declared skip whose reason CI puts on the "
+        "summary page"
+    )
+    skips = _markers(gate_function, "skipif")
+    assert len(skips) == 1, "the R-01 gate must carry exactly one skipif, on the corpus"
+    condition = skips[0].args[0] if skips[0].args else skips[0].kwargs.get("condition")
+    reason = str(skips[0].kwargs.get("reason", ""))
 
     if gate.real_fixtures():
-        # The good state. The marker may still be declared, but its condition
-        # must be false, or a real measurement would be swallowed as "expected
-        # to fail" — which would be the same defect with the sign flipped.
-        assert marker is None or marker.kwargs.get("condition") is False, (
-            "real corpus fixtures are staged and the gate is still marked "
-            "xfail, so an actual R-01 measurement is being reported as a known "
-            "failure. Remove the marker: the gate can do its job now."
+        assert condition is False, (
+            "real corpus fixtures are staged and the R-01 gate is still skipped, "
+            "so an actual measurement is being thrown away"
         )
         return
 
-    assert marker is not None, (
-        "the R-01 gate has no xfail marker and there is no corpus, so it is "
-        "reporting a pass (or a skip) while measuring nothing. That is the "
-        "defect: REQ-058 and REQ-035 are unscored and the build says otherwise."
+    assert condition is True, (
+        "there is no corpus and the R-01 gate is not skipped, so it runs and "
+        "fails — or worse, passes — with nothing to measure"
     )
-    assert marker.kwargs.get("strict") is True, (
-        "the gate's xfail is not strict, so a corpus that starts working would "
-        "keep reporting as a known failure forever"
-    )
-    assert marker.kwargs.get("run") is not False, (
-        "the gate is marked xfail(run=False), which means it is not executed at "
-        "all — the same silence as a skip, spelled differently"
-    )
-    reason = str(marker.kwargs.get("reason", ""))
-    assert "R-01" in reason and "corpus" in reason.lower(), (
-        "the reason a reader sees must name what is unmeasured and why: " + reason
+    assert "R-01" in reason and "corpus" in reason.lower() and "UNMEASURED" in reason, (
+        "the reason a reader sees on the summary page must say what is unmeasured "
+        "and why: " + reason
     )
 
 
 def test_the_gate_does_not_skip_itself() -> None:
-    """A skip is how this defect was spelled for three phases.
+    """A skip from inside the body is how this defect was spelled for three phases.
 
-    Structural rather than behavioural, because the gate itself only runs in the
-    worker image with the OCR toolchain present — so the behavioural version of
-    this check would be as invisible as the thing it is checking.
+    It is decided only after setup, carries whatever message the body chose, and
+    looks the same as any other skip. The declared marker is the one place the
+    absence is allowed to be stated.
     """
     source = Path(gate.__file__).read_text()
-    body = source[source.index("def test_golden_corpus_word_accuracy") :]
-    assert "pytest.skip" not in body, (
-        "the R-01 gate skips itself again. A skipped test in a run of a "
-        "thousand passes is invisible; use the strict xfail, which is counted "
-        "and reported as a failure that is known about."
+    body = source[source.index("async def test_golden_corpus_word_accuracy") :]
+    assert "pytest.skip(" not in body, (
+        "the R-01 gate skips itself from inside its body again; declare it on the "
+        "skipif marker, where the junit report and the job summary see it"
     )
+
+
+def test_ci_puts_every_skip_on_the_summary_page() -> None:
+    """A declared skip is only honest if someone reads it.
+
+    The integration job is where the gate is collected, so that job must write
+    its junit results somewhere the runner can see them and turn them into the
+    summary even when the run fails.
+    """
+    workflow = (REPO / ".github" / "workflows" / "build.yml").read_text()
+    job = workflow[workflow.index("\n  integration:") : workflow.index("\n  e2e:")]
+    assert "--junitxml=/out/integration.xml" in job, "the integration job writes no junit results"
+    assert "OCR_REPORT_DIR=/out" in job, "the synthetic OCR figure has nowhere to go"
+    step = job[job.index("scripts/ci_test_summary.py") - 600 :]
+    assert "if: always()" in step, "the summary must be written when the run fails, too"
+    assert '>> "$GITHUB_STEP_SUMMARY"' in step, "the summary step does not write the summary"
+
+
+def _summary_module():
+    spec = importlib.util.spec_from_file_location(
+        "ci_test_summary", REPO / "scripts" / "ci_test_summary.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_summary_names_each_skip_and_its_reason(tmp_path) -> None:
+    junit = tmp_path / "results.xml"
+    junit.write_text(
+        '<testsuites><testsuite tests="3" failures="0" errors="0" skipped="2">'
+        '<testcase classname="tests.test_ocr_accuracy" name="test_synthetic"/>'
+        '<testcase classname="tests.test_ocr_accuracy" name="test_golden_corpus_word_accuracy">'
+        '<skipped type="pytest.skip" message="R-01 UNMEASURED: no corpus">x</skipped></testcase>'
+        '<testcase classname="tests.test_x" name="test_known">'
+        '<skipped type="pytest.xfail" message="a known | failure"/></testcase>'
+        "</testsuite></testsuites>"
+    )
+    summary = _summary_module().summarize(junit)
+
+    assert "3 run, 0 failed, 0 errors, 2 skipped or xfailed" in summary
+    gate_row = "`tests.test_ocr_accuracy::test_golden_corpus_word_accuracy`"
+    assert f"| skipped | {gate_row} | R-01 UNMEASURED: no corpus |" in summary
+    assert "| xfail | `tests.test_x::test_known` | a known \\| failure |" in summary
+
+
+def test_a_run_that_wrote_no_results_says_so(tmp_path) -> None:
+    assert "No test results" in _summary_module().summarize(tmp_path / "missing.xml")
 
 
 def test_any_staged_fixture_is_complete_and_hand_corrected() -> None:
@@ -176,6 +216,7 @@ def test_the_corpus_state_is_reported_rather_than_assumed(record_property) -> No
             "\nR-01 UNMEASURED: tests/corpus/ has no real fixtures, so OCR word "
             "accuracy has never been scored. REQ-058 (auto-file precision) and "
             "REQ-035 (boundary F1) are unscored consequences of that, and the "
-            "gate below reports as xfail rather than as a pass."
+            "gate is skipped with that reason on the CI summary page. The "
+            "synthetic corpus figure is measured, but it is not R-01."
         )
     assert isinstance(fixtures, list)

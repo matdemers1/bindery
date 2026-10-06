@@ -107,7 +107,7 @@ below is the short version.
 | `make contract` | `web/src/api.ts` against the server's response models |
 | `make lint-web` | eslint and `tsc --noEmit` for the web app and the e2e specs |
 | `make screenshots` | recapture the documentation screenshots `tests/test_docs.py` gates |
-| `make ocr-report` | golden-corpus word accuracy — the R-01 gate |
+| `make ocr-report` | OCR word accuracy: the synthetic corpus, plus the R-01 gate on a real corpus you supply |
 | `make seed-forms` | load the known-form registry from `api/forms/seed/*.yaml` |
 | `make backup` / `make drill` | take a backup; then restore it and find the DD-214 |
 | `make drill-offsite` | the same from S3 alone — no local backup, no live stack |
@@ -117,14 +117,35 @@ below is the short version.
 | `make create-user email=… library=… [owner=1]` | scripted accounts (CI, tests); a fresh install is claimed in the browser instead, and `owner=1` makes a scripted first account finish setup the same way |
 | `make psql` / `make logs` / `make shell` | the usual |
 
-## Deploying to the ZimaOS host
+## Deploying
 
-`docs/zimaos-deploy.md` is the runbook. In short: CI publishes images to GHCR on
-push to `main`, the Zima pulls them, and `infra/zimaos/bindery.zimaos.yaml` is
-pasted into ZimaOS → Apps → Custom Install.
+CI publishes images to GHCR on push to `main`. Nothing auto-updates the thing
+holding your passport: a deploy is always a person (or a Claude session) choosing
+a commit.
 
-Deploy stays a deliberate manual pull-and-restart — nothing auto-updates the
-thing holding your passport.
+**Production deploys through [Shipyard](https://github.com/matdemers1/shipyard)**
+(since 2026-09-25), the deploy tool for the home server — never by SSH. Shipyard
+only accepts a SHA on `main` whose image build is green and that is ahead of what
+is live; it takes a backup, runs `alembic upgrade head` as a one-shot of the new
+image, swaps to the images by digest, then checks `/api/health` and rolls back to
+the previous images if it disagrees. The images carry the labels it reads
+(`dev.d3cloud.shipyard.schema` and `dev.d3cloud.shipyard.migration`, from
+`scripts/shipyard-labels.sh`), and a `Shipyard-Migration: expand|contract|none`
+trailer on a commit says what kind of migration it carries.
+
+**Self-hosting without Shipyard**, `docs/zimaos-deploy.md` is the runbook: the
+first install (`infra/zimaos/bindery.zimaos.yaml` filled in and run with
+`docker compose`), then, for each later release, the numbered manual procedure —
+note the current schema, `docker compose pull`, take a dump if the release adds a
+migration, `docker compose up -d`, `docker exec bindery-api alembic upgrade head`.
+Migrations never run on container boot, so that last step is yours.
+
+Either way, **`GET /api/health`** says what is actually running. It is
+unauthenticated and returns `version` — the short commit the api image was built
+from — and `schema`, the database's current alembic revision
+(`alembic_version.version_num`, `null` when unreadable). After a deploy both should
+name the release you meant; `GET /api/version` adds the worker's build and whether
+the services agree.
 
 CI (`.github/workflows/build.yml`) is seven gates — **lint → unit →
 integration → e2e → images** in series, cheapest first, and nothing is published until
@@ -149,7 +170,7 @@ docs/       Operator runbooks: deploy, backup and restore, offsite replication
 
 ## ⚠️ The golden corpus is real, and is never committed
 
-This repository is public under Apache-2.0 (BND-ADR-014). `tests/corpus/` is the golden corpus used to score OCR and classification quality, and it holds **real personal documents** — a DD-214, VA medical records, financial statements. They are **not in this repository and never have been**: everything under that path is gitignored except the harness. The fixtures stay on the maintainer's machine, so `make ocr-report` is reproducible only against a corpus you supply yourself.
+This repository is public under Apache-2.0 (BND-ADR-014). `tests/corpus/` is the golden corpus used to score OCR and classification quality, and it holds **real personal documents** — a DD-214, VA medical records, financial statements. They are **not in this repository and never have been**: everything under that path is gitignored except the harness. The fixtures stay on the maintainer's machine, so the R-01 figure is reproducible only against a corpus you supply yourself. What anyone can reproduce is the **synthetic corpus** (`tests/synthetic_corpus.py`): invented documents rendered and damaged at test time, which CI scores on every push.
 
 Keep it that way. Never `git add -f` anything under `tests/corpus/`, and never commit a document, screenshot or log excerpt taken from the real archive.
 
