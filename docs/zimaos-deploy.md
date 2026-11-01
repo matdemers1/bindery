@@ -406,7 +406,7 @@ docker ps --format '{{.Names}}\t{{.Image}}' --filter name=bindery
 # 2. Does the incoming release add a migration? Ask before you deploy, not
 #    after. This lists what the *new* image would apply on top of `current`.
 docker compose pull
-docker run --rm ghcr.io/matdemers1/bindery/api:main alembic heads
+docker run --rm ghcr.io/d3cloud-io/bindery/api:main alembic heads
 #    Same revision as step 1 -> no migration in this release; skip steps 3 and 6.
 
 # 3. The dump. Not the nightly one — this one, taken now, immediately before

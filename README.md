@@ -123,7 +123,7 @@ CI publishes images to GHCR on push to `main`. Nothing auto-updates the thing
 holding your passport: a deploy is always a person (or a Claude session) choosing
 a commit.
 
-**Production deploys through [Shipyard](https://github.com/matdemers1/shipyard)**
+**Production deploys through [Shipyard](https://github.com/D3Cloud-io/shipyard)**
 (since 2026-09-25), the deploy tool for the home server — never by SSH. Shipyard
 only accepts a SHA on `main` whose image build is green and that is ahead of what
 is live; it takes a backup, runs `alembic upgrade head` as a one-shot of the new

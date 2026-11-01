@@ -88,7 +88,7 @@ services:
           memory: 3G
 
   api:
-    image: ghcr.io/matdemers1/bindery/api:main
+    image: ghcr.io/d3cloud-io/bindery/api:main
     container_name: bindery-api
     restart: unless-stopped
     depends_on:
@@ -143,7 +143,7 @@ services:
     # NOTE (REQ-114): migrations are NOT run here. Apply them explicitly.
 
   worker:
-    image: ghcr.io/matdemers1/bindery/worker:main
+    image: ghcr.io/d3cloud-io/bindery/worker:main
     container_name: bindery-worker
     restart: unless-stopped
     depends_on:
@@ -187,7 +187,7 @@ services:
           memory: 8G
 
   web:
-    image: ghcr.io/matdemers1/bindery/web:main
+    image: ghcr.io/d3cloud-io/bindery/web:main
     container_name: bindery-web
     restart: unless-stopped
     depends_on:

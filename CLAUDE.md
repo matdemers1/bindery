@@ -512,7 +512,7 @@ scales to fit instead of losing its right-hand columns off the page.
 
 `docs/zimaos-deploy.md`. CI (`.github/workflows/build.yml`) is five gates in
 series — **lint → unit → integration → e2e → images** — and the last one publishes
-`ghcr.io/matdemers1/bindery/{api,worker,web}` tagged `:main`, `:latest` and
+`ghcr.io/d3cloud-io/bindery/{api,worker,web}` tagged `:main`, `:latest` and
 `:sha-<commit>`. The ZimaOS host pulls `:main`; rolling back means pinning a
 `:sha-` tag.
 
@@ -590,7 +590,7 @@ never gain a `ports:` key: ingress is the Cloudflare Tunnel only (REQ-104).
 ## The native app contract (Phase 22)
 
 D3 Constellation, the native Apple app, reaches Bindery through the D3 App contract
-(`matdemers1/d3-app-contract`; Foreman CON-ADR-003). `api/routers/native.py` holds the routes;
+(`D3Cloud-io/d3-app-contract`; Foreman CON-ADR-003). `api/routers/native.py` holds the routes;
 phase II (BND-P-23) added invites, account deletion, push and "Open in D3 Constellation":
 
 - `GET /.well-known/d3-app.json` — the manifest, served by the api and routed by an exact `location`
@@ -667,7 +667,7 @@ phase II (BND-P-23) added invites, account deletion, push and "Open in D3 Conste
   <date> — Restore cancels it" — from `delete_after` on `GET /api/admin/accounts`.
 - **"Open in D3 Constellation"** (BND-T-23.1): `web/src/components/OpenInConstellation.tsx` on the
   document viewer — Apple user agents only, `d3constellation://<host>/bindery/document/<id>?page=<n>`.
-- **The conformance suite** is `ghcr.io/matdemers1/d3-app-conformance:contract-1`. CI seeds the
+- **The conformance suite** is `ghcr.io/d3cloud-io/d3-app-conformance:contract-1`. CI seeds the
   main account as the **only administrator**, a disposable ordinary account with TOTP, and an invite,
   and passes `--main-is-last-owner --invite-token … --delete-email … --delete-password …
   --delete-totp-secret … --destructive`. Locally, from the contract checkout: `node
